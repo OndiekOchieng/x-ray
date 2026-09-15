@@ -43,6 +43,14 @@ They are recorded inline where they apply and indexed in
 4. `Gap.identifiers[]` for public-record request specificity
 5. Correction: `Finding.confidence` stays `HIGH | MEDIUM | LOW`
 
+Slice 2 (2026-09-15) ratified three further v0.1 clarifications, recorded in
+[domain-model.md](./domain-model.md):
+
+6. `Source.accessibility` carries `NOT_LOCATED` alongside `NOT_RETRIEVED`;
+   `DOES_NOT_EXIST` is not representable
+7. `TimeScope` — provisional lean shape (`from` / `to` / `asOf` / `description`)
+8. `InvestigationVersion` — provisional record derived from §22 behaviour
+
 These are v0.1 clarifications. They are **not** Protocol v0.2.
 
 ---

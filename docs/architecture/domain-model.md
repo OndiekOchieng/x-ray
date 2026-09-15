@@ -172,6 +172,37 @@ These measurements are not automatically compatible.
 
 ---
 
+## TimeScope
+
+**Provisional — recorded 2026-09-15 · System Architecture v0.1**
+
+`Claim.timeScope` is referenced in §6 but no shape is given there. The
+following lean shape is ratified as provisional v0.1:
+
+```ts
+interface TimeScope {
+  from?: string;
+  to?: string;
+  asOf?: string;
+  description?: string;
+}
+```
+
+`description` carries verbatim time-scope wording where it cannot be reduced
+to dates — the benchmark runs recorded scopes such as *"as at 13 Sep 2026"*,
+*"undated"*, and *"present (project as scoped)"*.
+
+**Deliberately not introduced:** `SCHEDULED` / `OCCURRED`, or any wider
+temporal ontology. The scheduled-versus-occurred distinction that XRAY-KE-001
+turns on is carried by the claim text and its Finding, not by a temporal
+enum. Adding one now would encode a decomposition decision that has not been
+made.
+
+Temporal semantics may be revisited when the `DECOMPOSE` and `CLASSIFY` stage
+contracts become executable.
+
+---
+
 ## Source
 
 ```ts
@@ -229,6 +260,39 @@ interface Source {
 > `accessibility: NOT_RETRIEVED` is how the graph records a record it could
 > not obtain. It never becomes a claim that the record does not exist — see
 > [XR-INV-006](./validation-and-invariants.md#xr-inv-006--missing-evidence-is-not-negative-evidence).
+
+> ### Ratified — `NOT_LOCATED` is distinct from `NOT_RETRIEVED`
+>
+> **Recorded:** 2026-09-15 · ratified during Slice 2 · System Architecture v0.1 clarification
+>
+> `accessibility` carries five values. §8 as written supplies four; `NOT_LOCATED`
+> is ratified as the fifth:
+>
+> ```ts
+> accessibility:
+>   | "RETRIEVED"
+>   | "PARTIAL"
+>   | "NOT_LOCATED"
+>   | "NOT_RETRIEVED"
+>   | "DEAD_LINK";
+> ```
+>
+> | Value | Meaning |
+> | --- | --- |
+> | `NOT_RETRIEVED` | The record has been **identified or referenced** — cited, attributed, indexed — but its contents could not be obtained. |
+> | `NOT_LOCATED` | Reasonable tracing and search were **attempted** and the record was **not located**. |
+>
+> The distinction is load-bearing. XRAY-KE-001 contains both: PS Omollo's
+> originating statements are identified and quoted by several outlets but the
+> originals were never obtained (`NOT_RETRIEVED`), while no variation order or
+> revised contract schedule was found at all despite targeted search
+> (`NOT_LOCATED`).
+>
+> **Neither state means the record does not exist.** `DOES_NOT_EXIST` is not a
+> member of this union and MUST NOT be introduced —
+> [XR-INV-006](./validation-and-invariants.md#xr-inv-006--missing-evidence-is-not-negative-evidence).
+> A record whose existence is genuinely in question is represented as a
+> [Gap](#gap), never as a negative fact about a source.
 
 ---
 
@@ -601,6 +665,60 @@ The language model MUST NOT invent the name of a record the Gap Ledger has not e
 > **Why:** X-Ray does not file requests
 > ([v0-scope](../engineering/v0-scope.md) excludes automated ATI submission).
 > A citizen must never believe X-Ray has submitted something on their behalf.
+
+---
+
+## InvestigationVersion
+
+**Provisional — recorded 2026-09-15 · System Architecture v0.1**
+
+§22 specifies immutable versioning behaviour and the version graph, but
+defines no record. The following shape is ratified as provisional v0.1,
+derived from the behaviour already accepted in
+[investigation-versioning.md](./investigation-versioning.md) and
+[ADR-0006](../adr/0006-immutable-investigation-versions.md):
+
+```ts
+type InvestigationVersionTrigger =
+  | "INITIAL_RESEARCH"
+  | "NEW_SOURCE_RECEIVED"
+  | "ATI_RESPONSE_RECEIVED"
+  | "RE_EVALUATION"
+  | "CORRECTION";
+
+interface InvestigationVersion {
+  investigationId: string;
+  version: number;
+  createdAt: string;
+  trigger: InvestigationVersionTrigger;
+  supersedesVersion?: number;
+
+  addedSourceIds: string[];
+  addedEvidenceIds: string[];
+  reEvaluatedClaimIds: string[];
+
+  findingIds: string[];
+  gapIds: string[];
+
+  researchStop?: ResearchStop;
+}
+```
+
+The fields carry exactly the behaviour §22 describes: what was **inherited**
+versus **added**, which claims were **re-evaluated** because the new evidence
+bore on them, and the findings and gaps **as they stood** at that version.
+
+XRAY-KE-001 is **Version 1** — `trigger: "INITIAL_RESEARCH"`, no
+`supersedesVersion`, and `reEvaluatedClaimIds` empty because nothing preceded
+it.
+
+**Deliberately not built:** version-transition machinery, inheritance
+resolution, or supersession queries. Those belong to the slice that actually
+produces a Version 2.
+
+**Still open:** whether `Investigation.stageRuns` stays embedded (as §5.1
+writes it) or becomes `stageRunIds` like every other artifact reference. That
+is a persistence question and is not resolved here.
 
 ---
 

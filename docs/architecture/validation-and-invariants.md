@@ -285,6 +285,18 @@ this failure mode mutates *meaning* without touching storage.
 
 Enforcement surface: [publication-and-cache.md](./publication-and-cache.md#responsible-sharing).
 
+## Source accessibility: `NOT_LOCATED` vs `NOT_RETRIEVED`
+
+Ratified 2026-09-15. `Source.accessibility` carries five values.
+`NOT_RETRIEVED` means a record was identified or referenced but its contents
+could not be obtained; `NOT_LOCATED` means reasonable tracing was attempted
+and the record was not found.
+
+**Neither means the record does not exist.** `DOES_NOT_EXIST` is not a member
+of the union and MUST NOT be introduced — see
+[domain-model.md](./domain-model.md#source). This is the structural form of
+[XR-INV-006](#xr-inv-006--missing-evidence-is-not-negative-evidence).
+
 ## Custody basis must be explicit
 
 `Gap.likelyHolder.basis: CONFIRMED | INFERRED` — see
