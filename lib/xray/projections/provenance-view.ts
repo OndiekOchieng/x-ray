@@ -1,0 +1,187 @@
+/**
+ * ProvenanceView — source independence, ready for display.
+ *
+ * NO FIXTURE GATES. The v0 scaffold rendered its provenance panel behind
+ * `selected.id === 'claim-2'`, so the panel existed only for one hardcoded
+ * claim. This projection is driven entirely by dependency edges: a claim gets
+ * a provenance panel when its sources actually have provenance, and the
+ * September cluster appears because the edges exist, not because a claim id
+ * was special-cased.
+ *
+ * `hasRepetition` is the predicate a component should gate on.
+ *
+ * The counts carry their meaning in their names. `publicationCount` is how
+ * many records carry an assertion; `independentOriginCount` is how many times
+ * it was independently observed. Only the second bears on corroboration
+ * (XR-INV-004, CAL-003, FM-003).
+ */
+
+import type { Source, SourceDependencyRelationship } from '@/lib/xray/domain'
+import type { XRayGraph, ClaimIdLike, OriginRef, ProvenanceCluster } from '@/lib/xray/selectors'
+import {
+  dependenciesForSource,
+  provenanceClusterForOrigin,
+  provenanceSummaryForClaim,
+  sourceById,
+} from '@/lib/xray/selectors'
+import { accessibilityLabel, originStatusLabel } from './labels'
+
+export interface ProvenanceSourceView {
+  sourceId: string
+  title: string
+  publisher?: string
+  institution?: string
+  url?: string
+  publishedAt?: string
+  originStatus: Source['originStatus']
+  originStatusLabel: string
+  accessibility: Source['accessibility']
+  accessibilityLabel: string
+  wasObtained: boolean
+}
+
+export interface ProvenanceEdgeView {
+  dependencyId: string
+  fromSourceId: string
+  toSourceId?: string
+  relationship: SourceDependencyRelationship
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW'
+  originDescription?: string
+  /** True when the parent record was described but never identified. */
+  isUnidentifiedOrigin: boolean
+}
+
+export interface ProvenanceClusterView {
+  /** The originating record, when identified and present in the graph. */
+  origin?: ProvenanceSourceView
+  /** How the origin was described, when it was never identified as a record. */
+  originDescription?: string
+  originIsIdentified: boolean
+  /** Records reproducing this origin. */
+  publications: ProvenanceSourceView[]
+  edges: ProvenanceEdgeView[]
+  /** How many records carry it. NOT corroboration. */
+  publicationCount: number
+  /** Always 1 for a cluster. Present so the ratio is unmissable. */
+  independentOriginCount: 1
+  /** e.g. "3 publications · 1 originating observation". */
+  summaryLabel: string
+}
+
+export interface ProvenanceView {
+  claimId?: string
+  sourceCount: number
+  publicationCount: number
+  originatingSourceCount: number
+  /** The corroboration-relevant number. */
+  independentOriginCount: number
+  unidentifiedOriginCount: number
+  dependencyEdgeCount: number
+  clusters: ProvenanceClusterView[]
+  /**
+   * True when at least one cluster has more than one publication behind a
+   * single origin — i.e. when repetition is present and worth showing.
+   */
+  hasRepetition: boolean
+  /** e.g. "7 sources · 6 independent originating observations". */
+  summaryLabel: string
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+function sourceViewOf(graph: XRayGraph, sourceId: string): ProvenanceSourceView | undefined {
+  const s = sourceById(graph, sourceId)
+  if (!s) return undefined
+  return {
+    sourceId: s.id,
+    title: s.title,
+    publisher: s.publisher,
+    institution: s.institution,
+    url: s.url,
+    publishedAt: s.publishedAt,
+    originStatus: s.originStatus,
+    originStatusLabel: originStatusLabel[s.originStatus],
+    accessibility: s.accessibility,
+    accessibilityLabel: accessibilityLabel[s.accessibility],
+    wasObtained: s.accessibility === 'RETRIEVED' || s.accessibility === 'PARTIAL',
+  }
+}
+
+function edgeViewsFor(graph: XRayGraph, sourceId: string, origin: OriginRef): ProvenanceEdgeView[] {
+  return dependenciesForSource(graph, sourceId)
+    .filter((edge) =>
+      origin.kind === 'SOURCE'
+        ? edge.dependsOnSourceId !== undefined
+        : edge.id === origin.viaDependencyId,
+    )
+    .map((edge) => ({
+      dependencyId: edge.id,
+      fromSourceId: edge.sourceId,
+      toSourceId: edge.dependsOnSourceId,
+      relationship: edge.relationship,
+      confidence: edge.confidence,
+      originDescription: edge.originDescription,
+      isUnidentifiedOrigin: edge.dependsOnSourceId === undefined,
+    }))
+}
+
+function clusterViewOf(graph: XRayGraph, cluster: ProvenanceCluster): ProvenanceClusterView {
+  const publications = cluster.publicationSourceIds
+    .map((id) => sourceViewOf(graph, id))
+    .filter((s): s is ProvenanceSourceView => s !== undefined)
+  const edges = cluster.publicationSourceIds.flatMap((id) =>
+    edgeViewsFor(graph, id, cluster.origin),
+  )
+  const origin = cluster.origin
+  return {
+    origin: origin.kind === 'SOURCE' ? sourceViewOf(graph, origin.sourceId) : undefined,
+    originDescription: origin.kind === 'UNIDENTIFIED' ? origin.description : undefined,
+    originIsIdentified: origin.kind === 'SOURCE',
+    publications,
+    edges,
+    publicationCount: cluster.publicationCount,
+    independentOriginCount: 1,
+    summaryLabel: `${plural(cluster.publicationCount, 'publication', 'publications')} · 1 originating observation`,
+  }
+}
+
+/** Provenance for everything bearing on one claim. */
+export function provenanceViewForClaim(graph: XRayGraph, claimId: ClaimIdLike): ProvenanceView {
+  const summary = provenanceSummaryForClaim(graph, claimId)
+  const clusters = summary.clusters.map((c) => clusterViewOf(graph, c))
+  return {
+    claimId: String(claimId),
+    sourceCount: summary.sourceCount,
+    publicationCount: summary.publicationCount,
+    originatingSourceCount: summary.originatingSourceCount,
+    independentOriginCount: summary.independentOriginCount,
+    unidentifiedOriginCount: summary.unidentifiedOriginCount,
+    dependencyEdgeCount: summary.dependencyEdgeCount,
+    clusters,
+    hasRepetition: clusters.some((c) => c.publicationCount > 1),
+    summaryLabel: `${plural(summary.sourceCount, 'source', 'sources')} · ${plural(
+      summary.independentOriginCount,
+      'independent originating observation',
+      'independent originating observations',
+    )}`,
+  }
+}
+
+/** One cluster, addressed by its originating record. Claim-independent. */
+export function provenanceClusterViewForOrigin(
+  graph: XRayGraph,
+  originSourceId: string,
+): ProvenanceClusterView {
+  return clusterViewOf(graph, provenanceClusterForOrigin(graph, originSourceId))
+}
+
+/**
+ * Clusters worth displaying for a claim: those where repetition actually
+ * occurs. This is the replacement for a hardcoded claim-id gate.
+ */
+export function repetitionClustersForClaim(
+  graph: XRayGraph,
+  claimId: ClaimIdLike,
+): ProvenanceClusterView[] {
+  return provenanceViewForClaim(graph, claimId).clusters.filter((c) => c.publicationCount > 1)
+}
