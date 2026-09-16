@@ -32,9 +32,14 @@ export function isSurfaceSource(graph: XRayGraph, sourceId: string): boolean {
 /**
  * Distinct sources that yielded evidence bearing on this claim.
  *
- * NOT a corroboration measure. Three of these may be three reproductions of
- * one originating record — see `independentOriginsForClaim`. Counting the
- * result of this function and calling it corroboration is FM-003.
+ * NOT a corroboration measure, in either direction. Three of these may be
+ * three reproductions of one originating record; equally, one of them may
+ * carry propositions from two different origins.
+ *
+ * For corroboration use `independentEvidenceOriginsForClaim` or
+ * `claimProvenanceSummary` in `selectors/provenance.ts`, which resolve each
+ * proposition to the origin that actually carries it. Counting the result of
+ * this function and calling it corroboration is FM-003.
  */
 export function sourcesForClaim(graph: XRayGraph, claimId: ClaimIdLike): Source[] {
   const seen = new Set<string>()
