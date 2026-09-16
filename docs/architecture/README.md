@@ -30,6 +30,7 @@ commitments.
 - **Research method** — [../protocol/v0.1/](../protocol/v0.1/XRAY_RESEARCH_PROTOCOL_v0.1.md)
 - **Benchmark evidence** — [../benchmarks/XRAY-KE-001/](../benchmarks/XRAY-KE-001/README.md)
 - **Acceptance / scope / build order** — [../engineering/](../engineering/acceptance-fixtures.md)
+- **Calibration** — [../calibration/](../calibration/README.md) (judgment at invariant boundaries)
 
 ## Amendments to v0.1
 

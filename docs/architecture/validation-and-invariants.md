@@ -377,8 +377,28 @@ see [domain-model.md](./domain-model.md#finding).
 
 ---
 
+## Where invariants end and judgment begins
+
+These rules say what the graph may never assert. They do not say which of two
+permitted answers is right — whether a particular measurement is compatible,
+whether a particular reconciliation is reasonable.
+
+That judgment is recorded in the [calibration corpus](../calibration/README.md):
+six worked cases at the boundaries these invariants create, and six recurring
+failure modes. XR-INV-005 exists *because* two benchmark runs judged one such
+boundary differently; [CAL-001](../calibration/cases/CAL-001-different-measurement-is-not-contradiction.md)
+is the worked example of applying it.
+
+Deterministic validation rejects graphs that cannot be right. A calibrated
+adversarial review of whether a graph *is* right is future work — see
+[calibration/README.md](../calibration/README.md#where-calibration-is-headed).
+No reviewer is implemented.
+
+---
+
 ## Related
 
+- [Calibration corpus](../calibration/README.md) — judgment at the boundaries these rules create
 - [Domain model](./domain-model.md) — the artifacts these rules constrain
 - [Evidence graph](./evidence-graph.md) — XR-INV-004 and XR-INV-005 in context
 - [Acceptance fixtures](../engineering/acceptance-fixtures.md) — how these are regression-tested

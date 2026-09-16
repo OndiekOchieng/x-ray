@@ -1,0 +1,63 @@
+{
+  "$comment": "Metadata only. Case prose lives in cases/*.md and failure-modes/*.md and is never duplicated here. Validated against the canonical fixture and against the files on disk by `pnpm check:fixtures`.",
+  "corpus": "XRAY-KE-001",
+  "researchCutoff": "2026-09-13",
+  "cases": [
+    {
+      "id": "CAL-001",
+      "title": "Different measurement is not contradiction",
+      "file": "cases/CAL-001-different-measurement-is-not-contradiction.md",
+      "invariants": ["XR-INV-005"],
+      "failureModes": ["FM-001", "FM-002"],
+      "fixtureIds": ["C003", "DC001", "FND-C003", "FND-DC001", "DISC-003", "GAP-002", "GAP-005", "DCF-003"]
+    },
+    {
+      "id": "CAL-002",
+      "title": "Different scope is not contradiction",
+      "file": "cases/CAL-002-different-scope-is-not-contradiction.md",
+      "invariants": ["XR-INV-005"],
+      "failureModes": ["FM-002", "FM-006"],
+      "fixtureIds": ["C001", "FND-C001", "DISC-001", "GAP-004", "DCF-001", "SRC-009"]
+    },
+    {
+      "id": "CAL-003",
+      "title": "Repetition is not corroboration",
+      "file": "cases/CAL-003-repetition-is-not-corroboration.md",
+      "invariants": ["XR-INV-004"],
+      "failureModes": ["FM-003", "FM-004"],
+      "fixtureIds": ["SRC-017", "SRC-018", "SRC-019", "SRC-020", "SD-001", "SD-002", "SD-003", "GAP-005"]
+    },
+    {
+      "id": "CAL-004",
+      "title": "Not located is not nonexistent",
+      "file": "cases/CAL-004-not-located-is-not-nonexistent.md",
+      "invariants": ["XR-INV-006"],
+      "failureModes": ["FM-004", "FM-006"],
+      "fixtureIds": ["GAP-001", "SRC-009", "SRC-011", "SRC-015", "SRC-017", "FND-C002", "DCF-002"]
+    },
+    {
+      "id": "CAL-005",
+      "title": "Scheduled is not occurred",
+      "file": "cases/CAL-005-scheduled-is-not-occurred.md",
+      "invariants": ["XR-INV-001", "XR-INV-009"],
+      "failureModes": ["FM-005", "FM-004"],
+      "fixtureIds": ["C004", "FND-C004", "GAP-003", "DCF-004", "SRC-001", "EV-033", "EV-034"]
+    },
+    {
+      "id": "CAL-006",
+      "title": "Unexplained financial bridge remains unresolved",
+      "file": "cases/CAL-006-unexplained-financial-bridge-remains-unresolved.md",
+      "invariants": ["XR-INV-006", "XR-INV-007"],
+      "failureModes": ["FM-006", "FM-004", "FM-002"],
+      "fixtureIds": ["C002", "FND-C002", "DISC-002", "GAP-001", "DCF-002", "EV-010", "EV-011", "EV-012", "EV-013"]
+    }
+  ],
+  "failureModes": [
+    { "id": "FM-001", "title": "Proxy-measure contradiction", "file": "failure-modes/FM-001-proxy-measure-contradiction.md", "invariants": ["XR-INV-005"], "cases": ["CAL-001"] },
+    { "id": "FM-002", "title": "Scope collapse", "file": "failure-modes/FM-002-scope-collapse.md", "invariants": ["XR-INV-005"], "cases": ["CAL-002", "CAL-006"] },
+    { "id": "FM-003", "title": "Source-count inflation", "file": "failure-modes/FM-003-source-count-inflation.md", "invariants": ["XR-INV-004"], "cases": ["CAL-003"] },
+    { "id": "FM-004", "title": "Absence promoted to nonexistence", "file": "failure-modes/FM-004-absence-to-nonexistence.md", "invariants": ["XR-INV-006"], "cases": ["CAL-004", "CAL-005", "CAL-006"] },
+    { "id": "FM-005", "title": "Temporal promotion", "file": "failure-modes/FM-005-temporal-promotion.md", "invariants": ["XR-INV-001"], "cases": ["CAL-005"] },
+    { "id": "FM-006", "title": "Premature numeric reconciliation", "file": "failure-modes/FM-006-premature-numeric-reconciliation.md", "invariants": ["XR-INV-006", "XR-INV-007"], "cases": ["CAL-006"] }
+  ]
+}

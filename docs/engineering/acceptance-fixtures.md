@@ -396,6 +396,7 @@ No citizen-facing synthesis mutates evidence state.
 
 ## Related
 
+- [Calibration corpus](../calibration/README.md) — the same boundaries as worked judgment cases, for reasoning rather than assertion
 - [Validation and invariants](../architecture/validation-and-invariants.md)
 - [Build order](./build-order.md) — the suite is step 6, and step 12 is making it green
 - [Benchmark XRAY-KE-001](../benchmarks/XRAY-KE-001/README.md)

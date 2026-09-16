@@ -223,6 +223,7 @@ XR-INV-005.
 
 ## Related
 
+- [Calibration corpus](../../calibration/README.md) — the judgment learned from these runs, written down as six worked cases
 - [ADR-0009 — Benchmark runs as acceptance evidence](../../adr/0009-benchmark-runs-as-acceptance-evidence.md)
 - [Research Protocol v0.1](../../protocol/v0.1/XRAY_RESEARCH_PROTOCOL_v0.1.md) — the method both runs executed
 - [Acceptance fixtures](../../engineering/acceptance-fixtures.md)

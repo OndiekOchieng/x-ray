@@ -19,6 +19,7 @@ import { disconfirmations } from './disconfirmation'
 import { findings } from './findings'
 import { gaps } from './gaps'
 import { investigation, investigationVersion, stageRuns } from './investigation'
+import { readFileSync, readdirSync } from 'node:fs'
 
 type Result = { name: string; ok: boolean; detail?: string }
 const results: Result[] = []
@@ -516,6 +517,109 @@ check('stages not executed by the benchmark are PENDING, not SUCCEEDED', () => {
   const notRun = ['VALIDATE', 'SYNTHESIZE', 'RESOLVE']
   const bad = stageRuns.filter((s) => notRun.includes(s.stage) && s.status !== 'PENDING')
   return bad.length ? list(bad.map((s) => s.stage)) : null
+})
+
+// ---------------------------------------------------------------------------
+// Calibration corpus (docs/calibration/)
+//
+// The calibration cases cite canonical fixture ids. These checks stop a case
+// outliving the record it describes: if an id is renamed or removed here, the
+// corpus fails rather than silently pointing at nothing.
+// ---------------------------------------------------------------------------
+
+const CALIBRATION_DIR = new URL('../../../../docs/calibration/', import.meta.url)
+
+const readCalibration = (): { path: string; text: string }[] => {
+  const out: { path: string; text: string }[] = []
+  for (const sub of ['cases', 'failure-modes']) {
+    const dir = new URL(`${sub}/`, CALIBRATION_DIR)
+    for (const name of readdirSync(dir).filter((n) => n.endsWith('.md'))) {
+      out.push({ path: `${sub}/${name}`, text: readFileSync(new URL(name, dir), 'utf8') })
+    }
+  }
+  out.push({ path: 'README.md', text: readFileSync(new URL('README.md', CALIBRATION_DIR), 'utf8') })
+  return out
+}
+
+const KNOWN_IDS = new Set<string>([
+  ...claims.map((c) => c.id),
+  ...sources.map((s) => s.id),
+  ...evidence.map((e) => e.id),
+  ...sourceDependencies.map((d) => d.id),
+  ...discrepancies.map((d) => d.id),
+  ...disconfirmations.map((d) => d.id),
+  ...findings.map((f) => f.id),
+  ...gaps.map((g) => g.id),
+])
+
+// Matches the id shapes this fixture uses. `FND-C001` is matched whole so the
+// trailing `C001` is not read as a second id.
+const ID_PATTERN = /\b(?:FND-(?:D?C\d+)|DCF-\d+|DISC-\d+|GAP-\d+|SRC-\d+|EV-\d+|SD-\d+|DC\d+|C\d{3})\b/g
+
+check('calibration cases cite only real fixture ids', () => {
+  const bad: string[] = []
+  for (const { path, text } of readCalibration()) {
+    // Ignore fenced code blocks: they contain illustrative, not canonical, ids.
+    const prose = text.replace(/```[\s\S]*?```/g, '')
+    for (const id of new Set(prose.match(ID_PATTERN) ?? [])) {
+      if (!KNOWN_IDS.has(id)) bad.push(`${path}: ${id}`)
+    }
+  }
+  return bad.length ? list(bad) : null
+})
+
+check('calibration index matches the files on disk', () => {
+  const index = JSON.parse(readFileSync(new URL('index.json', CALIBRATION_DIR), 'utf8'))
+  const bad: string[] = []
+  for (const entry of [...index.cases, ...index.failureModes]) {
+    try {
+      readFileSync(new URL(entry.file, CALIBRATION_DIR), 'utf8')
+    } catch {
+      bad.push(`${entry.id} → missing ${entry.file}`)
+    }
+  }
+  const onDisk = readCalibration().filter((f) => f.path !== 'README.md').length
+  const indexed = index.cases.length + index.failureModes.length
+  if (onDisk !== indexed) bad.push(`${onDisk} files on disk, ${indexed} indexed`)
+  return bad.length ? list(bad) : null
+})
+
+check('calibration index fixture ids exist', () => {
+  const index = JSON.parse(readFileSync(new URL('index.json', CALIBRATION_DIR), 'utf8'))
+  const bad: string[] = []
+  for (const c of index.cases)
+    for (const id of c.fixtureIds) if (!KNOWN_IDS.has(id)) bad.push(`${c.id} → ${id}`)
+  return bad.length ? list(bad) : null
+})
+
+check('calibration cross-references resolve', () => {
+  const index = JSON.parse(readFileSync(new URL('index.json', CALIBRATION_DIR), 'utf8'))
+  const caseIds = new Set(index.cases.map((c: { id: string }) => c.id))
+  const fmIds = new Set(index.failureModes.map((f: { id: string }) => f.id))
+  const bad: string[] = []
+  for (const c of index.cases)
+    for (const fm of c.failureModes) if (!fmIds.has(fm)) bad.push(`${c.id} → ${fm}`)
+  for (const f of index.failureModes)
+    for (const c of f.cases) if (!caseIds.has(c)) bad.push(`${f.id} → ${c}`)
+  return bad.length ? list(bad) : null
+})
+
+check('calibration cites no invariant outside XR-INV-001..012', () => {
+  const bad: string[] = []
+  for (const { path, text } of readCalibration())
+    for (const m of new Set(text.match(/XR-INV-\d+/g) ?? [])) {
+      const n = Number(m.slice(-3))
+      if (n < 1 || n > 12) bad.push(`${path}: ${m}`)
+    }
+  return bad.length ? list(bad) : null
+})
+
+check('every calibration case states what would change the judgment', () => {
+  const bad = readCalibration()
+    .filter((f) => f.path.startsWith('cases/'))
+    .filter((f) => !/what evidence would change the judgment/i.test(f.text))
+    .map((f) => f.path)
+  return bad.length ? list(bad) : null
 })
 
 // ---------------------------------------------------------------------------

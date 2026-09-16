@@ -110,7 +110,27 @@ Decision / Consequences`.
 
 ---
 
-## 6. Where engineering and acceptance design lives
+## 6. Where calibration lives
+
+**→ [`calibration/`](./calibration/README.md)** — six worked cases and six
+failure modes.
+
+The protocol says what to do. The invariants say what is representable and what
+is forbidden. Calibration says **which answer is right when the rule permits
+two** — the judgment two competent models disagreed on.
+
+| | |
+| --- | --- |
+| [cases/](./calibration/cases) | CAL-001 … CAL-006, each grounded in canonical XRAY-KE-001 ids |
+| [failure-modes/](./calibration/failure-modes) | FM-001 … FM-006, written to recur outside this benchmark |
+
+Calibration cases are **not source-of-truth facts**. They are regression
+examples for reasoning behaviour, and they do not override evidence in a live
+investigation.
+
+---
+
+## 7. Where engineering and acceptance design lives
 
 **→ [`engineering/`](./engineering/build-order.md)**
 
@@ -134,6 +154,7 @@ docs/
 ├── protocol/v0.1/              The research method (preserved as written)
 ├── adr/                        ADR-0001 … ADR-0009
 ├── benchmarks/XRAY-KE-001/     Reference benchmark + immutable raw runs
+├── calibration/                Worked judgment cases + recurring failure modes
 └── engineering/                Acceptance design, scope, build order
 ```
 
