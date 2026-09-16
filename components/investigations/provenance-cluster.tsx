@@ -72,16 +72,31 @@ export function ProvenanceClusterView({ provenance }: { provenance: ProvenanceVi
       ))}
 
       {/*
-        Deliberately NOT a claim-level "independent origins" figure. That count
-        is computed from source-level provenance and can overstate independence
-        when one record carries figures from two origins — the direction of
-        error FM-003 warns about. The per-cluster ratios above are exact.
+        Two different questions, kept apart.
+
+        Above: document lineage — which publications reproduce which record.
+        Below: claim-level independence, resolved per evidence proposition.
+
+        The claim-level count appears ONLY when every proposition's origin is
+        settled. Where any origin is unresolved or was never identified, the
+        panel says so rather than printing a falsely precise number.
       */}
-      <p className="mt-6 border-t border-border pt-4 font-mono text-[11px] text-muted-foreground">
-        Across this claim: {provenance.sourceCount} records ·{' '}
-        {provenance.publicationCount} of them repeat another record rather than
-        observing independently
-      </p>
+      <div className="mt-6 border-t border-border pt-4">
+        <p className="font-mono text-[11px] text-muted-foreground">
+          Across this claim: {provenance.sourceCount} records traced ·{' '}
+          {provenance.publicationCount} of them repeat another record
+        </p>
+
+        {provenance.independence.isResolved ? (
+          <p className="mt-2 font-mono text-[11px] text-foreground">
+            {provenance.independence.summaryLabel} behind this claim
+          </p>
+        ) : (
+          <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+            {provenance.independence.unresolvedLabel}
+          </p>
+        )}
+      </div>
     </section>
   )
 }

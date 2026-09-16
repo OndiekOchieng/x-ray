@@ -18,6 +18,7 @@ import { discrepancies } from './discrepancies'
 import { disconfirmations } from './disconfirmation'
 import { findings } from './findings'
 import { gaps } from './gaps'
+import { evidenceProvenance } from './evidence-provenance'
 import { investigation, investigationVersion, stageRuns } from './investigation'
 import { readFileSync, readdirSync } from 'node:fs'
 
@@ -517,6 +518,116 @@ check('stages not executed by the benchmark are PENDING, not SUCCEEDED', () => {
   const notRun = ['VALIDATE', 'SYNTHESIZE', 'RESOLVE']
   const bad = stageRuns.filter((s) => notRun.includes(s.stage) && s.status !== 'PENDING')
   return bad.length ? list(bad.map((s) => s.stage)) : null
+})
+
+// ---------------------------------------------------------------------------
+// Evidence-level provenance (Slice 4.1)
+//
+// SourceDependency is document lineage. EvidenceProvenance is the origin of a
+// single proposition. Claim-level independence is computed from the second,
+// because a multi-origin publication otherwise lends every one of its origins
+// to every claim it touches.
+// ---------------------------------------------------------------------------
+
+check('every EvidenceProvenance.evidenceId exists', () => {
+  const bad = evidenceProvenance.filter((p) => !evidenceIds.has(p.evidenceId))
+  return bad.length ? list(bad.map((p) => `${p.id}→${p.evidenceId}`)) : null
+})
+
+check('SOURCE origins reference an existing Source', () => {
+  const bad = evidenceProvenance.filter(
+    (p) => p.origin.kind === 'SOURCE' && !sourceIds.has(p.origin.sourceId),
+  )
+  return bad.length ? list(bad.map((p) => p.id)) : null
+})
+
+check('UNIDENTIFIED origins carry a non-empty description', () => {
+  const bad = evidenceProvenance.filter(
+    (p) => p.origin.kind === 'UNIDENTIFIED' && p.origin.description.trim() === '',
+  )
+  return bad.length ? list(bad.map((p) => p.id)) : null
+})
+
+check('the two origin forms cannot coexist on one record', () => {
+  const bad = evidenceProvenance.filter((p) => {
+    const o = p.origin as { kind: string; sourceId?: string; description?: string }
+    return o.kind === 'SOURCE'
+      ? o.description !== undefined
+      : o.sourceId !== undefined
+  })
+  return bad.length ? list(bad.map((p) => p.id)) : null
+})
+
+check('provenance never points at the surface source', () => {
+  // The surface source establishes that claims were made. It is not the origin
+  // of anything traced afterwards merely by being the article under study.
+  const bad = evidenceProvenance.filter(
+    (p) => p.origin.kind === 'SOURCE' && p.origin.sourceId === SURFACE_SOURCE_ID,
+  )
+  return bad.length ? list(bad.map((p) => p.id)) : null
+})
+
+check('provenance attributes existing evidence, it does not create it', () => {
+  // A provenance record says where an already-extracted proposition came from.
+  // It must never be the thing that introduces evidence from a record nobody
+  // obtained — that remains governed by the extraction rule.
+  const held = new Set(
+    sources.filter((s) => s.accessibility === 'RETRIEVED' || s.accessibility === 'PARTIAL').map((s) => s.id),
+  )
+  const bad = evidenceProvenance.filter((p) => {
+    const e = evidence.find((x) => x.id === p.evidenceId)
+    return e !== undefined && !held.has(e.sourceId)
+  })
+  return bad.length ? list(bad.map((p) => p.id)) : null
+})
+
+check('provenance ids are unique and evidence has at most one origin record', () => {
+  const ids = evidenceProvenance.map((p) => p.id)
+  const dupeIds = ids.filter((id, i) => ids.indexOf(id) !== i)
+  if (dupeIds.length) return `duplicate ids: ${list([...new Set(dupeIds)])}`
+  const perEvidence = new Map<string, number>()
+  for (const p of evidenceProvenance)
+    perEvidence.set(p.evidenceId, (perEvidence.get(p.evidenceId) ?? 0) + 1)
+  const many = [...perEvidence.entries()].filter(([, n]) => n > 1)
+  return many.length ? `multiple origins: ${list(many.map(([e, n]) => `${e}×${n}`))}` : null
+})
+
+check('multi-origin publications carry proposition-level provenance', () => {
+  // A source with more than one outgoing dependency edge cannot have its
+  // origins resolved at document level without overcounting. Every piece of
+  // evidence drawn from one must say which origin it comes from.
+  const edgeCount = new Map<string, number>()
+  for (const d of sourceDependencies)
+    if (d.dependsOnSourceId) edgeCount.set(d.sourceId, (edgeCount.get(d.sourceId) ?? 0) + 1)
+  const multiOrigin = [...edgeCount.entries()].filter(([, n]) => n > 1).map(([id]) => id)
+  if (multiOrigin.length === 0) return 'no multi-origin publication in the fixture to guard'
+
+  const covered = new Set(evidenceProvenance.map((p) => p.evidenceId))
+  const bad = evidence
+    .filter((e) => multiOrigin.includes(e.sourceId))
+    .filter((e) => !covered.has(e.id))
+  return bad.length
+    ? `${list(bad.map((e) => `${e.id}(${e.sourceId})`))} lack proposition-level provenance`
+    : null
+})
+
+check('derivative evidence is not left to imply independence', () => {
+  // Evidence from a REPEATING source with no provenance record would resolve
+  // to "unresolved" rather than independent, which is safe — but in this
+  // fixture every such record is accounted for, so the safety net is unused.
+  const repeating = new Set(
+    sources.filter((s) => s.originStatus === 'REPEATING').map((s) => s.id),
+  )
+  const covered = new Set(evidenceProvenance.map((p) => p.evidenceId))
+  const bad = evidence.filter((e) => repeating.has(e.sourceId) && !covered.has(e.id))
+  return bad.length ? list(bad.map((e) => `${e.id}(${e.sourceId})`)) : null
+})
+
+check('provenance introduces no post-cutoff research', () => {
+  // Provenance points only at sources already in the graph, all of which are
+  // cutoff-checked; and no provenance record carries a date of its own.
+  const bad = evidenceProvenance.filter((p) => /20[0-9]{2}-[0-9]{2}-[0-9]{2}/.test(JSON.stringify(p)))
+  return bad.length ? list(bad.map((p) => p.id)) : null
 })
 
 // ---------------------------------------------------------------------------

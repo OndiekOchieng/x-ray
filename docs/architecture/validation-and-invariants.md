@@ -297,6 +297,38 @@ of the union and MUST NOT be introduced — see
 [domain-model.md](./domain-model.md#source). This is the structural form of
 [XR-INV-006](#xr-inv-006--missing-evidence-is-not-negative-evidence).
 
+## Independence is evaluated at the proposition level
+
+Ratified 2026-09-16, clarifying
+[XR-INV-004](#xr-inv-004--source-independence) without renumbering it.
+
+Source-level provenance (`SourceDependency`) is useful and stays canonical, but
+it is **insufficient for claim-level corroboration when a source is
+multi-origin**. A publication carrying propositions from two originating
+records depends on both as a document; a claim resting on only one of them must
+not inherit the other.
+
+So:
+
+```text
+source count  ≠  publication count  ≠  independent evidence-origin count
+```
+
+Claim-level independence is therefore computed from `EvidenceProvenance` —
+proposition to origin — not from document lineage. See
+[domain-model.md](./domain-model.md#evidence) and
+[CAL-003](../calibration/cases/CAL-003-repetition-is-not-corroboration.md).
+
+Two corollaries, both about not inventing independence:
+
+- **Absent provenance is not independence.** Evidence with no provenance record
+  is independent only if its own source is `ORIGINATING`. Otherwise its
+  independence is unresolved, and unresolved is not counted.
+- **`UNIDENTIFIED` is not independence.** A proposition known to be derivative
+  from a record nobody identified is not an independent observation. Where any
+  origin is unresolved or unidentified, no precise independence count is
+  reported at all — a partially-resolved number would be falsely precise.
+
 ## Finding evidence traceability is total
 
 Ratified 2026-09-16. Evidence reaches a Finding through three lists, mapped

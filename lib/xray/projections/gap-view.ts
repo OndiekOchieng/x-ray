@@ -13,7 +13,8 @@
  * broadening this one.
  *
  * `atiEligible` is read from canonical `Gap`, never recomputed. A material gap
- * may be ineligible — CAL-005.
+ * may be ineligible — CAL-005. Ineligibility means a request is not the right
+ * instrument yet, not that no relevant record could ever exist.
  */
 
 import type { CustodyBasis, Gap, GapStatus, ResolutionPath } from '@/lib/xray/domain'

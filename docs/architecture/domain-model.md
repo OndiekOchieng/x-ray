@@ -377,6 +377,61 @@ Source
    └── Evidence C ──context─────► C005
 ```
 
+> ### Ratified — provenance is modelled at two levels
+>
+> **Recorded:** 2026-09-16 · Slice 4.1 · System Architecture v0.1 clarification
+>
+> `SourceDependency` (§9) is **document lineage**. It remains canonical and
+> answers document-level questions: this article reproduces that ministry
+> release; these publications share a probable common origin.
+>
+> `EvidenceProvenance` is **proposition lineage** — where one Evidence record
+> came from:
+>
+> ```ts
+> type EvidenceProvenanceRelationship =
+>   | "REPRODUCES"
+>   | "QUOTES"
+>   | "ATTRIBUTES_TO"
+>   | "DERIVED_FROM";
+>
+> type EvidenceOrigin =
+>   | { kind: "SOURCE"; sourceId: string }
+>   | { kind: "UNIDENTIFIED"; description: string };
+>
+> interface EvidenceProvenance {
+>   id: string;
+>   evidenceId: string;
+>   origin: EvidenceOrigin;
+>   relationship: EvidenceProvenanceRelationship;
+>   confidence: "HIGH" | "MEDIUM" | "LOW";
+> }
+> ```
+>
+> The relationship vocabulary is narrower than `SourceDependency`'s on purpose.
+> `SAME_EVENT` and `PROBABLE_COMMON_ORIGIN` describe two documents standing in
+> a relation to each other; they say nothing about where a particular
+> proposition came from.
+>
+> **Why both are needed.** A single publication routinely carries propositions
+> from several origins. In XRAY-KE-001 one article reports September progress
+> percentages from a ministry status release *and* lot contract values that
+> repeat a 2021 procurement notice. At document level it depends on both. At
+> proposition level each figure has exactly one origin.
+>
+> Resolving claim-level independence from document lineage therefore lends
+> every origin of a source to every claim that source touches. For a claim
+> resting on only the progress figures, the procurement notice was counted as a
+> second independent observation — inflating apparent corroboration. See
+> [XR-INV-004](./validation-and-invariants.md#xr-inv-004--source-independence)
+> and [CAL-003](../calibration/cases/CAL-003-repetition-is-not-corroboration.md).
+>
+> **An absent provenance record is not a claim of independence.** Evidence with
+> no record is independent only if its own source is `ORIGINATING`; otherwise
+> its independence is *unresolved*, and unresolved is never counted.
+> `UNIDENTIFIED` likewise means the proposition is known to be derivative from
+> a record nobody identified — not that it is an independent observation.
+
 > ### Ratified — Evidence carries its own temporal scope
 >
 > **Recorded:** 2026-09-16 · Slice 2.1 · System Architecture v0.1 clarification

@@ -26,6 +26,35 @@ rewritten; a dataset republished by aggregators; a spokesperson quoted at one
 briefing by everyone present; a figure that entered circulation once and is now
 "widely reported"; several studies re-analysing one cohort.
 
+### The multi-origin variant
+
+The same error runs backwards. One publication carries propositions from
+several originating records, and a claim resting on **one** of them is credited
+with **all** of them:
+
+```text
+        origin A          origin B
+             \              /
+              publication P
+                    │
+          proposition drawn from A
+                    │
+                    ▼
+                 claim X          ← credited with A *and* B
+```
+
+The tell is arithmetically impossible output: **more independent origins than
+sources**. Genuinely independent observations cannot outnumber the records
+carrying them.
+
+This is why provenance has to be modelled at the proposition level for
+corroboration purposes. Document lineage is correct about documents and
+insufficient about claims:
+
+```text
+source count  ≠  publication count  ≠  independent evidence-origin count
+```
+
 ## Why models and researchers fall into it
 
 - **Independence of publisher is real and irrelevant.** Separate mastheads,
@@ -54,6 +83,11 @@ briefing by everyone present; a figure that entered circulation once and is now
   sources are marked `REPEATING`.
 - An `ORIGINATING` source exists in the graph with **no** dependency edges
   pointing at it, while several publications carry its figures.
+- **Independent origins outnumber sources for a claim.** Always a bug; the
+  usual cause is resolving claim independence from document lineage while a
+  source is multi-origin.
+- A source with two or more outgoing dependency edges whose evidence carries no
+  proposition-level provenance — its origins cannot be apportioned.
 
 ## Harm if allowed
 
@@ -85,10 +119,19 @@ briefing by everyone present; a figure that entered circulation once and is now
    `LOW` confidence, with `originDescription` and no `dependsOnSourceId` when the
    origin was never identified as a record. Suspected provenance is neither
    promoted to fact nor dropped.
-7. Report "N publications, M independent origins" rather than "N sources"
-   wherever a count is surfaced.
+7. Resolve claim-level independence from **proposition-level** provenance, not
+   from document lineage. Keep both: lineage answers document questions and
+   drives cluster display; proposition provenance answers corroboration.
+8. Never let absence stand for independence. Evidence with no provenance is
+   independent only if its own source originates; otherwise its independence is
+   unresolved, and an unidentified origin is not an independent one.
+9. Where any origin is unresolved, report **no count** rather than a
+   partially-resolved one. "Origin independence unresolved" is honest; a
+   precise-looking number is not.
+10. Report "N publications, M independent origins" rather than "N sources"
+    wherever a count is surfaced.
 
 ## Calibration cases demonstrating it
 
-- [CAL-003 — Repetition is not corroboration](../cases/CAL-003-repetition-is-not-corroboration.md)
+- [CAL-003 — Repetition is not corroboration](../cases/CAL-003-repetition-is-not-corroboration.md), including its multi-origin boundary
 - [CAL-004](../cases/CAL-004-not-located-is-not-nonexistent.md) — the unobtained origin is unobtained, not nonexistent

@@ -42,9 +42,15 @@
  * never merged — nothing establishes they are the same record.
  */
 
-import type { Source, SourceDependency, SourceDependencyRelationship } from '@/lib/xray/domain'
+import type {
+  EvidenceProvenance,
+  Source,
+  SourceDependency,
+  SourceDependencyRelationship,
+} from '@/lib/xray/domain'
 import type { ClaimIdLike, XRayGraph } from './graph'
 import { sourceById, sourcesForClaim } from './sources'
+import { evidenceForClaim } from './evidence'
 
 /** Where an assertion originated, as far as the graph can establish. */
 export type OriginRef =
@@ -138,31 +144,25 @@ export function repeatingSourcesForClaim(graph: XRayGraph, claimId: ClaimIdLike)
 }
 
 /**
- * Distinct origins behind all evidence for a claim.
+ * Distinct origins behind a claim's **sources**, resolved through document
+ * lineage.
  *
- * **This is the corroboration-relevant set**, and it is usually far smaller
- * than the number of sources.
+ * ⚠️ NOT a corroboration measure, and renamed to say so. This was previously
+ * `independentOriginsForClaim`, and its result was rendered as claim-level
+ * independence. That was wrong: a multi-origin publication contributes every
+ * one of its origins to every claim it touches, so a claim resting on one of
+ * them counted the others too. In XRAY-KE-001 that produced five origins from
+ * four sources for DC001 — an overcount, in the direction that overstates
+ * independence.
  *
- * KNOWN LIMITATION — provenance is source-level, not evidence-level.
- * `SourceDependency` links records to records (architecture §9), so a source
- * carrying figures from two different origins contributes both to every claim
- * it touches, even when the claim only uses one of them. In XRAY-KE-001,
- * SRC-018 reproduces the September ministry dataset AND carries lot values
- * tracing to the 2021 award record; a claim resting only on its progress
- * figures still picks up both origins, and the count can then exceed the
- * source count.
- *
- * The result is directionally wrong for corroboration — it can OVERSTATE
- * independence, which is the harm FM-003 describes. So this number must not
- * be presented as a claim-level corroboration score in the UI. Per-cluster
- * ratios (`ProvenanceCluster.publicationCount` against its single origin) are
- * exact and are what the interface shows.
- *
- * Fixing it properly means resolving origins from the evidence actually used
- * rather than from its source, which needs evidence-level provenance the
- * domain does not yet carry. Deliberately not done here.
+ * Use it for document-lineage questions. For corroboration use
+ * {@link independentEvidenceOriginsForClaim}, which resolves each proposition
+ * to the origin that actually carries it.
  */
-export function independentOriginsForClaim(graph: XRayGraph, claimId: ClaimIdLike): OriginRef[] {
+export function sourceLineageOriginsForClaim(
+  graph: XRayGraph,
+  claimId: ClaimIdLike,
+): OriginRef[] {
   const seen = new Set<string>()
   const out: OriginRef[] = []
   for (const source of sourcesForClaim(graph, claimId)) {
@@ -174,6 +174,162 @@ export function independentOriginsForClaim(graph: XRayGraph, claimId: ClaimIdLik
     }
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// Evidence-level provenance — the corroboration layer
+// ---------------------------------------------------------------------------
+
+/** Proposition-level provenance records for one Evidence record. */
+export function provenanceForEvidence(
+  graph: XRayGraph,
+  evidenceId: string,
+): EvidenceProvenance[] {
+  return graph.index.provenanceByEvidence.get(evidenceId) ?? []
+}
+
+/**
+ * Where one proposition came from.
+ *
+ * Three outcomes, and the third is load-bearing:
+ *
+ *  - `RESOLVED`    — provenance says which record it derives from, or its own
+ *                    source is `ORIGINATING` and is therefore the origin.
+ *  - `UNIDENTIFIED` — it is known to be derivative, but the originating record
+ *                    was never identified.
+ *  - `UNRESOLVED`  — the source is `REPEATING` or `UNKNOWN` and no provenance
+ *                    record exists, so independence cannot be determined.
+ *
+ * `UNRESOLVED` is never counted as independence. Absence of provenance is not
+ * evidence of originality, in the same way that absence of a record is not
+ * evidence of non-existence (XR-INV-006).
+ */
+export type EvidenceOriginResolution =
+  | { status: 'RESOLVED'; origin: OriginRef; via?: EvidenceProvenance }
+  | { status: 'UNIDENTIFIED'; description: string; via: EvidenceProvenance }
+  | { status: 'UNRESOLVED'; reason: string }
+
+export function originForEvidence(
+  graph: XRayGraph,
+  evidenceId: string,
+): EvidenceOriginResolution {
+  const records = provenanceForEvidence(graph, evidenceId)
+
+  if (records.length > 0) {
+    const record = records[0]
+    if (record.origin.kind === 'SOURCE') {
+      return {
+        status: 'RESOLVED',
+        origin: { kind: 'SOURCE', sourceId: record.origin.sourceId },
+        via: record,
+      }
+    }
+    return { status: 'UNIDENTIFIED', description: record.origin.description, via: record }
+  }
+
+  const evidence = graph.index.evidence.get(evidenceId)
+  if (!evidence) return { status: 'UNRESOLVED', reason: 'no such evidence' }
+
+  const source = graph.index.source.get(evidence.sourceId)
+  if (!source) return { status: 'UNRESOLVED', reason: 'evidence has no source in the graph' }
+
+  if (source.originStatus === 'ORIGINATING') {
+    return { status: 'RESOLVED', origin: { kind: 'SOURCE', sourceId: source.id } }
+  }
+
+  return {
+    status: 'UNRESOLVED',
+    reason:
+      source.originStatus === 'REPEATING'
+        ? 'source repeats another record and this proposition has no recorded origin'
+        : 'source origin status is unknown and this proposition has no recorded origin',
+  }
+}
+
+/** All provenance records for a claim's evidence. */
+export function provenanceForClaim(graph: XRayGraph, claimId: ClaimIdLike): EvidenceProvenance[] {
+  return evidenceForClaim(graph, claimId).flatMap((e) => provenanceForEvidence(graph, e.id))
+}
+
+/**
+ * Distinct **confirmed** independent origins behind a claim's evidence.
+ *
+ * This is the corroboration answer. It resolves each proposition individually,
+ * so a multi-origin publication contributes only the origins that actually
+ * bear on this claim, and unresolved evidence contributes nothing.
+ */
+export function independentEvidenceOriginsForClaim(
+  graph: XRayGraph,
+  claimId: ClaimIdLike,
+): OriginRef[] {
+  const seen = new Set<string>()
+  const out: OriginRef[] = []
+  for (const evidence of evidenceForClaim(graph, claimId)) {
+    const resolution = originForEvidence(graph, evidence.id)
+    if (resolution.status !== 'RESOLVED') continue
+    const key = originKey(resolution.origin)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(resolution.origin)
+  }
+  return out
+}
+
+/** Claim-level independence, with the unresolved part stated rather than hidden. */
+export interface ClaimProvenanceSummary {
+  evidenceCount: number
+  /** Distinct records the evidence was drawn from. Not corroboration. */
+  sourceCount: number
+  /** Sources marked `REPEATING`. */
+  publicationCount: number
+  /** Confirmed independent originating observations. **The corroboration number.** */
+  independentOriginCount: number
+  /** Propositions known to be derivative whose origin was never identified. */
+  unidentifiedOriginCount: number
+  /** Propositions whose independence could not be determined at all. */
+  unresolvedEvidenceCount: number
+  /**
+   * True only when EVERY proposition's origin is settled — none unresolved and
+   * none merely known-to-be-derivative.
+   *
+   * An `UNIDENTIFIED` origin is not a resolved one. A claim resting entirely on
+   * derivative evidence whose parent was never identified has zero *confirmed*
+   * independent observations, and reporting "0 independent originating
+   * observations" would read as "nothing stands behind this" when the truth is
+   * "we cannot say what stands behind this". Both cases suppress the count.
+   */
+  isIndependenceResolved: boolean
+  origins: OriginRef[]
+}
+
+export function claimProvenanceSummary(
+  graph: XRayGraph,
+  claimId: ClaimIdLike,
+): ClaimProvenanceSummary {
+  const evidence = evidenceForClaim(graph, claimId)
+  const sources = sourcesForClaim(graph, claimId)
+  const origins = independentEvidenceOriginsForClaim(graph, claimId)
+
+  let unidentified = 0
+  let unresolved = 0
+  const unidentifiedKeys = new Set<string>()
+  for (const e of evidence) {
+    const r = originForEvidence(graph, e.id)
+    if (r.status === 'UNIDENTIFIED') unidentifiedKeys.add(r.via.id)
+    else if (r.status === 'UNRESOLVED') unresolved += 1
+  }
+  unidentified = unidentifiedKeys.size
+
+  return {
+    evidenceCount: evidence.length,
+    sourceCount: sources.length,
+    publicationCount: sources.filter((s) => s.originStatus === 'REPEATING').length,
+    independentOriginCount: origins.length,
+    unidentifiedOriginCount: unidentified,
+    unresolvedEvidenceCount: unresolved,
+    isIndependenceResolved: unresolved === 0 && unidentified === 0,
+    origins,
+  }
 }
 
 /** One origin and the records that reproduce it. */
@@ -267,10 +423,15 @@ export interface ProvenanceSummary {
   publicationCount: number
   /** Sources marked `ORIGINATING`. */
   originatingSourceCount: number
-  /** Distinct origins after resolving dependencies. **The corroboration number.** */
-  independentOriginCount: number
-  /** Origins described in an edge but never identified as a record. */
-  unidentifiedOriginCount: number
+  /**
+   * Distinct origins after resolving DOCUMENT lineage.
+   *
+   * ⚠️ Not corroboration — see {@link sourceLineageOriginsForClaim}. The
+   * corroboration number is `ClaimProvenanceSummary.independentOriginCount`.
+   */
+  sourceLineageOriginCount: number
+  /** Lineage origins described in an edge but never identified as a record. */
+  unidentifiedLineageOriginCount: number
   /** Dependency edges touching this claim's sources. */
   dependencyEdgeCount: number
   clusters: ProvenanceCluster[]
@@ -281,7 +442,7 @@ export function provenanceSummaryForClaim(
   claimId: ClaimIdLike,
 ): ProvenanceSummary {
   const sources = sourcesForClaim(graph, claimId)
-  const origins = independentOriginsForClaim(graph, claimId)
+  const origins = sourceLineageOriginsForClaim(graph, claimId)
   const clusters = provenanceClustersForClaim(graph, claimId)
   const edgeIds = new Set(
     sources.flatMap((s) => dependenciesForSource(graph, s.id).map((d) => d.id)),
@@ -290,8 +451,8 @@ export function provenanceSummaryForClaim(
     sourceCount: sources.length,
     publicationCount: sources.filter((s) => s.originStatus === 'REPEATING').length,
     originatingSourceCount: sources.filter((s) => s.originStatus === 'ORIGINATING').length,
-    independentOriginCount: origins.length,
-    unidentifiedOriginCount: origins.filter((o) => o.kind === 'UNIDENTIFIED').length,
+    sourceLineageOriginCount: origins.length,
+    unidentifiedLineageOriginCount: origins.filter((o) => o.kind === 'UNIDENTIFIED').length,
     dependencyEdgeCount: edgeIds.size,
     clusters,
   }

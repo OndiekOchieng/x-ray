@@ -49,6 +49,7 @@ import type {
   Disconfirmation,
   Discrepancy,
   Evidence,
+  EvidenceProvenance,
   Finding,
   Gap,
   Investigation,
@@ -65,6 +66,8 @@ export interface XRayGraphInput {
   sources: readonly Source[]
   sourceDependencies: readonly SourceDependency[]
   evidence: readonly Evidence[]
+  /** Proposition-level origins. See `selectors/provenance.ts`. */
+  evidenceProvenance?: readonly EvidenceProvenance[]
   discrepancies: readonly Discrepancy[]
   disconfirmations: readonly Disconfirmation[]
   findings: readonly Finding[]
@@ -91,9 +94,12 @@ interface GraphIndex {
   readonly dependenciesBySource: ReadonlyMap<string, SourceDependency[]>
   /** sourceId → incoming edges (... depends on this source). */
   readonly dependentsBySource: ReadonlyMap<string, SourceDependency[]>
+  /** evidenceId → proposition-level provenance records. */
+  readonly provenanceByEvidence: ReadonlyMap<string, EvidenceProvenance[]>
 }
 
 export interface XRayGraph extends XRayGraphInput {
+  readonly evidenceProvenance: readonly EvidenceProvenance[]
   readonly atiRequests: readonly ATIRequest[]
   readonly index: GraphIndex
 }
@@ -143,8 +149,12 @@ export function createXRayGraph(input: XRayGraphInput): XRayGraph {
     if (d.dependsOnSourceId) push(dependentsBySource, d.dependsOnSourceId, d)
   }
 
+  const provenanceByEvidence = new Map<string, EvidenceProvenance[]>()
+  for (const p of input.evidenceProvenance ?? []) push(provenanceByEvidence, p.evidenceId, p)
+
   return {
     ...input,
+    evidenceProvenance: input.evidenceProvenance ?? [],
     atiRequests: input.atiRequests ?? [],
     index: {
       claim: new Map(input.claims.map((c) => [c.id, c])),
@@ -159,6 +169,7 @@ export function createXRayGraph(input: XRayGraphInput): XRayGraph {
       evidenceByClaim,
       dependenciesBySource,
       dependentsBySource,
+      provenanceByEvidence,
     },
   }
 }

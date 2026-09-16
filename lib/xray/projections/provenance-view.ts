@@ -19,6 +19,7 @@
 import type { Source, SourceDependencyRelationship } from '@/lib/xray/domain'
 import type { XRayGraph, ClaimIdLike, OriginRef, ProvenanceCluster } from '@/lib/xray/selectors'
 import {
+  claimProvenanceSummary,
   dependenciesForSource,
   provenanceClusterForOrigin,
   provenanceSummaryForClaim,
@@ -68,14 +69,39 @@ export interface ProvenanceClusterView {
   summaryLabel: string
 }
 
+/**
+ * Claim-level independence, resolved from evidence-level provenance.
+ *
+ * Kept in its own object so it cannot be confused with the document-lineage
+ * numbers beside it. One number must not mean both.
+ */
+export interface ClaimIndependenceView {
+  /** Confirmed independent originating observations. */
+  independentOriginCount: number
+  /** Propositions known to be derivative whose origin was never identified. */
+  unidentifiedOriginCount: number
+  /** Propositions whose independence could not be determined. */
+  unresolvedEvidenceCount: number
+  /** False when any proposition's independence is undetermined. */
+  isResolved: boolean
+  /**
+   * Display string, or `undefined` when independence is unresolved.
+   *
+   * A partially-resolved count would be falsely precise, so none is offered.
+   * The caller shows `unresolvedLabel` instead.
+   */
+  summaryLabel?: string
+  /** Shown when independence cannot be stated exactly. */
+  unresolvedLabel?: string
+}
+
 export interface ProvenanceView {
   claimId?: string
   sourceCount: number
   publicationCount: number
   originatingSourceCount: number
-  /** The corroboration-relevant number. */
-  independentOriginCount: number
-  unidentifiedOriginCount: number
+  /** Document-lineage origin count. NOT corroboration — see `independence`. */
+  sourceLineageOriginCount: number
   dependencyEdgeCount: number
   clusters: ProvenanceClusterView[]
   /**
@@ -83,7 +109,9 @@ export interface ProvenanceView {
    * single origin — i.e. when repetition is present and worth showing.
    */
   hasRepetition: boolean
-  /** e.g. "7 sources · 6 independent originating observations". */
+  /** Claim-level independence from evidence provenance. */
+  independence: ClaimIndependenceView
+  /** e.g. "7 records traced · 5 of them repeat another record". */
   summaryLabel: string
 }
 
@@ -148,22 +176,52 @@ function clusterViewOf(graph: XRayGraph, cluster: ProvenanceCluster): Provenance
 /** Provenance for everything bearing on one claim. */
 export function provenanceViewForClaim(graph: XRayGraph, claimId: ClaimIdLike): ProvenanceView {
   const summary = provenanceSummaryForClaim(graph, claimId)
+  const independence = claimProvenanceSummary(graph, claimId)
   const clusters = summary.clusters.map((c) => clusterViewOf(graph, c))
+
   return {
     claimId: String(claimId),
     sourceCount: summary.sourceCount,
     publicationCount: summary.publicationCount,
     originatingSourceCount: summary.originatingSourceCount,
-    independentOriginCount: summary.independentOriginCount,
-    unidentifiedOriginCount: summary.unidentifiedOriginCount,
+    sourceLineageOriginCount: summary.sourceLineageOriginCount,
     dependencyEdgeCount: summary.dependencyEdgeCount,
     clusters,
     hasRepetition: clusters.some((c) => c.publicationCount > 1),
-    summaryLabel: `${plural(summary.sourceCount, 'source', 'sources')} · ${plural(
-      summary.independentOriginCount,
-      'independent originating observation',
-      'independent originating observations',
-    )}`,
+
+    independence: {
+      independentOriginCount: independence.independentOriginCount,
+      unidentifiedOriginCount: independence.unidentifiedOriginCount,
+      unresolvedEvidenceCount: independence.unresolvedEvidenceCount,
+      isResolved: independence.isIndependenceResolved,
+      // A count is offered ONLY when every proposition's origin is settled.
+      // Anything else would be falsely precise.
+      summaryLabel: independence.isIndependenceResolved
+        ? plural(
+            independence.independentOriginCount,
+            'independent originating observation',
+            'independent originating observations',
+          )
+        : undefined,
+      unresolvedLabel: independence.isIndependenceResolved
+        ? undefined
+        : independence.unidentifiedOriginCount > 0 &&
+            independence.unresolvedEvidenceCount === 0
+          ? `origin independence unresolved — ${plural(
+              independence.unidentifiedOriginCount,
+              'originating record was',
+              'originating records were',
+            )} never identified`
+          : `origin independence unresolved for ${plural(
+              independence.unresolvedEvidenceCount,
+              'evidence point',
+              'evidence points',
+            )}`,
+    },
+
+    summaryLabel: `${plural(summary.sourceCount, 'record', 'records')} traced · ${
+      summary.publicationCount
+    } of them repeat another record`,
   }
 }
 

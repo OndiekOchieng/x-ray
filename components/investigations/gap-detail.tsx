@@ -140,7 +140,7 @@ export function GapDetail({ payload }: { payload: GapPayload }) {
               <p className="mt-3 leading-7 text-muted-foreground">
                 {gap.atiEligible
                   ? 'This gap concerns a record a public body should hold, so it can become an access-to-information request.'
-                  : 'This gap cannot become an information request. The record does not exist yet — no request can produce it, however material the question is.'}
+                  : 'This gap requires post-event evidence, so an information request is not appropriate yet. X-Ray is waiting for a record of what happened rather than asking for one that may not yet have been created.'}
               </p>
             </section>
 
@@ -223,8 +223,9 @@ export function GapDetail({ payload }: { payload: GapPayload }) {
                 </p>
                 <h2 className="mt-2 text-2xl font-semibold">{gap.resolutionPathLabel}</h2>
                 <p className="mt-3 leading-7 text-muted-foreground">
-                  No information request is drafted for this gap. X-Ray is waiting for a record
-                  that does not exist yet; the evidence that would settle it is listed above.
+                  No information request is drafted for this gap. It needs post-event evidence,
+                  so X-Ray is waiting rather than requesting; the records that would settle it
+                  are listed above.
                 </p>
               </section>
             )}

@@ -212,6 +212,35 @@ publications = 3
 Counting publications is not counting observations. A dependency edge is what
 lets the engine compute the second number.
 
+### Two levels of provenance
+
+A dependency edge answers a question about **documents**. Corroboration is a
+question about **propositions**, and the two come apart whenever one
+publication carries material from more than one origin:
+
+```text
+                    publication P
+                   /              \
+      reproduces  /                \  repeats figures from
+                 ▼                  ▼
+        ministry release      procurement notice
+              │                      │
+        proposition A          proposition B
+              │                      │
+              ▼                      ▼
+           claim X                claim Y
+```
+
+At document level, P depends on both records. At proposition level, claim X
+draws on the first origin only. Counting X's independence from document lineage
+credits it with an observation that never bore on it.
+
+`EvidenceProvenance` records the second kind of edge — one proposition, one
+origin — and **claim-level independence is computed from it**. Document lineage
+remains the right answer for document-level questions, including the
+publication clusters shown to readers. See
+[domain-model.md](./domain-model.md#evidence).
+
 Full definition: [SourceDependency](./domain-model.md#sourcedependency).
 
 ---

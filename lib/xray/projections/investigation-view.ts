@@ -18,7 +18,7 @@ import type { InvestigationStatus, PipelineStage, StageRunStatus } from '@/lib/x
 import type { XRayGraph } from '@/lib/xray/selectors'
 import {
   graphCounts,
-  independentOriginsForClaim,
+  independentEvidenceOriginsForClaim,
   originKey,
   surfaceSource,
   gapResolutionSummary,
@@ -82,10 +82,11 @@ export function investigationView(graph: XRayGraph): InvestigationView {
   const counts = graphCounts(graph)
   const surface = surfaceSource(graph)
 
-  // Distinct origins across every claim, deduplicated graph-wide.
+  // Distinct CONFIRMED independent origins across every claim, from
+  // evidence-level provenance. Unresolved propositions contribute nothing.
   const origins = new Set<string>()
   for (const claim of graph.claims)
-    for (const o of independentOriginsForClaim(graph, claim.id)) origins.add(originKey(o))
+    for (const o of independentEvidenceOriginsForClaim(graph, claim.id)) origins.add(originKey(o))
 
   const gapSummary = gapResolutionSummary(allGaps(graph))
 

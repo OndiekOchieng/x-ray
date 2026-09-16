@@ -19,7 +19,7 @@
  * PURITY: types only. No React, no DOM, no fixtures, no copy, no I/O.
  */
 
-import type { ClaimId, EvidenceId, SourceId } from './primitives'
+import type { Confidence, ClaimId, EvidenceId, SourceId } from './primitives'
 import type { Measurement, TimeScope } from './claim'
 
 /**
@@ -100,4 +100,77 @@ export interface Evidence {
 
   /** Where in the source the passage sits (page, section, table, timestamp). */
   locationInSource?: string
+}
+
+// ---------------------------------------------------------------------------
+// Evidence-level provenance
+// ---------------------------------------------------------------------------
+
+/**
+ * How one proposition relates to the record it came from.
+ *
+ * A narrower vocabulary than `SourceDependencyRelationship`. Document-level
+ * relations such as `SAME_EVENT` and `PROBABLE_COMMON_ORIGIN` describe two
+ * publications standing in some relation to each other; they say nothing about
+ * where a *particular proposition* came from, so they are not offered here.
+ */
+export type EvidenceProvenanceRelationship =
+  | 'REPRODUCES'
+  | 'QUOTES'
+  | 'ATTRIBUTES_TO'
+  | 'DERIVED_FROM'
+
+/**
+ * Where a proposition originated.
+ *
+ * `UNIDENTIFIED` is not a failure state. It records that the evidence is
+ * derivative and that the originating record was never identified — which is
+ * materially different from the proposition being an independent observation.
+ * Treating an unidentified origin as independent is the overcount this whole
+ * entity exists to prevent.
+ */
+export type EvidenceOrigin =
+  | { kind: 'SOURCE'; sourceId: SourceId }
+  | { kind: 'UNIDENTIFIED'; description: string }
+
+/**
+ * The origin of one Evidence proposition.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM `SourceDependency`
+ * ==================================================
+ * `SourceDependency` is document lineage: this publication reproduces that
+ * ministry release. It is correct and it stays canonical.
+ *
+ * But a single publication routinely carries propositions from several
+ * origins. In XRAY-KE-001, one People Daily article reports September progress
+ * percentages that come from a ministry status release AND lot contract values
+ * that come from a 2021 procurement notice. At document level the article
+ * depends on both. At proposition level each figure has exactly one origin.
+ *
+ * Resolving claim-level independence from document lineage therefore attributes
+ * every origin of a source to every claim that source touches. For a claim
+ * resting only on the progress figures, the procurement notice is counted as a
+ * second independent observation that never bore on it — inflating apparent
+ * corroboration, which is the direction of error XR-INV-004 exists to prevent.
+ *
+ * So: **claim-level independence is evaluated at the evidence-proposition
+ * level.** Document lineage remains the right answer for document-level
+ * questions, including the publication clusters shown to readers.
+ *
+ * Absence of a record here does not mean independence. An Evidence record with
+ * no provenance is independent only if its own source is `ORIGINATING`;
+ * otherwise its independence is unresolved, and unresolved is not counted.
+ */
+export interface EvidenceProvenance {
+  id: string
+
+  /** The proposition whose origin this describes. */
+  evidenceId: EvidenceId
+
+  origin: EvidenceOrigin
+
+  relationship: EvidenceProvenanceRelationship
+
+  /** Confidence in the provenance claim itself, not in the evidence. */
+  confidence: Confidence
 }

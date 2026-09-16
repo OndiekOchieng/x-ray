@@ -110,9 +110,11 @@ export const gaps: Gap[] = [
     /**
      * THE NON-ELIGIBLE BRANCH. [C:GAP-006] [G:GAP-005]
      *
-     * The record does not exist yet — the inspection was scheduled for the day
-     * AFTER the research cutoff. No information request can produce a record of
-     * an event that has not happened. XR-INV-009: materiality does not create
+     * This gap needs POST-EVENT evidence, and the inspection was scheduled for
+     * the day AFTER the research cutoff. An information request is not the
+     * right instrument yet — not because no relevant record exists (itineraries
+     * do), but because the record that would settle THIS question could not
+     * have been created at the cutoff. XR-INV-009: materiality does not create
      * eligibility.
      */
     id: 'GAP-003',

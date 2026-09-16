@@ -40,6 +40,7 @@ const eq = (label: string, actual: unknown, expected: unknown) =>
   actual === expected ? null : `${label}: expected ${expected}, got ${actual}`
 
 const ids = (xs: { id: string }[]) => xs.map((x) => x.id).join(',')
+const list = (xs: string[]) => xs.join('; ')
 
 // ---------------------------------------------------------------------------
 // CAL-001 — different measurement is not contradiction
@@ -144,11 +145,126 @@ check('CAL-003 · the same cluster projects with both numbers visible', () => {
   return null
 })
 
-check('CAL-003 · independent origins are fewer than sources for C003', () => {
-  const p = S.provenanceSummaryForClaim(graph, 'C003')
+check('CAL-003 · confirmed independent origins are fewer than sources for C003', () => {
+  const p = S.claimProvenanceSummary(graph, 'C003')
   if (p.independentOriginCount >= p.sourceCount)
     return `origins ${p.independentOriginCount} >= sources ${p.sourceCount}`
   return null
+})
+
+// --- Slice 4.1 regression: evidence-level provenance -----------------------
+
+check('REGRESSION · DC001 no longer inherits an unrelated origin from SRC-018', () => {
+  // SRC-018 is multi-origin: it reproduces the September ministry release AND
+  // carries lot values tracing to the 2021 award notice (SRC-002). DC001 rests
+  // only on the progress figures, so SRC-002 must not count for it.
+  const origins = S.independentEvidenceOriginsForClaim(graph, 'DC001')
+  const ids = origins.filter((o) => o.kind === 'SOURCE').map((o) => (o as { sourceId: string }).sourceId)
+  if (ids.includes('SRC-002')) return `SRC-002 still counted: ${ids.join(',')}`
+  if (!ids.includes('SRC-017')) return `SRC-017 missing: ${ids.join(',')}`
+  // The document-lineage view still sees both, which is correct for documents.
+  const lineage = S.sourceLineageOriginsForClaim(graph, 'DC001')
+    .filter((o) => o.kind === 'SOURCE')
+    .map((o) => (o as { sourceId: string }).sourceId)
+  return lineage.includes('SRC-002') ? null : 'document lineage lost SRC-002'
+})
+
+check('REGRESSION · confirmed origins never exceed sources for any claim', () => {
+  const bad: string[] = []
+  for (const claim of graph.claims) {
+    const p = S.claimProvenanceSummary(graph, claim.id)
+    if (p.independentOriginCount > p.sourceCount)
+      bad.push(`${claim.id}: ${p.independentOriginCount} origins > ${p.sourceCount} sources`)
+  }
+  return bad.length ? list(bad) : null
+})
+
+check('REGRESSION · one multi-origin source does not spread origins across claims', () => {
+  // Every claim drawing on SRC-018 must see only the origins of the
+  // propositions it actually uses.
+  const bad: string[] = []
+  for (const claim of graph.claims) {
+    const used = evidence.filter(
+      (e) => e.sourceId === 'SRC-018' && e.claimIds.some((c) => c === claim.id),
+    )
+    if (used.length === 0) continue
+    const expected = new Set(
+      used
+        .map((e) => S.originForEvidence(graph, e.id))
+        .filter((r) => r.status === 'RESOLVED')
+        .map((r) => S.originKey((r as { origin: S.OriginRef }).origin)),
+    )
+    const actual = new Set(
+      S.independentEvidenceOriginsForClaim(graph, claim.id).map(S.originKey),
+    )
+    for (const key of expected) if (!actual.has(key)) bad.push(`${claim.id} lost ${key}`)
+    // SRC-002 may only appear where a proposition actually traces to it.
+    const usesAward = [...expected].includes('SOURCE:SRC-002')
+    if (!usesAward && actual.has('SOURCE:SRC-002')) {
+      const viaOther = evidence.some(
+        (e) =>
+          e.sourceId !== 'SRC-018' &&
+          e.claimIds.some((c) => c === claim.id) &&
+          S.originKey(
+            (S.originForEvidence(graph, e.id) as { origin?: S.OriginRef }).origin ?? {
+              kind: 'UNIDENTIFIED',
+              description: '',
+              viaDependencyId: 'x',
+            },
+          ) === 'SOURCE:SRC-002',
+      )
+      if (!viaOther) bad.push(`${claim.id} gained SRC-002 spuriously`)
+    }
+  }
+  return bad.length ? list(bad) : null
+})
+
+check('REGRESSION · unresolved provenance is never counted as independence', () => {
+  const bad: string[] = []
+  for (const e of evidence) {
+    const r = S.originForEvidence(graph, e.id)
+    if (r.status !== 'UNRESOLVED') continue
+    // An unresolved proposition must not put its own source into any claim's
+    // confirmed origin set by way of that evidence.
+    for (const claimId of e.claimIds) {
+      const origins = S.independentEvidenceOriginsForClaim(graph, claimId)
+      const viaOther = evidence.some(
+        (other) =>
+          other.id !== e.id &&
+          other.sourceId === e.sourceId &&
+          other.claimIds.some((c) => c === claimId) &&
+          S.originForEvidence(graph, other.id).status === 'RESOLVED',
+      )
+      if (
+        !viaOther &&
+        origins.some((o) => o.kind === 'SOURCE' && o.sourceId === e.sourceId)
+      )
+        bad.push(`${e.id} (${e.sourceId}) counted for ${claimId}`)
+    }
+  }
+  return bad.length ? list(bad) : null
+})
+
+check('REGRESSION · claim-level counts come from evidence provenance, not lineage', () => {
+  // The two layers must be able to disagree; if they never do, the fix is
+  // inert. DC001 is the case where they differ.
+  const lineage = S.sourceLineageOriginsForClaim(graph, 'DC001').length
+  const evidenceLevel = S.claimProvenanceSummary(graph, 'DC001').independentOriginCount
+  return lineage !== evidenceLevel
+    ? null
+    : `both layers report ${lineage}; the evidence-level path may be inert`
+})
+
+check('a partially-resolved claim offers no precise independence count', () => {
+  const bad: string[] = []
+  for (const claim of graph.claims) {
+    const v = P.provenanceViewForClaim(graph, claim.id).independence
+    if (!v.isResolved && v.summaryLabel !== undefined)
+      bad.push(`${claim.id} states a count while unresolved`)
+    if (!v.isResolved && !v.unresolvedLabel) bad.push(`${claim.id} has no unresolved label`)
+    if (v.isResolved && !v.summaryLabel) bad.push(`${claim.id} resolved but unlabelled`)
+  }
+  return bad.length ? list(bad) : null
 })
 
 check('FM-003 · no selector or projection is named for corroboration', () => {
@@ -158,12 +274,22 @@ check('FM-003 · no selector or projection is named for corroboration', () => {
   return bad.length ? bad.join(',') : null
 })
 
-check('FM-003 · provenance summary reports sources and origins together', () => {
-  const p = S.provenanceSummaryForClaim(graph, 'C003')
+check('FM-003 · claim summary reports sources and confirmed origins together', () => {
+  const p = S.claimProvenanceSummary(graph, 'C003')
   const keys = Object.keys(p)
-  return keys.includes('sourceCount') && keys.includes('independentOriginCount')
-    ? null
-    : `keys ${keys.join(',')}`
+  for (const required of [
+    'sourceCount',
+    'independentOriginCount',
+    'unresolvedEvidenceCount',
+    'isIndependenceResolved',
+  ])
+    if (!keys.includes(required)) return `missing ${required}`
+  // The document-lineage summary must NOT carry a field named as if it were
+  // corroboration; that name now says what it is.
+  const lineage = Object.keys(S.provenanceSummaryForClaim(graph, 'C003'))
+  return lineage.includes('independentOriginCount')
+    ? 'lineage summary still exposes independentOriginCount'
+    : null
 })
 
 check('CAL-003 · provenance is reachable without a claim-id special case', () => {
@@ -495,15 +621,18 @@ check('resolution path is not user-editable state', () => {
   return bad.length ? bad.map((f) => f.path).join(',') : null
 })
 
-check('FM-003 · no claim-level origin count is rendered as a corroboration score', () => {
-  // Source-level provenance can make independentOriginCount exceed sourceCount
-  // (DC001 does). Per-cluster ratios are exact; the claim-level figure is not,
-  // so the UI must not present it as one.
-  const bad = UI_CODE.filter((f) => /independentOriginCount/.test(f.text))
-  if (bad.length) return `${bad.map((f) => f.path).join(',')} render a claim-level origin count`
-  // And the limitation must stay documented where the number is computed.
+check('FM-003 · the unsafe claim-level API is gone, not merely unused', () => {
+  // Slice 4.1 replaced source-level claim independence with evidence-level
+  // provenance. The old name must not survive, or a caller could silently
+  // reach for the unsafe method again.
   const source = readFileSync(new URL('./selectors/provenance.ts', import.meta.url), 'utf8')
-  return /KNOWN LIMITATION/.test(source) ? null : 'limitation no longer documented'
+  if (/export function independentOriginsForClaim/.test(source))
+    return 'independentOriginsForClaim still exported'
+  if (!/sourceLineageOriginsForClaim/.test(source))
+    return 'the lineage-scoped replacement is missing'
+  if (!/independentEvidenceOriginsForClaim/.test(source))
+    return 'the evidence-level replacement is missing'
+  return null
 })
 
 check('per-cluster provenance ratios never overstate independence', () => {

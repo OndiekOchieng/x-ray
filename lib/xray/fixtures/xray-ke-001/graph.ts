@@ -16,6 +16,7 @@ import { claims } from './claims'
 import { sources } from './sources'
 import { sourceDependencies } from './source-dependencies'
 import { evidence } from './evidence'
+import { evidenceProvenance } from './evidence-provenance'
 import { discrepancies } from './discrepancies'
 import { disconfirmations } from './disconfirmation'
 import { findings } from './findings'
@@ -32,6 +33,7 @@ export function createXrayKe001Graph(): XRayGraph {
     sources,
     sourceDependencies,
     evidence,
+    evidenceProvenance,
     discrepancies,
     disconfirmations,
     findings,

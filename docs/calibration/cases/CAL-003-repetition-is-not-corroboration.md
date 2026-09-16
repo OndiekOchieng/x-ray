@@ -25,6 +25,8 @@ is invisible unless provenance is modelled as structure, which is why
 | Originating record | `SRC-017` — Ministry of Interior project-status release, `ATTRIBUTED_ORIGIN_NOT_RETRIEVED` / `NOT_RETRIEVED` / `ORIGINATING` |
 | Publications | `SRC-018` (People Daily), `SRC-019` (Radio47), `SRC-020` (The Star) — all `SECONDARY` / `REPEATING` |
 | Dependency edges | `SD-001`, `SD-002`, `SD-003` — all `REPRODUCES`, confidence `HIGH` |
+| Multi-origin publication | `SRC-018` — `SD-001` to `SRC-017`, `SD-010` to `SRC-002` |
+| Evidence provenance | `EP-012`–`EP-017` split `SRC-018`'s propositions between its two origins |
 | Evidence | `EV-020`, `EV-021`, `EV-022` (`STRONG_INDIRECT`) vs `EV-024`, `EV-025` (`WEAK`) |
 | Gap | `GAP-005` |
 | Second cluster | `SRC-011` → `SRC-012`, `SRC-013`, `SRC-014` (`SD-004`…`SD-006`) |
@@ -98,8 +100,89 @@ itinerary was never identified as a record.
 An unconfirmed dependency is recorded as unconfirmed. It is neither promoted to
 a fact nor dropped for being inconvenient.
 
+## The second boundary: one publication, several origins
+
+Discovered while migrating the UI, and it is the sharper half of this case.
+
+The counting above collapses three publications into one origin. The inverse
+also happens: **a single publication can carry propositions from more than one
+originating record.**
+
+`SRC-018` (People Daily, 11 September 2026) does both at once. It reproduces
+the ministry status release — and its lot contract values repeat the 2021
+procurement award exactly, unrevised. Two dependency edges, correctly recorded:
+
+```text
+SRC-002  procurement award (2021)  ◄── DERIVED_FROM ── SRC-018 ── REPRODUCES ──► SRC-017  ministry release
+```
+
+Both edges are true of the **document**. Neither is true of every
+**proposition** in it:
+
+| Evidence | Proposition | Origin |
+| --- | --- | --- |
+| `EV-020`–`EV-022`, `EV-029` | lot progress 20.2% / 34% / 28% | `SRC-017` |
+| `EV-009` | lot lengths 12.9 / 43.4 / 44.5 km | `SRC-017` |
+| `EV-018` | lot values 5.19 / 4.96 / 5.72 bn | `SRC-002` |
+
+### The wrong instinct, second form
+
+> The publication depends on two originating records. Any claim drawing on it
+> therefore rests on two independent observations.
+
+### What went wrong
+
+`DC001` rests on the progress figures alone (`EV-029`). Resolving its
+independence from document lineage credited it with the procurement notice as
+well — a record that never bore on it. The result:
+
+```text
+DC001    4 sources  →  5 "independent origins"
+```
+
+More origins than sources, which is impossible for genuinely independent
+observations, and wrong in the direction that **overstates** corroboration.
+
+### Expected judgment
+
+Independence is evaluated **per proposition**, not per document:
+
+```text
+DC001    4 sources  →  3 confirmed independent origins  (SRC-017, SRC-015, SRC-005)
+                    →  1 evidence point unresolved      (EV-032, origin unknown)
+```
+
+`SRC-002` no longer appears, because nothing DC001 rests on came from it. The
+document-lineage view still shows both edges, which is correct for documents.
+
+So the three quantities are all different, and only the last measures
+corroboration:
+
+```text
+source count  ≠  publication count  ≠  independent evidence-origin count
+```
+
+### And unknown is not independent
+
+`EV-032` comes from a source whose origin status is `UNKNOWN`, with no
+provenance record. It is not counted as an independent observation — absence of
+provenance is not evidence of originality, exactly as absence of a record is not
+evidence of non-existence ([CAL-004](./CAL-004-not-located-is-not-nonexistent.md)).
+
+Where any origin is unresolved or merely unidentified, **no independence count
+is reported at all**. A partially-resolved number would be falsely precise.
+`C004` illustrates the other form: both its origins trace to an itinerary
+nobody identified, so it has zero *confirmed* independent observations and the
+interface says "origin independence unresolved" rather than "0".
+
+---
+
 ## What evidence would change the judgment
 
+- Identifying the itinerary behind `C004`'s evidence → its `UNIDENTIFIED`
+  origins resolve and an independence count becomes reportable.
+- Establishing provenance for `EV-032` → `DC001`'s independence becomes fully
+  resolved.
 - Retrieving the originating release (`GAP-005`) → the figures can be graded
   against the origin directly, and `SRC-017` becomes `RETRIEVED`.
 - Evidence that one outlet independently verified the figures — its own site

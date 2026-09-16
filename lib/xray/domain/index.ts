@@ -80,7 +80,14 @@ export type {
 } from './source'
 
 // Evidence
-export type { Evidence, EvidenceRelationship, EvidenceStrength } from './evidence'
+export type {
+  Evidence,
+  EvidenceOrigin,
+  EvidenceProvenance,
+  EvidenceProvenanceRelationship,
+  EvidenceRelationship,
+  EvidenceStrength,
+} from './evidence'
 
 // Analysis
 export type {
