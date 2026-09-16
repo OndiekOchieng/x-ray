@@ -140,9 +140,27 @@ export function repeatingSourcesForClaim(graph: XRayGraph, claimId: ClaimIdLike)
 /**
  * Distinct origins behind all evidence for a claim.
  *
- * **This is the corroboration-relevant set.** Its length is the number of
- * independent observations, which is at most — and frequently far fewer than —
- * the number of sources.
+ * **This is the corroboration-relevant set**, and it is usually far smaller
+ * than the number of sources.
+ *
+ * KNOWN LIMITATION — provenance is source-level, not evidence-level.
+ * `SourceDependency` links records to records (architecture §9), so a source
+ * carrying figures from two different origins contributes both to every claim
+ * it touches, even when the claim only uses one of them. In XRAY-KE-001,
+ * SRC-018 reproduces the September ministry dataset AND carries lot values
+ * tracing to the 2021 award record; a claim resting only on its progress
+ * figures still picks up both origins, and the count can then exceed the
+ * source count.
+ *
+ * The result is directionally wrong for corroboration — it can OVERSTATE
+ * independence, which is the harm FM-003 describes. So this number must not
+ * be presented as a claim-level corroboration score in the UI. Per-cluster
+ * ratios (`ProvenanceCluster.publicationCount` against its single origin) are
+ * exact and are what the interface shows.
+ *
+ * Fixing it properly means resolving origins from the evidence actually used
+ * rather than from its source, which needs evidence-level provenance the
+ * domain does not yet carry. Deliberately not done here.
  */
 export function independentOriginsForClaim(graph: XRayGraph, claimId: ClaimIdLike): OriginRef[] {
   const seen = new Set<string>()

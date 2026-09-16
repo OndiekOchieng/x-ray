@@ -18,9 +18,10 @@
  * This is the synthesis side of the boundary in XR-INV-011: it reads the graph
  * and writes nothing back.
  *
- * NOT HERE: ATI draft generation. Composing request prose is a synthesis step
- * with its own rules (ADR-0008) and is left to the UI-migration slice; GapView
- * exposes the structured inputs a draft needs without composing them.
+ * ATI draft composition lives in `./ati-draft`, and share-card wording in
+ * `./share`. Both are synthesis: they read the graph and write nothing back.
+ * `atiDraftFor` refuses to draft for an ineligible gap (ADR-0008), and share
+ * wording never turns a missing record into an allegation.
  */
 
 export * from './labels'
@@ -32,3 +33,5 @@ export * from './provenance-view'
 export * from './claim-view'
 export * from './investigation-view'
 export * from './library-view'
+export * from './ati-draft'
+export * from './share'

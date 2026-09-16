@@ -1,8 +1,11 @@
 import { AppShell } from '@/components/layout/app-shell'
 import { SourceInput } from '@/components/investigations/source-input'
 import { CachedXRayCard } from '@/components/investigations/cached-xray-card'
+import { getFeaturedInvestigation } from '@/lib/xray/investigations'
 
 export default function Page() {
+  const featured = getFeaturedInvestigation()
+
   return (
     <AppShell>
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20">
@@ -37,12 +40,14 @@ export default function Page() {
         </div>
 
         {/* Featured Investigation */}
-        <div>
-          <h2 className="text-sm font-semibold text-muted-foreground mb-4 uppercase tracking-wide">
-            Featured Investigation
-          </h2>
-          <CachedXRayCard />
-        </div>
+        {featured && (
+          <div>
+            <h2 className="text-sm font-semibold text-muted-foreground mb-4 uppercase tracking-wide">
+              Featured Investigation
+            </h2>
+            <CachedXRayCard entry={featured} />
+          </div>
+        )}
       </div>
     </AppShell>
   )

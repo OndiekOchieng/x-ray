@@ -21,6 +21,7 @@ import { evidence } from './fixtures/xray-ke-001/evidence'
 import { gaps } from './fixtures/xray-ke-001/gaps'
 import { discrepancies } from './fixtures/xray-ke-001/discrepancies'
 import { sourceDependencies } from './fixtures/xray-ke-001/source-dependencies'
+import { readFileSync, readdirSync } from 'node:fs'
 
 type Result = { name: string; ok: boolean; detail?: string }
 const results: Result[] = []
@@ -373,6 +374,198 @@ check('ReceiptView marks evidence drawn from unobtained records', () => {
   if (bad.length) return `${ids(bad)} quote an unobtained record`
   const anyReceipt = P.receiptViewsForClaim(graph, 'C003')[0]
   return anyReceipt?.wasObtained === true ? null : 'wasObtained not set'
+})
+
+// ---------------------------------------------------------------------------
+// UI migration boundary (Slice 4)
+//
+// The dependency direction is graph -> selectors -> projections -> pages ->
+// components. These checks assert the UI stays on the right side of it.
+// ---------------------------------------------------------------------------
+
+const UI_ROOTS = ['app', 'components']
+
+function uiFiles(): { path: string; text: string }[] {
+  const out: { path: string; text: string }[] = []
+  const walk = (dir: URL, prefix: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`)
+      else if (/\.tsx?$/.test(entry.name))
+        out.push({
+          path: `${prefix}${entry.name}`,
+          text: readFileSync(new URL(entry.name, dir), 'utf8'),
+        })
+    }
+  }
+  for (const root of UI_ROOTS) walk(new URL(`../../${root}/`, import.meta.url), `${root}/`)
+  return out
+}
+
+const UI = uiFiles()
+
+/**
+ * Source with comments removed.
+ *
+ * These checks look for patterns in CODE. Several migrated components
+ * document what was removed — the old `selected.id` gate, the hardcoded gap
+ * route, the single-param route lock — and that documentation is worth
+ * keeping. A check that could not tell code from prose would force it deleted.
+ */
+const uiCode = (text: string): string =>
+  text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+
+const UI_CODE = UI.map((f) => ({ path: f.path, text: uiCode(f.text) }))
+
+check('UI imports no canonical fixture module directly', () => {
+  const bad = UI_CODE.filter((f) => /from ['"]@?\/?(\.\.\/)*lib\/xray\/fixtures/.test(f.text))
+  return bad.length ? bad.map((f) => f.path).join(',') : null
+})
+
+check('UI imports no selector module directly', () => {
+  // Components consume projections. Pages consume the loader seam.
+  const bad = UI_CODE.filter((f) => /from ['"]@\/lib\/xray\/selectors/.test(f.text))
+  return bad.length ? bad.map((f) => f.path).join(',') : null
+})
+
+check('legacy fixture and domain types are gone and unreferenced', () => {
+  const bad = UI_CODE.filter((f) => /@\/lib\/(data|types)\b/.test(f.text))
+  if (bad.length) return `still imported by ${bad.map((f) => f.path).join(',')}`
+  for (const legacy of ['../../lib/data/fixture.ts', '../../lib/types/index.ts', '../../lib/types/gaps.ts']) {
+    try {
+      readFileSync(new URL(legacy, import.meta.url))
+      return `${legacy} still exists`
+    } catch {
+      /* expected */
+    }
+  }
+  return null
+})
+
+check('no fixture-id gate remains in the UI', () => {
+  // e.g. `selected.id === 'claim-2'`, the v0 provenance gate.
+  const gate = /(id|claimId)\s*===\s*['"](claim-\d+|C\d{3}|DC\d+)['"]/
+  const bad = UI_CODE.filter((f) => gate.test(f.text))
+  return bad.length ? bad.map((f) => f.path).join(',') : null
+})
+
+check('no hardcoded gap route remains', () => {
+  const bad = UI_CODE.filter((f) => /\/gap\/GAP-\d+/.test(f.text))
+  return bad.length ? bad.map((f) => f.path).join(',') : null
+})
+
+check('no hardcoded investigation id remains outside the loader seam', () => {
+  const bad = UI_CODE.filter(
+    (f) => /XRAY-KE-001/.test(f.text) && !/source-input/.test(f.path),
+  )
+  return bad.length ? bad.map((f) => f.path).join(',') : null
+})
+
+check('dynamic routes consume their id param', () => {
+  const dynamic = UI_CODE.filter((f) => /^app\/.*\[id\]\/page\.tsx$/.test(f.path))
+  if (dynamic.length !== 3) return `expected 3 dynamic routes, found ${dynamic.length}`
+  const bad = dynamic.filter((f) => !/await params/.test(f.text) || !/\bid\b/.test(f.text))
+  if (bad.length) return `${bad.map((f) => f.path).join(',')} ignore their param`
+  const notFound = dynamic.filter((f) => !/notFound\(\)/.test(f.text))
+  return notFound.length ? `${notFound.map((f) => f.path).join(',')} lack a not-found branch` : null
+})
+
+check('no route locks itself to a single investigation', () => {
+  const bad = UI_CODE.filter((f) => /dynamicParams\s*=\s*false/.test(f.text))
+  return bad.length ? bad.map((f) => f.path).join(',') : null
+})
+
+check('the v0 hardcoded summary numbers are gone', () => {
+  const completion = UI_CODE.find((f) => /completion-state\.tsx$/.test(f.path))
+  const card = UI_CODE.find((f) => /cached-xray-card\.tsx$/.test(f.path))
+  if (!completion || !card) return 'component missing'
+  const bad: string[] = []
+  if (/>\s*11\s*</.test(completion.text) || /source dependencies/.test(completion.text))
+    bad.push('completion-state')
+  if (/>\s*(5|11|2)\s*</.test(card.text)) bad.push('cached-xray-card')
+  return bad.length ? bad.join(',') : null
+})
+
+check('no numeric confidence is rendered', () => {
+  const bad = UI_CODE.filter((f) => /confidence \* 100|% confidence|Math\.round\(.*confidence/.test(f.text))
+  return bad.length ? bad.map((f) => f.path).join(',') : null
+})
+
+check('resolution path is not user-editable state', () => {
+  const bad = UI_CODE.filter((f) => /setGap\(|resolutionPath:\s*path/.test(f.text))
+  return bad.length ? bad.map((f) => f.path).join(',') : null
+})
+
+check('FM-003 · no claim-level origin count is rendered as a corroboration score', () => {
+  // Source-level provenance can make independentOriginCount exceed sourceCount
+  // (DC001 does). Per-cluster ratios are exact; the claim-level figure is not,
+  // so the UI must not present it as one.
+  const bad = UI_CODE.filter((f) => /independentOriginCount/.test(f.text))
+  if (bad.length) return `${bad.map((f) => f.path).join(',')} render a claim-level origin count`
+  // And the limitation must stay documented where the number is computed.
+  const source = readFileSync(new URL('./selectors/provenance.ts', import.meta.url), 'utf8')
+  return /KNOWN LIMITATION/.test(source) ? null : 'limitation no longer documented'
+})
+
+check('per-cluster provenance ratios never overstate independence', () => {
+  for (const claim of graph.claims) {
+    for (const cluster of P.provenanceViewForClaim(graph, claim.id).clusters) {
+      if (cluster.independentOriginCount !== 1) return `${claim.id} cluster origin count != 1`
+      if (cluster.publicationCount < 0) return `${claim.id} negative publication count`
+    }
+  }
+  return null
+})
+
+// ---------------------------------------------------------------------------
+// ATI drafting
+// ---------------------------------------------------------------------------
+
+check('CAL-005 · GAP-003 produces no ATI draft', () => {
+  const gap = P.gapView(graph, gaps.find((g) => g.id === 'GAP-003')!)
+  if (gap.atiEligible) return 'GAP-003 is marked eligible'
+  return P.atiDraftFor(gap) === null ? null : 'a draft was composed for an ineligible gap'
+})
+
+check('an eligible gap drafts, labelled DRAFT and not submitted', () => {
+  const gap = P.gapView(graph, gaps.find((g) => g.id === 'GAP-001')!)
+  const draft = P.atiDraftFor(gap)
+  if (!draft) return 'no draft for an eligible gap'
+  if (draft.status !== 'DRAFT') return `status ${draft.status}`
+  if (!/NOT been submitted/i.test(draft.submissionDisclaimer)) return 'no submission disclaimer'
+  return null
+})
+
+check('an inferred custodian is never drafted as confirmed', () => {
+  const gap = P.gapView(graph, gaps.find((g) => g.id === 'GAP-001')!)
+  const draft = P.atiDraftFor(gap)!
+  if (!draft.holderIsInferred) return 'GAP-001 custody is not marked inferred'
+  return /has not confirmed/i.test(draft.body) ? null : 'draft body implies confirmed custody'
+})
+
+check('a draft requests only records the gap names', () => {
+  for (const g of gaps) {
+    const view = P.gapView(graph, g)
+    const draft = P.atiDraftFor(view)
+    if (!draft) continue
+    for (const record of view.recordsSought)
+      if (!draft.body.includes(record)) return `${g.id} draft omits "${record}"`
+  }
+  return null
+})
+
+// ---------------------------------------------------------------------------
+// Responsible sharing
+// ---------------------------------------------------------------------------
+
+check('gap share wording describes the record, never conduct', () => {
+  const accusatory = /\b(cannot explain|refuses|concealed|hiding|misused|failed to account|corrupt)\b/i
+  for (const g of gaps) {
+    const share = P.gapShareView(P.gapView(graph, g), { investigatedAt: '2026-09-13' })
+    if (accusatory.test(share.shareText)) return `${g.id}: "${share.shareText}"`
+    if (!/not evidence of wrongdoing/i.test(share.shareText))
+      return `${g.id} share text omits the responsibility note`
+  }
+  return null
 })
 
 // ---------------------------------------------------------------------------

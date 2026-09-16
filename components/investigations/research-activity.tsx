@@ -1,65 +1,57 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { ResearchEvent } from '@/lib/types'
 
-const eventIcons: Record<string, string> = {
-  claim: '▪',
-  evidence: '✓',
-  connection: '◆',
-  gap: '!',
-  status: '→',
-}
+import type { StageRunView } from '@/lib/xray/projections'
 
-export function ResearchActivity({
-  events,
-  investigationStarted,
-}: {
-  events: ResearchEvent[]
-  investigationStarted: boolean
-}) {
-  const [visibleEvents, setVisibleEvents] = useState<ResearchEvent[]>([])
+/**
+ * Live research activity.
+ *
+ * Rendered ONLY for an investigation whose status is genuinely RUNNING. The v0
+ * scaffold replayed a completed historical investigation through setTimeout,
+ * so a finished X-Ray appeared to be researching itself for thirteen seconds
+ * on every page load.
+ *
+ * Every line here is derived from a StageRun. No sentence is invented: the
+ * canonical graph carries no research-event narration, so none is displayed.
+ */
+export function ResearchActivity({ stages }: { stages: StageRunView[] }) {
+  const done = stages.filter((s) => s.isComplete || s.status === 'RUNNING')
+  const [visible, setVisible] = useState<StageRunView[]>([])
 
   useEffect(() => {
-    if (!investigationStarted) return
-
-    const timeouts = events.map((event) => {
-      return setTimeout(
-        () => {
-          setVisibleEvents((prev) => [...prev, event])
-        },
-        event.timestamp
-      )
-    })
-
-    return () => timeouts.forEach(clearTimeout)
-  }, [investigationStarted, events])
+    setVisible([])
+    const timers = done.map((stage, i) =>
+      setTimeout(() => setVisible((prev) => [...prev, stage]), i * 400),
+    )
+    return () => timers.forEach(clearTimeout)
+  }, [stages])
 
   return (
-    <div>
+    <section>
       <h2 className="text-sm font-semibold text-foreground mb-4 uppercase tracking-wide">
-        Research Activity
+        Research activity
       </h2>
-      <div className="space-y-2 max-h-96 overflow-y-auto">
-        {visibleEvents.length === 0 && investigationStarted && (
-          <div className="text-xs text-muted-foreground italic">
-            Initializing...
-          </div>
+      <ol
+        className="space-y-2 max-h-96 overflow-y-auto"
+        aria-live="polite"
+        aria-relevant="additions"
+      >
+        {visible.length === 0 && (
+          <li className="text-xs text-muted-foreground italic">Starting research…</li>
         )}
-
-        {visibleEvents.map((event, idx) => (
-          <div
-            key={event.id}
-            className="text-xs text-muted-foreground border-l border-muted-foreground/20 pl-3 py-1 animate-in fade-in slide-in-from-left-2 duration-300"
-            style={{ animationDelay: `${idx * 50}ms` }}
+        {visible.map((stage) => (
+          <li
+            key={stage.stageRunId}
+            className="text-xs text-muted-foreground border-l border-muted-foreground/20 pl-3 py-1"
           >
-            <span className="inline-block w-4 text-left">
-              {eventIcons[event.type] || '•'}
+            <span className="font-mono uppercase tracking-wider">{stage.stage}</span>
+            <span className="ml-2">
+              {stage.isComplete ? 'complete' : 'in progress'}
             </span>
-            <span className="ml-2">{event.message}</span>
-          </div>
+          </li>
         ))}
-      </div>
-    </div>
+      </ol>
+    </section>
   )
 }
