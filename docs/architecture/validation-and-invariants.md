@@ -297,6 +297,67 @@ of the union and MUST NOT be introduced — see
 [domain-model.md](./domain-model.md#source). This is the structural form of
 [XR-INV-006](#xr-inv-006--missing-evidence-is-not-negative-evidence).
 
+## Finding evidence traceability is total
+
+Ratified 2026-09-16. Evidence reaches a Finding through three lists, mapped
+from the canonical `Evidence.relationship`:
+
+```text
+SUPPORTS       → supportingEvidenceIds
+CHALLENGES     → challengingEvidenceIds
+CONTRADICTS    → challengingEvidenceIds
+CONTEXTUALIZES → contextualEvidenceIds
+```
+
+Every Evidence record bearing on the claim appears in exactly one list; no list
+contains an id whose relationship maps elsewhere. There is no
+`contradictingEvidenceIds` — the canonical distinction stays on the Evidence.
+
+This makes [XR-INV-007](#xr-inv-007--findings-must-be-reversible) checkable
+rather than aspirational: a finding whose rationale rests on contextualizing
+evidence can now name it. See
+[domain-model.md](./domain-model.md#finding).
+
+## Evidence carries its own temporal scope
+
+Ratified 2026-09-16. `Evidence.timeScope` records when an observation or
+measurement is true of. `Source.publishedAt` records when its source was
+published. These routinely differ, and conflating them makes a stale
+measurement indistinguishable from a current one.
+
+Temporal scope MUST NOT be encoded inside `Measurement.definition`, which is
+reserved for measurement-definition semantics. Where a record gives no
+measurement date, that is stated rather than supplied. See
+[domain-model.md](./domain-model.md#evidence).
+
+## GapStatus does not gain `WAITING`
+
+Ratified 2026-09-16, closing a question left open by scaffold reconciliation.
+The v0 UI scaffold carried a `WAITING` gap status. It is **not** adopted.
+
+`GapStatus` and `ResolutionPath` answer different questions — *is this gap
+closed* and *how would it close*. A gap awaiting a record that does not yet
+exist is:
+
+```ts
+status: "OPEN"
+resolutionPath: "WAIT_FOR_RECORD"
+```
+
+Adding `WAITING` would encode the resolution path a second time in the status,
+and the two could then disagree.
+
+## `Claim.type` remains single-valued
+
+Ratified 2026-09-16. Architecture v0.1 keeps one `ClaimType` per claim.
+
+Both benchmark runs classified the road-length claim as
+"quantitative/geographic", so the limitation is real: a single axis cannot
+express subject matter and form at once. A multi-axis claim taxonomy is
+**deferred**, not rejected — it would change decomposition and classification
+contracts that are not yet executable. Until then the testable assertion
+governs the type, and secondary aspects are carried in `entities`.
+
 ## Custody basis must be explicit
 
 `Gap.likelyHolder.basis: CONFIRMED | INFERRED` — see

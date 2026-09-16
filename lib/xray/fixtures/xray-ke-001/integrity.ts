@@ -313,24 +313,143 @@ check('every Finding can describe how it would be overturned', () => {
   return bad.length ? list(bad.map((f) => f.id)) : null
 })
 
-check('every Finding evidence list mirrors Evidence.relationship', () => {
+// --- Finding evidence traceability (Slice 2.1) ---
+//
+//   SUPPORTS       → supportingEvidenceIds
+//   CHALLENGES     → challengingEvidenceIds
+//   CONTRADICTS    → challengingEvidenceIds
+//   CONTEXTUALIZES → contextualEvidenceIds
+//
+// Checked in both directions: every list is complete for its relationships,
+// and no list contains an id whose relationship maps elsewhere.
+
+const BUCKET = {
+  SUPPORTS: 'supportingEvidenceIds',
+  CHALLENGES: 'challengingEvidenceIds',
+  CONTRADICTS: 'challengingEvidenceIds',
+  CONTEXTUALIZES: 'contextualEvidenceIds',
+} as const
+
+const evidenceFor = (claimId: string) => evidence.filter((e) => e.claimIds.some((c) => c === claimId))
+
+const expectedBucket = (claimId: string, bucket: string) =>
+  evidenceFor(claimId)
+    .filter((e) => BUCKET[e.relationship] === bucket)
+    .map((e) => e.id)
+
+const sameSet = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((x) => b.includes(x))
+
+check('supportingEvidenceIds reference only SUPPORTS evidence', () => {
+  const bad: string[] = []
+  for (const f of findings)
+    for (const id of f.supportingEvidenceIds) {
+      const e = evidence.find((x) => x.id === id)!
+      if (e.relationship !== 'SUPPORTS') bad.push(`${f.id}→${id} is ${e.relationship}`)
+    }
+  return bad.length ? list(bad) : null
+})
+
+check('challengingEvidenceIds reference only CHALLENGES or CONTRADICTS', () => {
+  const bad: string[] = []
+  for (const f of findings)
+    for (const id of f.challengingEvidenceIds) {
+      const e = evidence.find((x) => x.id === id)!
+      if (e.relationship !== 'CHALLENGES' && e.relationship !== 'CONTRADICTS')
+        bad.push(`${f.id}→${id} is ${e.relationship}`)
+    }
+  return bad.length ? list(bad) : null
+})
+
+check('contextualEvidenceIds reference only CONTEXTUALIZES evidence', () => {
+  const bad: string[] = []
+  for (const f of findings)
+    for (const id of f.contextualEvidenceIds) {
+      const e = evidence.find((x) => x.id === id)!
+      if (e.relationship !== 'CONTEXTUALIZES') bad.push(`${f.id}→${id} is ${e.relationship}`)
+    }
+  return bad.length ? list(bad) : null
+})
+
+check('every contextualEvidenceId bears on that Finding\'s Claim', () => {
+  const bad: string[] = []
+  for (const f of findings)
+    for (const id of f.contextualEvidenceIds) {
+      const e = evidence.find((x) => x.id === id)
+      if (!e) bad.push(`${f.id}→${id} missing`)
+      else if (!e.claimIds.includes(f.claimId)) bad.push(`${f.id}→${id} does not bear on ${f.claimId}`)
+    }
+  return bad.length ? list(bad) : null
+})
+
+check('every CONTEXTUALIZES evidence on a claim appears in its contextualEvidenceIds', () => {
   const bad: string[] = []
   for (const f of findings) {
-    const expectedSupport = evidence
-      .filter((e) => e.claimIds.includes(f.claimId) && e.relationship === 'SUPPORTS')
-      .map((e) => e.id)
-    const expectedChallenge = evidence
-      .filter(
-        (e) =>
-          e.claimIds.includes(f.claimId) &&
-          (e.relationship === 'CHALLENGES' || e.relationship === 'CONTRADICTS'),
-      )
-      .map((e) => e.id)
-    const eq = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x))
-    if (!eq(expectedSupport, f.supportingEvidenceIds)) bad.push(`${f.id} supporting`)
-    if (!eq(expectedChallenge, f.challengingEvidenceIds)) bad.push(`${f.id} challenging`)
+    const expected = expectedBucket(f.claimId, 'contextualEvidenceIds')
+    const missing = expected.filter((id) => !f.contextualEvidenceIds.includes(id))
+    if (missing.length) bad.push(`${f.id} omits ${list(missing)}`)
   }
   return bad.length ? list(bad) : null
+})
+
+check('Finding evidence lists are complete for all material relationships', () => {
+  const bad: string[] = []
+  for (const f of findings) {
+    for (const [bucket, actual] of [
+      ['supportingEvidenceIds', f.supportingEvidenceIds],
+      ['challengingEvidenceIds', f.challengingEvidenceIds],
+      ['contextualEvidenceIds', f.contextualEvidenceIds],
+    ] as const) {
+      const expected = expectedBucket(f.claimId, bucket)
+      if (!sameSet(expected, actual)) bad.push(`${f.id}.${bucket} expected [${list(expected)}] got [${list(actual)}]`)
+    }
+    // Total: nothing bearing on the claim may fall outside all three lists.
+    const all = [...f.supportingEvidenceIds, ...f.challengingEvidenceIds, ...f.contextualEvidenceIds]
+    const orphans = evidenceFor(f.claimId).filter((e) => !all.includes(e.id))
+    if (orphans.length) bad.push(`${f.id} unreachable: ${list(orphans.map((e) => e.id))}`)
+  }
+  return bad.length ? list(bad) : null
+})
+
+check('contextualEvidenceIds exist in this fixture where the rationale relies on them', () => {
+  // Five of six findings rest on contextualizing evidence; DC001 legitimately
+  // has none. A fixture where every list were empty would pass the mapping
+  // checks above while proving nothing.
+  const withContext = findings.filter((f) => f.contextualEvidenceIds.length > 0)
+  return withContext.length >= 5
+    ? null
+    : `only ${withContext.length} findings carry contextual evidence`
+})
+
+// --- Evidence temporal scope (Slice 2.1) ---
+
+check('Measurement.definition carries no temporal scope', () => {
+  const YEAR = /\b(19|20)\d{2}\b/
+  const bad = evidence
+    .filter((e) => e.measurement)
+    .filter((e) => YEAR.test(e.measurement!.definition ?? '') || YEAR.test(e.measurement!.scope ?? ''))
+  return bad.length ? `${list(bad.map((e) => e.id))} encode dates in Measurement` : null
+})
+
+check('evidence whose observation predates its source carries timeScope', () => {
+  // The case this field exists for: Treasury published in November 2025 a
+  // completion figure as at 30 June 2025.
+  const bad = ['EV-028', 'EV-031'].filter((id) => {
+    const e = evidence.find((x) => x.id === id)!
+    return e.timeScope?.asOf !== '2025-06-30'
+  })
+  return bad.length ? `${list(bad)} lack the as-of date of the observation` : null
+})
+
+check('timeScope never asserts a date the benchmark does not give', () => {
+  // The September ministry release states no measurement date, so those records
+  // must carry description only — never a fabricated asOf.
+  const septemberRecords = ['EV-020', 'EV-021', 'EV-022', 'EV-029']
+  const bad = septemberRecords.filter((id) => {
+    const ts = evidence.find((x) => x.id === id)!.timeScope
+    return ts?.asOf !== undefined || !ts?.description
+  })
+  return bad.length ? `${list(bad)} assert an unsupported measurement date` : null
 })
 
 check('every unresolved material finding has a gap', () => {

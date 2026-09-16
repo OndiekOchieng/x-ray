@@ -20,7 +20,7 @@
  */
 
 import type { ClaimId, EvidenceId, SourceId } from './primitives'
-import type { Measurement } from './claim'
+import type { Measurement, TimeScope } from './claim'
 
 /**
  * The direction in which a piece of evidence bears on a claim.
@@ -80,6 +80,20 @@ export interface Evidence {
    * against a measured claim — see XR-INV-005.
    */
   measurement?: Measurement
+
+  /**
+   * The period the observation or measurement is scoped to.
+   *
+   * NOT the source's publication time. A record published in November 2025 may
+   * report completion as at 30 June 2025; a 2022 article may state contract
+   * sums fixed at award in 2021. `Source.publishedAt` answers "when was this
+   * published"; `timeScope` answers "when is this true of".
+   *
+   * Temporal scope MUST NOT be encoded inside `Measurement.definition`, which
+   * is reserved for measurement-definition semantics — what the metric means,
+   * not when it was taken.
+   */
+  timeScope?: TimeScope
 
   /** The source's own words, preserved verbatim. */
   quotedPassage?: string

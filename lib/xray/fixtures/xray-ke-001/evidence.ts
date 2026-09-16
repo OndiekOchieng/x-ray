@@ -16,6 +16,13 @@
  *    (XR-INV-001). It establishes that the claims were made, not that they are
  *    true. Asserted by the integrity check.
  *
+ * TEMPORAL SCOPE: `Evidence.timeScope` carries when an observation or
+ * measurement is true of, which is not the same as when its source was
+ * published — Treasury's November 2025 report states completion as at 30 June
+ * 2025. `Measurement.definition` is reserved for measurement semantics and
+ * carries no dates. Where the frozen runs give no measurement date, that is
+ * said in `description` rather than filled in.
+ *
  * NOTE ON `CONTRADICTS`: no record in this fixture uses it. That is the
  * finding, not an omission — the benchmark located no measurement-compatible
  * evidence contradicting any surface claim. See discrepancies.ts DISC-003.
@@ -90,7 +97,8 @@ export const evidence: Evidence[] = [
     relationship: 'SUPPORTS',
     claimIds: ['C001'],
     strength: 'STRONG_INDIRECT',
-    measurement: { metric: 'road_length', value: 63, unit: 'km', scope: 'the road as described by KeNHA in 2022' },
+    timeScope: { description: 'As described by KeNHA on the record in 2022.' },
+    measurement: { metric: 'road_length', value: 63, unit: 'km', scope: 'the road' },
   },
   {
     // [C:S007] [G:S002]
@@ -189,13 +197,17 @@ export const evidence: Evidence[] = [
     relationship: 'CHALLENGES',
     claimIds: ['C002'],
     strength: 'DIRECT',
+    timeScope: {
+      asOf: '2021-06-30',
+      description: 'At award, 4th quarter FY2020/21. No later variation is reflected.',
+    },
     measurement: {
       metric: 'awarded_works_contract_sum',
       value: 15.880008733,
       unit: 'KES_BILLION',
       scope: 'three works contracts, Lots 1–3',
       definition:
-        'Sum of awarded works contracts at award. Excludes supervision consultancies, variations and price adjustment.',
+        'Sum of awarded works contracts. Excludes supervision consultancies, variations and price adjustment.',
     },
   },
   {
@@ -225,6 +237,7 @@ export const evidence: Evidence[] = [
     relationship: 'CONTEXTUALIZES',
     claimIds: ['C002'],
     strength: 'DIRECT',
+    timeScope: { asOf: '2025-11-18', description: 'As recorded in the November 2025 Treasury sector report.' },
     measurement: {
       metric: 'estimated_project_cost',
       value: 16.385,
@@ -243,6 +256,7 @@ export const evidence: Evidence[] = [
     relationship: 'SUPPORTS',
     claimIds: ['C002'],
     strength: 'STRONG_INDIRECT',
+    timeScope: { asOf: '2026-05-08', description: 'As stated at the KeNHA Nyanza site briefing.' },
     measurement: {
       metric: 'project_value',
       value: 16.7,
@@ -287,11 +301,12 @@ export const evidence: Evidence[] = [
     relationship: 'CHALLENGES',
     claimIds: ['C002'],
     strength: 'CONTEXTUAL',
+    timeScope: { asOf: '2025-05-06' },
     measurement: {
       metric: 'project_value',
       value: 15.7,
       unit: 'KES_BILLION',
-      scope: 'total works as described in May 2025',
+      scope: 'total works',
       definition: 'A rounding of the awarded works total rather than an independent valuation.',
     },
   },
@@ -304,12 +319,14 @@ export const evidence: Evidence[] = [
     relationship: 'CHALLENGES',
     claimIds: ['C002'],
     strength: 'STRONG_INDIRECT',
+    timeScope: { description: 'As reported in the September 2026 ministry status data.' },
     measurement: {
       metric: 'project_value',
       value: 15.87,
       unit: 'KES_BILLION',
-      scope: 'three-lot project, as reported by the ministry in September 2026',
-      definition: 'Matches the 2021 awarded works sums; no revision is reflected.',
+      scope: 'three-lot project',
+      definition:
+        'The awarded works sums rather than any revised contract value; no revision is reflected.',
     },
   },
   {
@@ -321,11 +338,14 @@ export const evidence: Evidence[] = [
     relationship: 'CHALLENGES',
     claimIds: ['C002'],
     strength: 'STRONG_INDIRECT',
+    timeScope: {
+      description: 'As stated by KeNHA on the record in 2022; the awards themselves date from 2021.',
+    },
     measurement: {
       metric: 'awarded_works_contract_sum',
       value: 15.87,
       unit: 'KES_BILLION',
-      scope: 'three works contracts as stated by KeNHA in 2022',
+      scope: 'three works contracts',
     },
   },
 
@@ -355,6 +375,10 @@ export const evidence: Evidence[] = [
       definition:
         'Overall physical completion against contractual work. NOT a measure of road length surfaced; not compatible with the claim measurement on C003.',
     },
+    timeScope: {
+      description:
+        'September 2026 ministry status data. The release does not state the date the measurement was taken.',
+    },
   },
   {
     id: 'EV-021',
@@ -371,6 +395,10 @@ export const evidence: Evidence[] = [
       scope: 'Lot 2, Miwani–Chemelil',
       definition: 'Overall physical completion against contractual work, not road length surfaced.',
     },
+    timeScope: {
+      description:
+        'September 2026 ministry status data. The release does not state the date the measurement was taken.',
+    },
   },
   {
     id: 'EV-022',
@@ -386,6 +414,10 @@ export const evidence: Evidence[] = [
       denominator: 'contractual_work',
       scope: 'Lot 3, Chemelil–Muhoroni–Kipsitet',
       definition: 'Overall physical completion against contractual work, not road length surfaced.',
+    },
+    timeScope: {
+      description:
+        'September 2026 ministry status data. The release does not state the date the measurement was taken.',
     },
   },
   {
@@ -405,6 +437,7 @@ export const evidence: Evidence[] = [
       scope: 'whole three-lot project',
       definition: 'Overall physical completion against contractual work, not road length surfaced.',
     },
+    timeScope: { asOf: '2026-06-06', description: 'As stated to the committee during its inspection.' },
   },
   {
     // [G:S008] Dependent corroboration — deliberately WEAK. XR-INV-004.
@@ -458,9 +491,13 @@ export const evidence: Evidence[] = [
       metric: 'physical_project_completion',
       unit: 'percent',
       denominator: 'contractual_work',
-      scope: 'three lots, recorded completion at 30 June 2025',
-      definition:
-        'Fifteen months before the surface claim and on the project-completion metric, not surfaced length.',
+      scope: 'three lots',
+      definition: 'Overall physical completion against contractual work, not surfaced length.',
+    },
+    timeScope: {
+      asOf: '2025-06-30',
+      description:
+        'Completion as at 30 June 2025, recorded in a report published in November 2025 — fifteen months before the surface claim.',
     },
   },
 
@@ -484,8 +521,12 @@ export const evidence: Evidence[] = [
       metric: 'physical_project_completion',
       unit: 'percent',
       denominator: 'contractual_work',
-      scope: 'three-lot project, September 2026',
+      scope: 'three-lot project',
       definition: 'The metric DC001 is stated in, so the comparison here is measurement-compatible.',
+    },
+    timeScope: {
+      description:
+        'September 2026 ministry status data. The release does not state the date the measurement was taken.',
     },
   },
   {
@@ -502,8 +543,9 @@ export const evidence: Evidence[] = [
       value: 28,
       unit: 'percent',
       denominator: 'contractual_work',
-      scope: 'whole three-lot project, June 2026',
+      scope: 'whole three-lot project',
     },
+    timeScope: { asOf: '2026-06-06' },
   },
   {
     // [G:S001]
@@ -518,8 +560,9 @@ export const evidence: Evidence[] = [
       metric: 'physical_project_completion',
       unit: 'percent',
       denominator: 'contractual_work',
-      scope: 'three lots at 30 June 2025',
+      scope: 'three lots',
     },
+    timeScope: { asOf: '2025-06-30', description: 'Completion as at 30 June 2025.' },
   },
   {
     // [G:C005 disconfirmation] "Strongest contrary evidence: reports of

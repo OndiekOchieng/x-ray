@@ -134,7 +134,20 @@ export type FindingStatus =
  *
  * XR-INV-007 — every material finding MUST record supporting evidence,
  * challenging evidence, unresolved gaps, rationale, and the evidence that
- * would change it. A conclusion that cannot describe how it could be
+ * would change it.
+ *
+ * Evidence reaches the finding through three lists, mapped from the canonical
+ * `Evidence.relationship`:
+ *
+ * ```text
+ *   SUPPORTS       → supportingEvidenceIds
+ *   CHALLENGES     → challengingEvidenceIds
+ *   CONTRADICTS    → challengingEvidenceIds
+ *   CONTEXTUALIZES → contextualEvidenceIds
+ * ```
+ *
+ * The mapping is total: every Evidence record bearing on the claim lands in
+ * exactly one list. The relationship itself stays on the Evidence. A conclusion that cannot describe how it could be
  * overturned is invalid. All five are non-optional fields here, so a finding
  * that cannot describe its own reversal cannot be constructed.
  *
@@ -160,8 +173,34 @@ export interface Finding {
 
   rationale: string
 
+  /**
+   * Evidence whose relationship to the claim is `SUPPORTS`.
+   */
   supportingEvidenceIds: EvidenceId[]
+
+  /**
+   * Evidence whose relationship to the claim is `CHALLENGES` or `CONTRADICTS`.
+   *
+   * The two share a list deliberately. The distinction between weakening a
+   * claim and refuting it is carried by `Evidence.relationship`, which remains
+   * canonical; duplicating it here would create a second place for it to drift.
+   * There is no `contradictingEvidenceIds`.
+   */
   challengingEvidenceIds: EvidenceId[]
+
+  /**
+   * Evidence whose relationship to the claim is `CONTEXTUALIZES`.
+   *
+   * Such evidence neither supports nor opposes the claim, yet can be decisive
+   * for the finding's reasoning — the record that explains why two figures
+   * measure different things, or that establishes the definition a
+   * reconciliation rests on.
+   *
+   * Without this list, finding-level explainability would require scanning
+   * every Evidence record for a matching `claimId`, and evidence that was
+   * load-bearing for the rationale would be invisible in the finding itself.
+   */
+  contextualEvidenceIds: EvidenceId[]
 
   discrepancyIds: DiscrepancyId[]
   gapIds: GapId[]

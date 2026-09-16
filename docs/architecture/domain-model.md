@@ -377,6 +377,32 @@ Source
    └── Evidence C ──context─────► C005
 ```
 
+> ### Ratified — Evidence carries its own temporal scope
+>
+> **Recorded:** 2026-09-16 · Slice 2.1 · System Architecture v0.1 clarification
+>
+> `Evidence` gains an optional `timeScope`:
+>
+> ```ts
+> timeScope?: TimeScope;
+> ```
+>
+> **A source's publication time is not the time the observation is true of.**
+> The National Treasury published a report in November 2025 recording project
+> completion **as at 30 June 2025**; a 2022 article states contract sums fixed
+> at award in 2021. `Source.publishedAt` answers *when was this published*;
+> `Evidence.timeScope` answers *when is this true of*.
+>
+> Without the field, the two collapse — and a finding cannot tell a current
+> measurement from a stale one, which is exactly the judgment
+> [XR-INV-005](./validation-and-invariants.md#xr-inv-005--same-measure-contradiction-rule)
+> and research cutoffs depend on.
+>
+> Temporal scope **MUST NOT** be encoded inside `Measurement.definition`.
+> `definition` is reserved for measurement-definition semantics — what the
+> metric means, not when it was taken. Where a record gives no measurement
+> date, `TimeScope.description` says so rather than supplying one.
+
 ---
 
 ## Discrepancy
@@ -472,6 +498,7 @@ interface Finding {
 
   supportingEvidenceIds: string[];
   challengingEvidenceIds: string[];
+  contextualEvidenceIds: string[];
 
   discrepancyIds: string[];
   gapIds: string[];
@@ -500,6 +527,46 @@ interface Finding {
 > produce. On a civic-trust surface, fabricated precision is worse than an
 > honest band. The architecture was already correct here; this note exists so
 > the drift is not re-introduced.
+
+> ### Ratified — findings carry contextualizing evidence explicitly
+>
+> **Recorded:** 2026-09-16 · Slice 2.1 · System Architecture v0.1 clarification
+>
+> `Finding` gains a third evidence list:
+>
+> ```ts
+> contextualEvidenceIds: string[];
+> ```
+>
+> Evidence reaches a finding through three lists, mapped from the canonical
+> `Evidence.relationship`:
+>
+> ```text
+> SUPPORTS       → supportingEvidenceIds
+> CHALLENGES     → challengingEvidenceIds
+> CONTRADICTS    → challengingEvidenceIds
+> CONTEXTUALIZES → contextualEvidenceIds
+> ```
+>
+> The mapping is **total**: every Evidence record bearing on the claim lands in
+> exactly one list, and no list contains an id whose relationship maps
+> elsewhere.
+>
+> **Why:** evidence that neither supports nor opposes a claim can still be
+> decisive for the finding's reasoning — the ESIA record establishing that
+> spur roads are programmed separately is what makes a scope reconciliation
+> credible, without supporting or challenging the length figure itself.
+> Previously such evidence appeared in no list, so finding-level
+> explainability required scanning every Evidence record for a matching
+> `claimId`, and load-bearing evidence was invisible in the finding it
+> supported. [XR-INV-007](./validation-and-invariants.md#xr-inv-007--findings-must-be-reversible)
+> requires a finding to account for itself; it cannot do that while part of its
+> reasoning is unreachable from it.
+>
+> **`CHALLENGES` and `CONTRADICTS` deliberately share one list.** There is no
+> `contradictingEvidenceIds`. The distinction between weakening a claim and
+> refuting it is carried by `Evidence.relationship`, which stays canonical;
+> duplicating it on the finding would create a second place for it to drift.
 
 ---
 

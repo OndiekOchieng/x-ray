@@ -116,6 +116,44 @@ DIRECT | STRONG_INDIRECT | CONTEXTUAL | WEAK
 of evidence that measures something else — see
 [measurement compatibility](#measurement-compatibility) below.
 
+### How relationships reach a Finding
+
+A Finding does not restate relationships; it indexes evidence by them. The
+mapping is total — every Evidence record bearing on the claim lands in exactly
+one list:
+
+| `Evidence.relationship` | Finding list |
+| --- | --- |
+| `SUPPORTS` | `supportingEvidenceIds` |
+| `CHALLENGES` | `challengingEvidenceIds` |
+| `CONTRADICTS` | `challengingEvidenceIds` |
+| `CONTEXTUALIZES` | `contextualEvidenceIds` |
+
+`CHALLENGES` and `CONTRADICTS` share a list on purpose, and there is no
+`contradictingEvidenceIds`. The canonical distinction lives on the Evidence;
+a second copy on the Finding would be a second thing to keep in sync.
+
+`CONTEXTUALIZES` has its own list rather than none. Evidence that neither
+supports nor opposes a claim is often what makes a finding legible — the record
+establishing that two figures measure different quantities does not argue for
+either figure. Without the list, that evidence would be reachable only by
+scanning every Evidence record for a matching `claimId`, and
+[XR-INV-007](./validation-and-invariants.md#xr-inv-007--findings-must-be-reversible)
+asks a finding to account for its own reasoning.
+
+### When an observation is true of
+
+Relationship and strength describe how evidence bears on a claim. **When** it
+bears is separate: `Evidence.timeScope` records the period the observation or
+measurement is scoped to, which is not its source's publication date.
+
+A November 2025 Treasury report recording completion as at 30 June 2025 is one
+record with two dates — `Source.publishedAt` and `Evidence.timeScope.asOf` —
+and collapsing them would make a fifteen-month-old measurement look current.
+
+Temporal scope MUST NOT be hidden inside `Measurement.definition`; see
+[measurement compatibility](#measurement-compatibility).
+
 ---
 
 ## Provenance and dependency semantics
@@ -256,6 +294,10 @@ independent benchmark runs — see
 [benchmarks/XRAY-KE-001](../benchmarks/XRAY-KE-001/README.md) and the
 regression fixture in
 [engineering/acceptance-fixtures.md](../engineering/acceptance-fixtures.md#same-measure-acceptance-fixture).
+
+`Measurement.definition` carries measurement semantics only — what the metric
+means, what it is a proportion of, under whose definition. It does **not**
+carry dates. When a measurement was taken is `Evidence.timeScope`.
 
 Evaluating compatibility is a **referential and epistemic validation**
 concern, not a prompt instruction —

@@ -51,6 +51,17 @@ Slice 2 (2026-09-15) ratified three further v0.1 clarifications, recorded in
 7. `TimeScope` — provisional lean shape (`from` / `to` / `asOf` / `description`)
 8. `InvestigationVersion` — provisional record derived from §22 behaviour
 
+Slice 2.1 (2026-09-16) ratified two further clarifications and closed two open
+questions:
+
+9. `Finding.contextualEvidenceIds` — evidence reaches a finding through three
+   lists, mapped totally from `Evidence.relationship`
+10. `Evidence.timeScope` — when an observation is true of, distinct from when
+    its source was published
+11. Closed: `GapStatus` does **not** gain `WAITING` (use `OPEN` +
+    `WAIT_FOR_RECORD`)
+12. Closed: `Claim.type` remains single-valued; multi-axis taxonomy deferred
+
 These are v0.1 clarifications. They are **not** Protocol v0.2.
 
 ---
