@@ -14,6 +14,8 @@
  * Run:  pnpm check:review
  */
 
+import { readFileSync } from 'node:fs'
+
 import { createXRayGraph, type XRayGraph, type XRayGraphInput } from './selectors'
 import { validateXRayGraph } from './validation'
 import {
@@ -24,6 +26,7 @@ import {
   latestRoundIsClear,
   reviewXRayGraph,
   roundsConcernDistinctGraphs,
+  CHECK_ROUTING,
   DETERMINISTIC_CHECKS,
   PORT_DEPENDENT_CHECKS,
   type ReviewResult,
@@ -514,6 +517,68 @@ check('review is reproducible for identical input', () => {
   const a = reviewXRayGraph(canonical, { reviewedAt: AT })
   const b = reviewXRayGraph(canonical, { reviewedAt: AT })
   return JSON.stringify(a) === JSON.stringify(b) ? null : 'two runs over one graph differ'
+})
+
+// ---------------------------------------------------------------------------
+/**
+ * 6b regression guard — every check that can accuse must say who fixes it.
+ *
+ * Only BLOCKING findings produce a `RevisionRequest`, so only checks that can
+ * raise one need a routing target. The four advisory-only deterministic checks
+ * are deliberately unrouted: an advisory concern is for a human to read, not a
+ * stage to re-run, and routing one would imply otherwise.
+ *
+ * Every model-assisted check needs routing regardless, because a model decides
+ * the severity at runtime — any of them may come back BLOCKING.
+ *
+ * The seam being connected in 6b (D21) is what made this matter. While no
+ * model-assisted check could raise a finding, all six were unrouted and it was
+ * invisible; a BLOCKING finding naming no stage counts toward the verdict and
+ * leaves a hole in the loop 6c exists to close.
+ */
+check('every check that can raise a BLOCKING finding has a routing target', () => {
+  const source = readFileSync(new URL('./review/deterministic.ts', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1')
+  const table = source.slice(
+    source.indexOf('export const DETERMINISTIC_CHECKS'),
+    source.indexOf('export const CHECK_ROUTING'),
+  )
+
+  const marks = [...table.matchAll(/checkId: '([^']+)'/g)]
+  const canBlock = marks.filter((m, i) => {
+    const end = i + 1 < marks.length ? marks[i + 1].index : table.length
+    return table.slice(m.index, end).includes("severity: 'BLOCKING'")
+  })
+
+  const unrouted = [
+    ...canBlock.map((m) => m[1]),
+    ...PORT_DEPENDENT_CHECKS.map((c) => c.checkId),
+  ].filter((id) => CHECK_ROUTING[id] === undefined)
+
+  if (unrouted.length) return `unrouted: ${unrouted.join(', ')}`
+  return canBlock.length >= 7 ? null : `only ${canBlock.length} blocking checks found; parse failed`
+})
+
+check('advisory-only checks are left unrouted on purpose', () => {
+  const advisoryOnly = [
+    'FM-002/RESOLVED_WITHOUT_RECONCILIATION',
+    'FM-003/IDENTICAL_MEASUREMENT_ACROSS_SOURCES',
+    'FM-004/THIN_SEARCH_BEHIND_GAP',
+    'FM-005/TEMPORAL_SCOPE_IN_MEASUREMENT',
+  ]
+  const known = advisoryOnly.filter((id) => DETERMINISTIC_CHECKS.some((c) => c.checkId === id))
+  if (known.length !== advisoryOnly.length) return 'the advisory check list is stale'
+  const routed = advisoryOnly.filter((id) => CHECK_ROUTING[id] !== undefined)
+  return routed.length
+    ? `${routed.join(', ')} acquired routing; an advisory concern is not a stage re-run`
+    : null
+})
+
+check('no routing target is a control gate', () => {
+  const gates = ['VALIDATE', 'REVIEW']
+  const bad = Object.entries(CHECK_ROUTING).filter(([, r]) => gates.includes(r.stage as string))
+  return bad.length ? `${bad.map(([k]) => k).join(', ')} route to a gate` : null
 })
 
 // ---------------------------------------------------------------------------

@@ -160,9 +160,9 @@ export function createIdentityAllocator(seed: IdentitySeed): IdentityAllocator {
  * record. Separating them means a stage cannot issue an id that collides
  * with a journal entry, and keeps the two prefixes readable as what they are.
  *
- * `SR-…` is a `StageRun`. `GR-…` is a `GateRun`. The prefixes are disjoint so
- * that a record id alone says whether the step could have changed canonical
- * state (#6 D15).
+ * `SR-…` is a `StageRun`. `GR-…` is a `GateRun`. `CR-…` is a `CapabilityRun`.
+ * The prefixes are disjoint so that a record id alone says whether the step
+ * could have changed canonical state (#6 D15), and whether it ran at all.
  */
 export function nextStageRunId(existing: Iterable<string>): StageRunId {
   return `SR-${ordinal(highestOrdinal(existing, 'SR-') + 1)}`
@@ -170,4 +170,8 @@ export function nextStageRunId(existing: Iterable<string>): StageRunId {
 
 export function nextGateRunId(existing: Iterable<string>): string {
   return `GR-${ordinal(highestOrdinal(existing, 'GR-') + 1)}`
+}
+
+export function nextCapabilityRunId(existing: Iterable<string>): string {
+  return `CR-${ordinal(highestOrdinal(existing, 'CR-') + 1)}`
 }

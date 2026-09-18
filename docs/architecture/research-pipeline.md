@@ -377,6 +377,16 @@ See [ADR-0004](../adr/0004-model-adapter-boundary.md). The invariants in
 > Retrieval is a separate boundary again: a search/research adapter returns
 > retrieved material and retrieval metadata and never mints Evidence — see
 > [ADR-0010](../adr/0010-research-retrieval-boundary.md).
+>
+> **Amended again 2026-09-18.** The method list above is also superseded.
+> `ResearchModel` has a method only where model judgment is genuinely required:
+> `INGEST` is retrieval, `PLAN` owns no canonical collection and has no
+> `ResearchPlan` to return, and `PROVENANCE` decides lineage the stage must
+> own. Seven operations remain — `decompose`, `classify`, `trace`,
+> `disconfirm`, `reconcile`, `grade`, `identifyGaps` — and each returns a
+> capability result, because a provider may report that it cannot run. See
+> [ADR-0004 Amendment 2](../adr/0004-model-adapter-boundary.md) and
+> [ADR-0010's payload amendment](../adr/0010-research-retrieval-boundary.md).
 
 ---
 

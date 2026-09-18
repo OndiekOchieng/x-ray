@@ -381,7 +381,10 @@ async function main(): Promise<void> {
     } catch {
       return null
     }
-    return j.entries[0].run.status === 'SUCCEEDED' ? null : 'an appended entry was rewritten'
+    const first = j.entries[0]
+    return first.kind === 'STAGE' && first.run.status === 'SUCCEEDED'
+      ? null
+      : 'an appended entry was rewritten'
   })
 
   check('the journal refuses an entry from another investigation', () => {

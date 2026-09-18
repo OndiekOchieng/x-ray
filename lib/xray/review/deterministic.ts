@@ -437,6 +437,37 @@ export const CHECK_ROUTING: Readonly<
     stage: 'PROVENANCE',
     action: 'Establish proposition-level provenance before grading at ESTABLISHED.',
   },
+
+  // Model-assisted checks (#4's port, connected in 6b under D21).
+  //
+  // Unrouted until now, and harmlessly so: no model-assisted check could raise
+  // a finding while the seam was open. Once it can, an unrouted BLOCKING
+  // finding would count toward the verdict and name no stage able to fix it,
+  // leaving a hole in exactly the loop 6c exists to close.
+  'XR-INV-002/CLAIM_ATOMICITY': {
+    stage: 'DECOMPOSE',
+    action: 'Split the claim into independently testable assertions.',
+  },
+  'XR-INV-003/CROSS_LAYER_INFERENCE': {
+    stage: 'GRADE',
+    action: "Re-grade against evidence at the claim's own epistemic layer.",
+  },
+  'XR-INV-005/SEMANTIC_COMPATIBILITY': {
+    stage: 'RECONCILE',
+    action: 'Establish whether the two measures are comparable before permitting contradiction.',
+  },
+  'XR-INV-007/REVERSIBILITY_ADEQUACY': {
+    stage: 'GRADE',
+    action: 'State overturn conditions that would actually overturn the finding.',
+  },
+  'FM-001/SILENT_CONVERSION_IN_RATIONALE': {
+    stage: 'GRADE',
+    action: 'Restate the rationale without converting between measures.',
+  },
+  'FM-005/TENSE_MODALITY_DRIFT': {
+    stage: 'DECOMPOSE',
+    action: 'Restate the claim in the modality of its source passage.',
+  },
 }
 
 export { sourceById, evidenceForClaim, gapsForClaim }

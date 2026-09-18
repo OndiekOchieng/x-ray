@@ -37,6 +37,7 @@ import type {
   StageRun,
   StageRunStatus,
 } from '@/lib/xray/domain'
+import type { CapabilityUnavailable } from '@/lib/xray/capability'
 
 /**
  * A `StageRun` the pipeline produced.
@@ -97,9 +98,36 @@ export interface GateRun {
   error?: string
 }
 
+/**
+ * One capability that could not be exercised during the run.
+ *
+ * A third record shape, for the same reason there are two already: this is
+ * neither work that changed canonical state nor a verdict on it. It is a
+ * disclosure that something the run wanted was not available (#6 D19).
+ *
+ * NOTE the absent fields, again: no artifact revision transition, because
+ * nothing was produced, and no `error`, because nothing broke. A capability
+ * gap recorded as a failure would accuse the graph of a defect it has not been
+ * shown to have — the distinction #5 built `BLOCKED` around.
+ *
+ * 6c reads these and converts them into graduation blockers. 6b only records
+ * them; it computes no verdict.
+ */
+export interface CapabilityRun {
+  id: string
+  investigationId: InvestigationId
+  /** The stage that wanted the capability. */
+  stage: ResearchStage
+  /** The in-run artifact revision current when the gap was observed. */
+  observedArtifactVersion: number
+  unavailable: CapabilityUnavailable
+  observedAt?: IsoDateTime
+}
+
 export type JournalEntry =
   | { readonly kind: 'STAGE'; readonly sequence: number; readonly run: ResearchStageRun }
   | { readonly kind: 'GATE'; readonly sequence: number; readonly run: GateRun }
+  | { readonly kind: 'CAPABILITY'; readonly sequence: number; readonly run: CapabilityRun }
 
 export class JournalError extends Error {
   constructor(message: string) {
@@ -139,6 +167,10 @@ export class RunJournal {
     return this.append({ kind: 'GATE', sequence: this.log.length, run: Object.freeze(run) })
   }
 
+  appendCapability(run: CapabilityRun): JournalEntry {
+    return this.append({ kind: 'CAPABILITY', sequence: this.log.length, run: Object.freeze(run) })
+  }
+
   private append(entry: JournalEntry): JournalEntry {
     if (entry.run.investigationId !== this.investigationId) {
       throw new JournalError(
@@ -160,6 +192,11 @@ export class RunJournal {
 
   gateEntries(): readonly GateRun[] {
     return this.log.filter((e) => e.kind === 'GATE').map((e) => e.run)
+  }
+
+  /** Capability gaps observed during the run. 6c turns these into blockers. */
+  capabilityEntries(): readonly CapabilityRun[] {
+    return this.log.filter((e) => e.kind === 'CAPABILITY').map((e) => e.run)
   }
 
   /** Every run id used, so identity allocation does not reissue one. */

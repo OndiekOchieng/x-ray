@@ -9,15 +9,21 @@
  * computable from graph structure.
  *
  * Rather than fake them with keyword matching (brittle, and confidently wrong
- * in exactly the cases that matter), #4 defines the seam and reports those
- * checks as NOT_EVALUATED. Provider wiring is #6 under ADR-0004: protocol
- * stays provider-independent, and provider logic lives behind the adapter.
+ * in exactly the cases that matter), #4 defined the seam and reported those
+ * checks as NOT_EVALUATED.
  *
- * When an implementation arrives, no Reviewer check changes — only the
- * capability report does.
+ * 6b CONNECTS THE SEAM (#6 D21). `reviewXRayGraph` now actually asks a
+ * supplied model, and a check reports `EVALUATED` when it gets an answer. No
+ * check changed; only whether it can run does — which is what #4 promised.
+ *
+ * Still no provider implementation: 6b ships the wire, not the thing on the
+ * other end of it. And capability absence stays explicit. A model that refuses
+ * a query returns `UNAVAILABLE`, the check stays NOT_EVALUATED with a reason,
+ * and nothing is reported as a pass that was never run.
  */
 
 import type { Claim, Evidence, Finding } from '@/lib/xray/domain'
+import type { CapabilityResult } from '@/lib/xray/capability'
 import type { CalibrationCaseId, FailureModeId, ReviewSeverity, ReviewTarget } from './types'
 
 /** What the port returns for one judgment. */
@@ -78,7 +84,25 @@ export type ReviewerModelQuery =
  */
 export interface ReviewerModel {
   readonly name: string
-  judge(query: ReviewerModelQuery): Promise<ModelJudgment>
+
+  /**
+   * Query kinds this model claims to answer.
+   *
+   * Advisory and per operation, never one coarse capability flag: a model may
+   * answer atomicity and refuse semantic compatibility, or answer both until
+   * its quota runs out. Callers must still handle `UNAVAILABLE` at runtime.
+   */
+  readonly capabilities?: readonly ReviewerModelQuery['kind'][]
+
+  /**
+   * Answer one typed judgment, or say it cannot.
+   *
+   * Returns `CapabilityResult` rather than throwing on refusal, because a
+   * refusal is not an error: it leaves the check unevaluated, which is a
+   * disclosure, not a defect (#6 D19). A model that genuinely breaks — a
+   * transport failure, a malformed response — should still throw.
+   */
+  judge(query: ReviewerModelQuery): Promise<CapabilityResult<ModelJudgment>>
 }
 
 /** Metadata for a check that needs the port. */

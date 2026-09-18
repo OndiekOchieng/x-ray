@@ -30,7 +30,14 @@
 import type { XRayGraph } from '@/lib/xray/selectors'
 import { validateXRayGraph, type ValidationResult } from '@/lib/xray/validation'
 import { CHECK_ROUTING, DETERMINISTIC_CHECKS } from './deterministic'
-import { PORT_DEPENDENT_CHECKS, type ReviewerModel } from './port'
+import { PORT_DEPENDENT_CHECKS, type ModelJudgment, type ReviewerModel } from './port'
+import { isAvailable, type CapabilityResult } from '@/lib/xray/capability'
+import {
+  collectModelJudgments,
+  judgmentKey,
+  judgmentRequests,
+  type ModelJudgmentSet,
+} from './judgments'
 import type { ReviewCheckReport, ReviewFinding, ReviewResult, RevisionRequest } from './types'
 
 export type {
@@ -57,6 +64,13 @@ export type {
   ReviewerModelQuery,
 } from './port'
 export { PORT_DEPENDENT_CHECKS } from './port'
+export {
+  anyAvailable,
+  collectModelJudgments,
+  judgmentKey,
+  judgmentRequests,
+} from './judgments'
+export type { JudgmentKey, JudgmentRequest, ModelJudgmentSet } from './judgments'
 export { DETERMINISTIC_CHECKS, CHECK_ROUTING } from './deterministic'
 export {
   appendReviewRound,
@@ -73,10 +87,25 @@ export interface ReviewOptions {
    */
   validation?: ValidationResult
   /**
-   * Model port. Unimplemented in #4 — when absent, model-assisted checks are
-   * reported NOT_EVALUATED rather than skipped silently.
+   * Model port.
+   *
+   * Supplying it here alone does not make model-assisted checks run: this
+   * function is synchronous and asking a model is not. Pass `judgments`, or
+   * use `reviewXRayGraphWithModel`, which collects them first.
+   *
+   * Kept because the capability report distinguishes "no model configured"
+   * from "a model is configured but produced nothing for this graph".
    */
   model?: ReviewerModel
+
+  /**
+   * Pre-collected model answers, from `collectModelJudgments` (#6 D21).
+   *
+   * Passed as data so review stays a pure function of a graph and a set of
+   * judgments. That is what lets a review be reproduced from a record rather
+   * than only by asking a model again.
+   */
+  judgments?: ModelJudgmentSet
   /** Review timestamp as an ISO string. Injected so reviews are reproducible. */
   reviewedAt?: string
 }
@@ -182,18 +211,81 @@ export function reviewXRayGraph(graph: XRayGraph, options: ReviewOptions = {}): 
   }
 
   // Model-assisted checks. NOT_EVALUATED is never collapsed into a pass (D4).
+  const judgments = options.judgments
+  const subjects = judgments === undefined ? [] : judgmentRequests(graph)
+
   for (const portCheck of PORT_DEPENDENT_CHECKS) {
+    const forCheck = subjects.filter((s) => s.checkId === portCheck.checkId)
+    const answers = forCheck.map((s) => ({
+      subject: s,
+      result: judgments?.get(judgmentKey(s.checkId, s.subjectId)),
+    }))
+    const answered = answers.filter((a) => a.result !== undefined && isAvailable(a.result))
+
+    // A check with nothing to judge has been evaluated: the graph raised no
+    // subject for it. That is different from a check that could not run, and
+    // reporting it as unevaluated would leave a permanent capability gap on
+    // graphs that simply have no findings yet.
+    const ranToCompletion = judgments !== undefined && answered.length === forCheck.length
+
+    if (!ranToCompletion) {
+      const refusal = answers.find((a) => a.result !== undefined && !isAvailable(a.result))?.result
+      checks.push({
+        checkId: portCheck.checkId,
+        title: portCheck.title,
+        failureMode: portCheck.failureMode,
+        calibrationCases: portCheck.calibrationCases,
+        capability: 'MODEL_ASSISTED',
+        outcome: 'NOT_EVALUATED',
+        notEvaluatedReason: notEvaluatedReason(portCheck, options.model, refusal),
+        findingCount: 0,
+      })
+      continue
+    }
+
+    let raised = 0
+    for (const { subject, result } of answered) {
+      const judgment = (result as { kind: 'AVAILABLE'; value: ModelJudgment }).value
+      if (!judgment.flagged) continue
+
+      raised += 1
+      findingSeq += 1
+      const finding: ReviewFinding = {
+        id: `RF-${String(findingSeq).padStart(3, '0')}`,
+        checkId: portCheck.checkId,
+        failureMode: portCheck.failureMode,
+        calibrationCases: portCheck.calibrationCases,
+        severity: judgment.severity,
+        targets: judgment.targets,
+        rationale: judgment.rationale,
+        requiredAction: judgment.requiredAction,
+      }
+      findings.push(finding)
+      void subject
+
+      if (finding.severity === 'BLOCKING') {
+        const routing = CHECK_ROUTING[portCheck.checkId]
+        if (routing) {
+          revisionSeq += 1
+          revisionRequests.push({
+            id: `RR-${String(revisionSeq).padStart(3, '0')}`,
+            findingId: finding.id,
+            stage: routing.stage,
+            action: routing.action,
+            targets: finding.targets,
+          })
+        }
+      }
+    }
+
     checks.push({
       checkId: portCheck.checkId,
       title: portCheck.title,
       failureMode: portCheck.failureMode,
       calibrationCases: portCheck.calibrationCases,
       capability: 'MODEL_ASSISTED',
-      outcome: 'NOT_EVALUATED',
-      notEvaluatedReason: options.model
-        ? `Model "${options.model.name}" was supplied, but no provider execution is wired in this build. ${portCheck.reason}`
-        : `No model port implementation is wired; deferred to #6 under ADR-0004. ${portCheck.reason}`,
-      findingCount: 0,
+      outcome: 'EVALUATED',
+      findingCount: raised,
     })
   }
 
@@ -242,4 +334,48 @@ export function formatReviewReport(result: ReviewResult): string {
     }.`,
   )
   return lines.join('\n')
+}
+
+
+/**
+ * Why a model-assisted check did not run.
+ *
+ * Three distinguishable situations, because the remedies differ: configure a
+ * model, configure one that answers this query kind, or collect the judgments
+ * before reviewing.
+ */
+function notEvaluatedReason(
+  portCheck: (typeof PORT_DEPENDENT_CHECKS)[number],
+  model: ReviewerModel | undefined,
+  refusal: CapabilityResult<ModelJudgment> | undefined,
+): string {
+  if (refusal !== undefined && refusal.kind === 'CAPABILITY_UNAVAILABLE') {
+    return `${refusal.detail} ${refusal.resolvedBy} ${portCheck.reason}`
+  }
+  if (model !== undefined) {
+    return `Model "${model.name}" was supplied but its judgments were not collected for this review; call reviewXRayGraphWithModel or pass \`judgments\`. ${portCheck.reason}`
+  }
+  return `No reviewer model is configured. ${portCheck.reason}`
+}
+
+/**
+ * Review, asking a model the questions the graph raises (#6 D21).
+ *
+ * The asynchronous entry point. Collects judgments, then delegates to the
+ * synchronous core, so every existing caller of `reviewXRayGraph` keeps its
+ * behaviour and its verdict.
+ *
+ * NOTE what this does not change: a run with no model still reports its
+ * model-assisted checks NOT_EVALUATED and still graduates to BLOCKED. A stub
+ * model proves the seam works; it does not make the benchmark assured (D21).
+ */
+export async function reviewXRayGraphWithModel(
+  graph: XRayGraph,
+  options: ReviewOptions & { model: ReviewerModel },
+): Promise<ReviewResult> {
+  const validation = options.validation ?? validateXRayGraph(graph)
+  if (!validation.valid) return reviewXRayGraph(graph, { ...options, validation })
+
+  const judgments = await collectModelJudgments(graph, options.model)
+  return reviewXRayGraph(graph, { ...options, validation, judgments })
 }

@@ -110,28 +110,81 @@ collection, were both rejected.
 
 ## 6b — Adapter boundaries
 
-**Delivers** the two adapter interfaces and the proposal types. **No provider
-implementation** — the same discipline as `ReviewerModel` in #4.
+**Status: delivered.** `lib/xray/capability.ts`, four modules under
+`lib/xray/pipeline/`, the reviewer seam in `lib/xray/review/`, and 45 checks in
+`pnpm check:adapters`. **No provider implementation** — the same discipline as
+`ReviewerModel` in #4.
 
-- `ResearchModel` returning proposals: id-free, unvalidated, carrying no field
-  the validator constrains as an epistemic judgment (D1, D2).
+- `ResearchModel` returning proposals. Seven operations, not one per stage:
+  `INGEST` is retrieval, `PLAN` owns no canonical collection, and `PROVENANCE`
+  decides lineage the stage must own (D17).
 - `ResearchAdapter` returning retrieved material plus retrieval metadata
   sufficient for a stage to decide `accessibility`, `evidenceClass` and
-  `originStatus` (D7).
+  `originStatus` (D7, D18).
 - Proposal types live in the pipeline layer. `lib/xray/domain/` stays canonical
   and type-only.
-- Capability reporting when an adapter is absent, matching #4's
-  `NOT_EVALUATED` treatment: absent capability is disclosed, never silently
-  treated as success.
+- **Proposals carry judgment, not identity (D16).** A proposal may carry a
+  proposed grade, layer or classification — grading is judgment and no stage
+  can derive it. It carries no canonical id, no canonical cross-reference, and
+  no field ADR-0010 assigns to a stage. References go through stage-issued
+  handles (`ref:…`).
+- Capability is a value, not an exception (D19). `CapabilityResult` on every
+  adapter operation; per-operation discovery, with runtime `UNAVAILABLE` still
+  handled.
+- Deterministic proposal correlation (D20): identity follows normalized
+  proposal content and the stage input context, never provider ordering or a
+  provider-supplied key.
+- The `ReviewerModel` seam is connected (D21) without changing the default
+  assurance claim.
 
-**Checkpoint.** A stage can be written against both interfaces, compile, and
-report honestly that it cannot run.
+**Checkpoint.** Met. Stages are written against both interfaces in the harness,
+compile, and report honestly that they cannot run.
 
-**Rollback.** Additive. Types only.
+**Verification gate.** Met. `pnpm check:adapters` asserts no provider SDK,
+network call, environment read or prompt string anywhere under
+`lib/xray/pipeline/`, and that no proposal type carries a canonical id or
+cross-reference. Full suite green (330 checks, `tsc --noEmit` clean), and
+`pnpm graduate` still reports `BLOCKED` with six capability blockers.
 
-**Verification gate.** No provider SDK, no `fetch`, no prompt string anywhere
-under `lib/xray/pipeline/`. A check asserts a proposal type carries no
-canonical id field and no `Finding`-grade field.
+**Rollback.** Additive, plus three narrow edits noted below.
+
+### Corrected: the proposal rule this plan previously stated
+
+An earlier version of this section said proposal types must carry "no field the
+validator constrains as an epistemic judgment", and set a gate asserting no
+`Finding`-grade field. That was too strong. ADR-0004's own Context records two
+benchmark runs producing materially different grades for the same claim —
+grading is judgment, and a proposal that may not carry one leaves grading with
+no author. D16 corrects it; ADR-0004 Amendment 2 records the correction.
+
+### What 6b changed outside the new modules
+
+**1. `ReviewerModel.judge` returns `CapabilityResult<ModelJudgment>`.** A
+refusal is not an exception. A model that breaks still throws; a model that
+declines leaves the check `NOT_EVALUATED` with a reason.
+
+**2. `reviewXRayGraph` evaluates model-assisted checks when judgments are
+supplied.** The synchronous core stays pure: `collectModelJudgments` does the
+asking, `reviewXRayGraphWithModel` composes the two. Every existing caller
+keeps its behaviour, so the benchmark still graduates to `BLOCKED` — a stub
+model proves the seam, it does not make an investigation assured (D21).
+
+**3. The six port-dependent checks gained routing targets.** Found by the 6b
+harness: while no model-assisted check could raise a finding, all six were
+unrouted and harmlessly so. Once the seam is connected, a BLOCKING model
+finding would count toward the verdict and name no stage able to fix it. A
+regression guard in `check:review` now asserts that every check capable of a
+BLOCKING finding is routed — and that the four advisory-only checks stay
+unrouted, because an advisory concern is for a reader, not a stage re-run.
+
+### Recorded, not worked around
+
+A check the graph raises no subject for completes vacuously rather than
+reporting a capability gap. `XR-INV-005/SEMANTIC_COMPATIBILITY` inspects
+contradicting evidence, and XRAY-KE-001 contains none. Reporting that as
+`NOT_EVALUATED` would create a capability gap no model could ever close. With
+no model configured at all, every port-dependent check still reports
+`NOT_EVALUATED`, so the default assurance claim is unchanged.
 
 ---
 

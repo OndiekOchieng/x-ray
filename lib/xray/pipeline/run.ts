@@ -52,10 +52,25 @@ import {
   type ReviewResult,
 } from '@/lib/xray/review'
 
+import { AdapterFailure, type CapabilityUnavailable } from '@/lib/xray/capability'
+
 import { GraphAccumulator, PipelineContractError } from './accumulator'
-import { createIdentityAllocator, nextGateRunId, nextStageRunId, seedFrom } from './identity'
-import { RunJournal, type GateOutcome, type GateResultRef, type GateRun } from './journal'
-import { RESEARCH_STAGES, type StageContext, type StageDefinition } from './stages'
+import { CorrelationLedger } from './correlation'
+import {
+  createIdentityAllocator,
+  nextCapabilityRunId,
+  nextGateRunId,
+  nextStageRunId,
+  seedFrom,
+} from './identity'
+import { RunJournal, type GateOutcome, type GateRun } from './journal'
+import {
+  RESEARCH_STAGES,
+  isCapabilityOutcome,
+  type StageAdapters,
+  type StageContext,
+  type StageDefinition,
+} from './stages'
 
 export interface RunOptions {
   investigation: Investigation
@@ -69,16 +84,34 @@ export interface RunOptions {
    * Resume state from an interrupted run. Stages already `SUCCEEDED` in this
    * journal are skipped, and their artifacts must be supplied via `seed`.
    */
-  resume?: { journal: RunJournal; accumulator: GraphAccumulator }
+  resume?: { journal: RunJournal; accumulator: GraphAccumulator; ledger?: CorrelationLedger }
   /** In-run artifact revision to start from. Not an `InvestigationVersion`. */
   startArtifactVersion?: number
   /** Injected so a run is reproducible. Defaults to a fixed epoch, not now(). */
   clock?: () => IsoDateTime
+
+  /**
+   * Adapters available to stages. Both optional.
+   *
+   * A run with neither is legal and completes: every stage that needs one
+   * reports the gap, the run records it, and graduation later reports
+   * `BLOCKED` rather than accusing the graph of a defect (#6 D19).
+   */
+  adapters?: StageAdapters
 }
 
 export type RunStatus =
   /** Every scheduled stage succeeded and both gates ran. */
   | 'COMPLETED'
+  /**
+   * One or more stages could not run for want of a capability.
+   *
+   * Not a failure. No stage broke and nothing is known to be wrong with the
+   * graph; work was simply not done. The gates still run, so the state that
+   * *was* produced is still checked, and 6c converts the recorded gaps into
+   * graduation blockers (D19).
+   */
+  | 'CAPABILITY_BLOCKED'
   /** A stage exhausted its attempts. Downstream stages did not run. */
   | 'STAGE_FAILED'
   /** Stages completed; a gate refused to let the run proceed. */
@@ -95,6 +128,10 @@ export interface PipelineRunResult {
   artifactVersion: number
   /** Stage that exhausted its attempts, when `status` is `STAGE_FAILED`. */
   failedStage?: ResearchStage
+  /** Capability gaps observed. Empty unless a stage reported one. */
+  capabilityGaps: readonly CapabilityUnavailable[]
+  /** Key-to-id bindings, so a resumed run correlates against the same state. */
+  ledger: CorrelationLedger
   /** FULL validation at the `VALIDATE` gate. Absent if stages did not finish. */
   validation?: ValidationResult
   /** Review at the `REVIEW` gate. Absent if the gate was skipped. */
@@ -117,9 +154,12 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
 
   const byStage = new Map(options.stages.map((s) => [s.stage, s]))
   const alreadyDone = new Set(journal.succeededStages())
+  const adapters: StageAdapters = options.adapters ?? {}
+  const ledger = options.resume?.ledger ?? new CorrelationLedger()
 
   let artifactVersion = options.startArtifactVersion ?? 0
   let failedStage: ResearchStage | undefined
+  const capabilityGaps: CapabilityUnavailable[] = []
 
   // -------------------------------------------------------------------------
   // Research stages
@@ -131,8 +171,9 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
     if (alreadyDone.has(stage)) continue
 
     let succeeded = false
+    let unavailable = false
 
-    for (let attempt = 1; attempt <= maxAttempts && !succeeded; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAttempts && !succeeded && !unavailable; attempt += 1) {
       const restorePoint = accumulator.checkpoint()
       const runId = nextStageRunId(runIdPool(investigation, journal))
       const startedAt = clock()
@@ -144,9 +185,45 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
           ids: allocator(accumulator),
           inputArtifactVersion: artifactVersion,
           attempt,
+          adapters,
+          correlation: { investigationId, stage, inputArtifactVersion: artifactVersion },
+          ledger,
         }
 
-        accumulator.merge(stage, await definition.run(ctx))
+        const outcome = await definition.run(ctx)
+
+        // A capability gap is not an attempt that went wrong, so it is not
+        // retried: asking an unconfigured adapter a second time gets the same
+        // answer and a longer journal (D19).
+        if (isCapabilityOutcome(outcome)) {
+          accumulator.restore(restorePoint)
+          capabilityGaps.push(outcome)
+
+          journal.appendCapability({
+            id: nextCapabilityRunId(runIdPool(investigation, journal)),
+            investigationId,
+            stage,
+            observedArtifactVersion: artifactVersion,
+            unavailable: outcome,
+            observedAt: clock(),
+          })
+
+          // PENDING, not FAILED: scheduled, never executed, nothing broken.
+          journal.appendStage({
+            id: runId,
+            investigationId,
+            stage,
+            status: 'PENDING',
+            inputArtifactVersion: artifactVersion,
+            startedAt,
+            completedAt: clock(),
+          })
+
+          unavailable = true
+          continue
+        }
+
+        accumulator.merge(stage, outcome)
 
         // D9 — the stage owns the legality of what it produced.
         const staged = validateXRayGraph(accumulator.rebuild(), { mode: 'STAGED' })
@@ -178,6 +255,12 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
         // same identities the failed attempt did.
         accumulator.restore(restorePoint)
 
+        // A permanent adapter failure is not retried. Re-sending a request the
+        // provider has already refused produces the same refusal.
+        if (err instanceof AdapterFailure && err.disposition === 'PERMANENT') {
+          attempt = maxAttempts
+        }
+
         journal.appendStage({
           id: runId,
           investigationId,
@@ -191,6 +274,11 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
         })
       }
     }
+
+    // A stage that could not run blocks nothing downstream: later stages may
+    // still have everything they need, and those that do not will report their
+    // own gap. Stopping here would hide capability gaps behind the first one.
+    if (unavailable) continue
 
     if (!succeeded) {
       failedStage = stage
@@ -207,6 +295,8 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
       graph: accumulator.rebuild(),
       artifactVersion,
       failedStage,
+      capabilityGaps,
+      ledger,
     }
   }
 
@@ -256,6 +346,8 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
       graph,
       artifactVersion,
       validation,
+      capabilityGaps,
+      ledger,
     }
   }
 
@@ -278,7 +370,10 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
 
   return {
     investigationId,
-    status: 'COMPLETED',
+    // A run that could not do some of its work did not complete, even though
+    // nothing failed. Saying COMPLETED here would be the exact conflation
+    // BLOCKED exists to prevent.
+    status: capabilityGaps.length > 0 ? 'CAPABILITY_BLOCKED' : 'COMPLETED',
     journal,
     accumulator,
     graph,
@@ -286,6 +381,8 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
     validation,
     review,
     reviewHistory,
+    capabilityGaps,
+    ledger,
   }
 }
 

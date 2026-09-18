@@ -23,7 +23,11 @@
 
 import type { InvestigationId, ResearchStage } from '@/lib/xray/domain'
 import type { XRayGraph, XRayGraphInput } from '@/lib/xray/selectors'
+import type { CapabilityUnavailable } from '@/lib/xray/capability'
 import type { IdentityAllocator } from './identity'
+import type { CorrelationContext, CorrelationLedger } from './correlation'
+import type { ResearchModel } from './model-port'
+import type { ResearchAdapter } from './retrieval-port'
 
 /**
  * Execution order. Protocol v0.1 stages 1–9, with the architecture's
@@ -173,18 +177,57 @@ export interface StageContext {
 
   /** 1 for the first attempt. Present so a stage can vary strategy on retry. */
   readonly attempt: number
+
+  /**
+   * The adapters configured for this run, if any.
+   *
+   * Optional on purpose. A stage written against these must handle their
+   * absence by returning `CapabilityUnavailable`, not by throwing and not by
+   * quietly producing nothing — a stage that silently produces nothing is
+   * indistinguishable from one that found nothing (#6 D19).
+   */
+  readonly adapters: StageAdapters
+
+  /** Scope for deterministic proposal correlation (D20). */
+  readonly correlation: CorrelationContext
+
+  /**
+   * Key-to-id bindings for this run.
+   *
+   * Shared across attempts so a proposal that comes back unchanged after a
+   * retry is bound to the identifier it already had.
+   */
+  readonly ledger: CorrelationLedger
 }
+
+/** Adapters a stage may use. Either may be absent. */
+export interface StageAdapters {
+  readonly model?: ResearchModel
+  readonly research?: ResearchAdapter
+}
+
+/**
+ * What a stage returns.
+ *
+ * Either a contribution, or an explicit statement that a capability it needed
+ * was not available. The second is not an error: the run continues, the gap is
+ * journalled, and 6c turns it into a graduation blocker rather than a defect.
+ */
+export type StageOutcome = StageContribution | CapabilityUnavailable
+
+export const isCapabilityOutcome = (outcome: StageOutcome): outcome is CapabilityUnavailable =>
+  (outcome as CapabilityUnavailable).kind === 'CAPABILITY_UNAVAILABLE'
 
 /**
  * An executable stage.
  *
- * `run` may be async because 6b will put a provider call behind it. 6a ships
- * no implementation of this interface outside the check harness — defining
- * the contract is the deliverable.
+ * `run` is async because a provider call sits behind it. Neither 6a nor 6b
+ * ships an implementation outside the check harnesses — defining the contract
+ * is the deliverable.
  */
 export interface StageDefinition {
   readonly stage: ResearchStage
-  run(ctx: StageContext): StageContribution | Promise<StageContribution>
+  run(ctx: StageContext): StageOutcome | Promise<StageOutcome>
 }
 
 // ---------------------------------------------------------------------------

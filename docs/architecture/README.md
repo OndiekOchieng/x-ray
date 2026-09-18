@@ -82,6 +82,14 @@ Pipeline slice 6a (2026-09-18) resolved the stage-vocabulary conflict:
 18. [research-pipeline §16](./research-pipeline.md) — `GRADE` precedes `GAPS`,
     so the `Finding.gapIds` back-reference is written by `GAPS`
 
+Pipeline slice 6b (2026-09-18) specified the two adapter boundaries:
+
+19. [ADR-0004 amendment 2](../adr/0004-model-adapter-boundary.md) — a proposal
+    may carry judgment but never identity; methods exist where judgment is
+    required, not one per stage
+20. [ADR-0010 amendment](../adr/0010-research-retrieval-boundary.md) — bounded
+    content crosses the retrieval boundary, in memory only; retention is #7
+
 These are v0.1 clarifications. They are **not** Protocol v0.2.
 
 ---

@@ -2,6 +2,7 @@
 
 **ADR:** 0010
 **Status:** Accepted
+**Amended:** 2026-09-18 (see *Amendment* below)
 **Date:** 2026-09-18
 **Source:** Pipeline pre-implementation investigation (#6, decision D7)
 **Supersedes:** —
@@ -83,3 +84,53 @@ artifacts.
 - `#6` defines this interface and ships no implementation of it. Provider wiring
   is out of scope for the slice that defines the boundary, exactly as with
   `ReviewerModel` in #4.
+
+
+---
+
+## Amendment — 2026-09-18 · what the retrieved payload contains, and how long it lives
+
+**Status:** Accepted. Specifies the payload; the decision above is unchanged.
+**Source:** Human decision D18, recorded on #6.
+
+The decision above says the adapter returns "retrieved document/source
+material" without saying what that means concretely. Implementing 6b required
+it, and the answer has consequences for #7 and for republication exposure, so
+it is recorded here rather than left in code comments.
+
+### What crosses
+
+A provider-neutral retrieved-document payload:
+
+- the source locator or canonical URL, where one exists;
+- the retrieval outcome — the same five states as `SourceAccessibility`, which
+  already enumerates exactly the outcomes this ADR requires and already forbids
+  a `DOES_NOT_EXIST` member;
+- a retrieval timestamp and observed document metadata;
+- **bounded** inspected content: a normalized extract sufficient for `TRACE`,
+  not an entire document, and flagged when it was clamped;
+- a content digest, computed outside provider-controlled canonical identity;
+- provider diagnostics as explicitly non-canonical execution data.
+
+### What does not
+
+Raw provider response envelopes, SDK objects, prompts and transport metadata.
+None of it may reach canonical state.
+
+### Lifetime
+
+For #6, retrieved content is **in-memory execution material only**. 6b invents
+no durable storage and no retention period; persistence and retention policy
+are #7. Recording the boundary now keeps #7's question about artifacts rather
+than about a document store.
+
+### Why bounded, and why the stage hashes
+
+The stage needs enough passage to decide whether something may be quoted and to
+anchor `locationInSource` — not the whole record. `truncated` is not cosmetic:
+a stage quoting from a partial extract must know it was reading part of a
+record, because that is the difference between `RETRIEVED` and `PARTIAL`.
+
+A provider-supplied digest is advisory. The stage may recompute it from the
+extract it actually received, and that value is authoritative where both exist:
+a digest is worth something only to whoever computed it.
