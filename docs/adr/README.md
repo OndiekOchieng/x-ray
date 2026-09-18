@@ -4,8 +4,10 @@ Nine decisions define X-Ray's architecture. Each was made in
 `X-Ray System Architecture v0.1` §37 and is recorded here in full form
 (Status / Context / Decision / Consequences).
 
-No decision here is new. Context and Consequences are derived from material
-already present in System Architecture v0.1; where scaffold reconciliation
+ADR-0001 through ADR-0009 restate decisions already present in System
+Architecture v0.1 §37. ADR-0010 onward record decisions made after it.
+Context and Consequences for the first nine are derived from material already
+present in v0.1; where scaffold reconciliation
 (2026-09-15) clarified a decision's consequences, that is marked inline as a
 **v0.1 clarification**.
 
@@ -20,6 +22,7 @@ already present in System Architecture v0.1; where scaffold reconciliation
 | [0007](./0007-gap-first-class-state.md) | Gap Is First-Class Product State | Missing evidence is persisted, displayed, and actionable. |
 | [0008](./0008-ati-resolution-adapter.md) | ATI Is a Resolution Adapter | Only `PUBLIC_RECORD_REQUEST` gaps produce an ATI draft. |
 | [0009](./0009-benchmark-runs-as-acceptance-evidence.md) | Benchmark Runs Are Acceptance Evidence | Raw runs are frozen; tests target epistemic behaviour, not prose. |
+| [0010](./0010-research-retrieval-boundary.md) | Retrieval Is a Separate Boundary From Extraction | A search provider returns material and retrieval metadata; stages mint Evidence. |
 
 ## Numbering
 
@@ -29,7 +32,7 @@ recorded in each file's header.
 
 ## Adding an ADR
 
-Next number is `0010`. Use the same four sections, and state Status as
+Next number is `0011`. Use the same four sections, and state Status as
 `Proposed` until accepted. An ADR that replaces an earlier one sets
 `Supersedes:` and the superseded ADR is marked `Superseded by:` rather than
 deleted — the same preservation rule the system applies to its own findings

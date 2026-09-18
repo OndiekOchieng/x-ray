@@ -49,6 +49,27 @@ It is:
 
 Only then is the engine real.
 
+### Sequencing amendment — 2026-09-18
+
+The order above was written before the validator, Reviewer and graduation gate
+existed. Those were built first, out of order, and that turned out to be the
+right call: each one constrains what the pipeline is allowed to produce, and
+building them afterwards would have meant retrofitting.
+
+Two deliberate departures now stand:
+
+- **Step 2, Protocol v0.2, is not being authored.** Execution runs against
+  frozen Protocol v0.1, which is complete and stage-by-stage. Authoring v0.2 to
+  unblock the pipeline would be documentation written to satisfy a sequence
+  rather than a need. If executable work reveals protocol changes, they are
+  specified explicitly rather than by rewriting a frozen document (#6, D12).
+- **Steps 7–9 — pipeline interfaces, model adapter, research adapter — are
+  sequenced as [6a–6d](./pipeline-implementation-plan.md)** rather than as three
+  linear steps, because the adapter boundaries and the stage contracts have to
+  be settled together to be coherent.
+
+The dependency spine in issue #1 is the live sequencing authority.
+
 ### Where we are
 
 Steps 1–2 are in progress. The benchmark inputs and both raw runs are frozen

@@ -63,6 +63,18 @@ questions:
     `WAIT_FOR_RECORD`)
 12. Closed: `Claim.type` remains single-valued; multi-axis taxonomy deferred
 
+Pipeline pre-implementation (2026-09-18) amended two documents ahead of #6, and
+added one ADR:
+
+13. [ADR-0004 amendment](../adr/0004-model-adapter-boundary.md) — a model
+    adapter returns proposals; stages mint canonical artifacts
+14. [ADR-0010](../adr/0010-research-retrieval-boundary.md) — retrieval is a
+    separate boundary from extraction
+15. [research-pipeline §17](./research-pipeline.md#stage-contract) — artifact
+    revisions are in-run, not investigation versions; identity survives retry
+16. [research-pipeline §19](./research-pipeline.md#research-saturation) —
+    stopping is necessary but not sufficient for graduation
+
 These are v0.1 clarifications. They are **not** Protocol v0.2.
 
 ---
