@@ -34,6 +34,7 @@ import type {
   InvestigationId,
   IsoDateTime,
   ResearchStage,
+  ResearchStop,
   StageRun,
   StageRunStatus,
 } from '@/lib/xray/domain'
@@ -128,6 +129,25 @@ export type JournalEntry =
   | { readonly kind: 'STAGE'; readonly sequence: number; readonly run: ResearchStageRun }
   | { readonly kind: 'GATE'; readonly sequence: number; readonly run: GateRun }
   | { readonly kind: 'CAPABILITY'; readonly sequence: number; readonly run: CapabilityRun }
+  | { readonly kind: 'STOP'; readonly sequence: number; readonly run: StopTransition }
+  | { readonly kind: 'INVALIDATION'; readonly sequence: number; readonly run: InvalidationRun }
+
+export interface StopTransition {
+  id: string
+  investigationId: InvestigationId
+  action: 'STOPPED' | 'RESUMED'
+  stop?: ResearchStop
+  observedAt?: IsoDateTime
+}
+
+export interface InvalidationRun {
+  id: string
+  investigationId: InvestigationId
+  requestId: string
+  target: ResearchStage
+  staleStages: readonly ResearchStage[]
+  observedAt?: IsoDateTime
+}
 
 export class JournalError extends Error {
   constructor(message: string) {
@@ -171,6 +191,14 @@ export class RunJournal {
     return this.append({ kind: 'CAPABILITY', sequence: this.log.length, run: Object.freeze(run) })
   }
 
+  appendStop(run: StopTransition): JournalEntry {
+    return this.append({ kind: 'STOP', sequence: this.log.length, run: Object.freeze(run) })
+  }
+
+  appendInvalidation(run: InvalidationRun): JournalEntry {
+    return this.append({ kind: 'INVALIDATION', sequence: this.log.length, run: Object.freeze(run) })
+  }
+
   private append(entry: JournalEntry): JournalEntry {
     if (entry.run.investigationId !== this.investigationId) {
       throw new JournalError(
@@ -199,6 +227,34 @@ export class RunJournal {
     return this.log.filter((e) => e.kind === 'CAPABILITY').map((e) => e.run)
   }
 
+  activeCapabilityEntries(): readonly CapabilityRun[] {
+    const lastSuccess = new Map<ResearchStage, number>()
+    for (const entry of this.log) {
+      if (entry.kind === 'STAGE' && entry.run.status === 'SUCCEEDED') lastSuccess.set(entry.run.stage, entry.sequence)
+    }
+    return this.log
+      .filter((entry) => entry.kind === 'CAPABILITY' && entry.sequence > (lastSuccess.get(entry.run.stage) ?? -1))
+      .map((entry) => entry.run as CapabilityRun)
+  }
+
+  stopEntries(): readonly StopTransition[] {
+    return this.log.filter((e) => e.kind === 'STOP').map((e) => e.run)
+  }
+
+  invalidationEntries(): readonly InvalidationRun[] {
+    return this.log.filter((e) => e.kind === 'INVALIDATION').map((e) => e.run)
+  }
+
+  /** A successful rerun clears only its own stale marker. */
+  staleStages(): readonly ResearchStage[] {
+    const stale = new Set<ResearchStage>()
+    for (const entry of this.log) {
+      if (entry.kind === 'INVALIDATION') entry.run.staleStages.forEach((stage) => stale.add(stage))
+      if (entry.kind === 'STAGE' && entry.run.status === 'SUCCEEDED') stale.delete(entry.run.stage)
+    }
+    return [...stale]
+  }
+
   /** Every run id used, so identity allocation does not reissue one. */
   runIds(): readonly string[] {
     return [...this.ids]
@@ -206,9 +262,11 @@ export class RunJournal {
 
   /** Stages that reached `SUCCEEDED`. What a resume may skip. */
   succeededStages(): readonly ResearchStage[] {
+    const stale = new Set(this.staleStages())
     return this.stageEntries()
       .filter((r) => r.status === 'SUCCEEDED')
       .map((r) => r.stage)
+      .filter((stage) => !stale.has(stage))
   }
 
   /** How many times a stage has been attempted, successfully or not. */

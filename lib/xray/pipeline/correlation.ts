@@ -46,14 +46,7 @@ import type { ResearchStage } from '@/lib/xray/domain'
 export interface CorrelationContext {
   readonly investigationId: string
   readonly stage: ResearchStage
-  /**
-   * The in-run artifact revision the stage read.
-   *
-   * In the key because D20 scopes the guarantee to "the same input artifact
-   * revision". The same proposition proposed against different upstream state
-   * is a different proposal, and conflating them would let a stale retry
-   * silently claim a current artifact's identity.
-   */
+  /** Execution bookkeeping only; never part of semantic identity (D31). */
   readonly inputArtifactVersion: number
 }
 
@@ -124,7 +117,7 @@ export type CorrelationKey = `pk_${string}`
  * proposals require agreement on size as well as hash.
  */
 export function correlationKey(ctx: CorrelationContext, proposal: unknown): CorrelationKey {
-  const scope = `${ctx.investigationId}|${ctx.stage}|${ctx.inputArtifactVersion}`
+  const scope = `${ctx.investigationId}|${ctx.stage}`
   const body = JSON.stringify(normalize(proposal))
   return `pk_${hash(`${scope}|${body}`)}_${body.length.toString(36)}`
 }

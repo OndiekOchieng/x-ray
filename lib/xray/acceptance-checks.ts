@@ -122,6 +122,32 @@ check('canonical benchmark graduates to BLOCKED, not FAIL or REVISE', () => {
   return null
 })
 
+check('6c · absent stop blocks an otherwise publishable graph', () => {
+  const graph = mutated((g) => { g.investigation.researchStop = undefined })
+  const result = assess(graph, [])
+  return result.verdict === 'BLOCKED' && result.blockers.some((b) => b.ref === 'RESEARCH_STOP')
+    ? null : `${result.verdict}, stop blocker missing`
+})
+
+check('6c · budget and manual stops block without accusing the graph', () => {
+  for (const reason of ['TIME_BUDGET', 'COST_BUDGET', 'SOURCE_EXHAUSTION', 'MANUAL_STOP', 'ERROR']) {
+    const graph = mutated((g) => { g.investigation.researchStop.reason = reason })
+    const result = assess(graph, [])
+    if (result.verdict !== 'BLOCKED' || result.reasons.length) return `${reason}: ${result.verdict}`
+  }
+  return null
+})
+
+check('6c · run capability gaps use the blocker channel', () => {
+  const result = assessGraduation(canonical, {
+    behaviors: XRAY_KE_001_ACCEPTANCE, requiredReviewChecks: [], assessedAt: AT,
+    capabilityGaps: [{ kind: 'CAPABILITY_UNAVAILABLE', operation: 'research-model:grade',
+      reason: 'NOT_CONFIGURED', detail: 'No grader', resolvedBy: 'configure a grader' }],
+  })
+  return result.verdict === 'BLOCKED' && result.reasons.length === 0 &&
+    result.blockers.some((b) => b.ref === 'research-model:grade') ? null : 'capability was conflated with a graph reason'
+})
+
 check('BLOCKED carries no accusation against the graph', () => {
   // The decisive property: a capability gap produces blockers, never reasons.
   const result = assess(canonical)

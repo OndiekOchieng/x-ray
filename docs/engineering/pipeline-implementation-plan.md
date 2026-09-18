@@ -193,8 +193,9 @@ no model configured at all, every port-dependent check still reports
 **Delivers** research-stop assessment and the routing that closes the review
 loop.
 
-- `assessResearchStop(...)` evaluating §19's conditions and producing a named
-  `ResearchStop`. Always recorded — including for runs that end well (D4).
+- `assessResearchStop(...)` evaluating observable §19 conditions and producing
+  a named `ResearchStop` only when the reason is established (D22–D26). A
+  single pass cannot prove saturation. Capability absence stays separate.
 - Graduation integration: a recorded terminal stop becomes **necessary** for
   PASS; budget, exhaustion, manual and error stops become **blockers**, never
   `REVISE` or `FAIL` (D4).

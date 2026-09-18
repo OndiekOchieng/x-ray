@@ -377,10 +377,10 @@ async function main(): Promise<void> {
     return a !== b ? null : 'two different propositions correlate as one'
   })
 
-  check('D20 · a different input artifact revision produces a different key', () => {
+  check('D31 · a different artifact revision preserves semantic correlation', () => {
     const a = correlationKey(ctx, proposal('same'))
     const b = correlationKey({ ...ctx, inputArtifactVersion: 5 }, proposal('same'))
-    return a !== b ? null : 'a stale proposal could claim a current artifact identity'
+    return a === b ? null : 'execution revision changed semantic identity'
   })
 
   check('D20 · provider ordering does not determine canonical identity', () => {
