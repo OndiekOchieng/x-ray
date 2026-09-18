@@ -7,10 +7,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "check:fixtures": "tsc --noEmit && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/fixtures/xray-ke-001/integrity.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/query-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/validation-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/review-checks.ts",
+    "check:fixtures": "tsc --noEmit && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/fixtures/xray-ke-001/integrity.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/query-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/validation-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/review-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/acceptance-checks.ts",
     "check:query": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/query-checks.ts",
     "check:validation": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/validation-checks.ts",
-    "check:review": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/review-checks.ts"
+    "check:review": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/review-checks.ts",
+    "graduate": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/graduate.ts",
+    "check:acceptance": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/acceptance-checks.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
