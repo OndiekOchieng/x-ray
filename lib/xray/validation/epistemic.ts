@@ -610,7 +610,26 @@ export function validateEpistemics(
   // =========================================================================
   // XR-INV-008 — Gap Preservation
   // =========================================================================
-  for (const finding of graph.findings) {
+  /**
+   * An unresolved finding must expose the gap preventing resolution.
+   *
+   * STAGED EXEMPTION, AND ONLY WHILE NO GAP EXISTS. The architecture grades at
+   * stage 8 and identifies gaps at stage 9, so between those two stages an
+   * unresolved finding necessarily names no gap — the artifact it would name
+   * has not been produced. Enforcing the rule there would fail `GRADE` for
+   * doing its job in the specified order.
+   *
+   * This is the mirror of the exemption already made below for orphaned gaps,
+   * which anticipates the opposite ordering. Both say the same thing: a rule
+   * relating two collections cannot bind before both exist.
+   *
+   * The exemption lapses the moment a gap exists. Once `GAPS` has run, a
+   * finding still naming none is a real defect, is caught under STAGED, and is
+   * attributed to `GAPS` rather than surfacing later at the gate with no owner.
+   * `FULL` always enforces it, so graduation is unaffected.
+   */
+  const gapsProduced = graph.gaps.length > 0
+  for (const finding of mode === 'FULL' || gapsProduced ? graph.findings : []) {
     if (!UNSETTLED.includes(finding.status)) continue
     if (finding.gapIds.length > 0) continue
     out.push({

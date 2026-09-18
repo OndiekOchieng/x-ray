@@ -104,7 +104,7 @@ export const INVARIANT_COVERAGE: readonly InvariantCoverage[] = [
     enforced:
       'Every UNRESOLVED, INSUFFICIENT_EVIDENCE or CONTESTED finding names at least one gap. At graduation, every gap is also reachable from a finding on one of its claims.',
     notEnforced:
-      'Gap reachability is skipped in STAGED mode, where a gap may legitimately precede the finding that will reference it. Whether synthesis hides a gap downstream remains a projection concern.',
+      'Both directions are skipped in STAGED mode while the other collection is absent: a gap may legitimately precede the finding that will reference it, and between GRADE and GAPS an unresolved finding necessarily names no gap. Both bind under FULL, and the second binds under STAGED as soon as any gap exists. Whether synthesis hides a gap downstream remains a projection concern.',
   },
   {
     id: 'XR-INV-009',

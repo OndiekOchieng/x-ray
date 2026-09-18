@@ -28,17 +28,18 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * The thirteen pipeline stages.
+ * Steps that transform investigation state and may own canonical artifacts.
  *
- * Stages `INGEST` … `VALIDATE` (and `PERSIST`, which produces no artifact of
- * its own) generate canonical research state. `SYNTHESIZE` and `RESOLVE` are
- * downstream consumers and MUST NOT mutate what precedes them (XR-INV-011).
+ * These are the only steps that mint evidence-graph artifacts, and therefore
+ * the only ones that may claim an artifact revision transition. The pipeline
+ * writes exactly these; everything else inspects.
  *
- * This is the architectural pipeline, not the ten progress rows the v0 UI
- * happens to display. The UI list omits VALIDATE, SYNTHESIZE and RESOLVE; a
- * progress view is a projection of these runs, not the definition of them.
+ * `IDENTIFY GAPS` in Protocol v0.1 is named `GAPS` here. That is a naming
+ * refinement of the same step, not a new one, and `PROVENANCE` is the
+ * architecture's deliberate split of proposition-level origin work out of
+ * v0.1's `TRACE`. See docs/architecture/research-pipeline.md §16.
  */
-export type PipelineStage =
+export type ResearchStage =
   | 'INGEST'
   | 'DECOMPOSE'
   | 'CLASSIFY'
@@ -49,9 +50,42 @@ export type PipelineStage =
   | 'RECONCILE'
   | 'GRADE'
   | 'GAPS'
-  | 'VALIDATE'
-  | 'SYNTHESIZE'
-  | 'RESOLVE'
+
+/**
+ * Steps that inspect current state and decide whether execution may continue.
+ *
+ * A control gate mints no canonical artifact. It reads the graph, produces a
+ * verdict, and either permits the run to proceed or stops it. Both gates
+ * already have durable result types of their own — `ValidationResult` and
+ * `ReviewHistory` — so neither needs, or may claim, an artifact revision.
+ *
+ * `VALIDATE` and `REVIEW` postdate Protocol v0.1; they are architecture
+ * refinements that make the v0.1 method executable (#6 D12, D15).
+ */
+export type ControlGate = 'VALIDATE' | 'REVIEW'
+
+/**
+ * LEGACY vocabulary. The stage names historical `StageRun` records may carry.
+ *
+ * DO NOT USE FOR NEW CONTRACTS. New pipeline code uses `ResearchStage` for
+ * artifact-producing work and `ControlGate` for inspection; those two are
+ * disjoint, and this union is not.
+ *
+ * It exists because XRAY-KE-001 was reconstructed before the distinction was
+ * drawn, and records `VALIDATE`, `SYNTHESIZE` and `RESOLVE` as `PENDING`
+ * stage runs. Those observations are historical evidence of what the frozen
+ * benchmark did and did not execute. Rewriting them to fit a later type model
+ * would edit the evidence to flatter the code (#6 D15, migration rule).
+ *
+ * The member list is therefore frozen at what already existed. `REVIEW` and
+ * `PERSIST` are deliberately absent: `REVIEW` is a gate recorded by
+ * `ReviewHistory`, and persistence is owned by #7.
+ *
+ * `SYNTHESIZE` and `RESOLVE` are downstream lifecycle steps that MUST NOT
+ * mutate what precedes them (XR-INV-011). They are not part of the
+ * pre-persistence research pipeline #6 executes.
+ */
+export type PipelineStage = ResearchStage | 'VALIDATE' | 'SYNTHESIZE' | 'RESOLVE'
 
 export type StageRunStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
 
@@ -68,11 +102,23 @@ export interface StageRun {
 
   investigationId: InvestigationId
 
+  /**
+   * Which step this run records.
+   *
+   * New runs produced by the pipeline are always a `ResearchStage`; the wider
+   * `PipelineStage` is retained only so historical records remain readable.
+   * See `ResearchStageRun` in `lib/xray/pipeline/journal.ts`.
+   */
   stage: PipelineStage
 
   status: StageRunStatus
 
-  /** Graph version this run read. */
+  /**
+   * In-run artifact revision this run read.
+   *
+   * NOT an `InvestigationVersion`. A stage retried three times has not
+   * produced three versions of the investigation. See research-pipeline §17.
+   */
   inputArtifactVersion: number
 
   /** Graph version this run produced. Absent until it succeeds. */

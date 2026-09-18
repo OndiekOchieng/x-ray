@@ -23,6 +23,7 @@ present in v0.1; where scaffold reconciliation
 | [0008](./0008-ati-resolution-adapter.md) | ATI Is a Resolution Adapter | Only `PUBLIC_RECORD_REQUEST` gaps produce an ATI draft. |
 | [0009](./0009-benchmark-runs-as-acceptance-evidence.md) | Benchmark Runs Are Acceptance Evidence | Raw runs are frozen; tests target epistemic behaviour, not prose. |
 | [0010](./0010-research-retrieval-boundary.md) | Retrieval Is a Separate Boundary From Extraction | A search provider returns material and retrieval metadata; stages mint Evidence. |
+| [0011](./0011-control-gates-are-not-stages.md) | Control Gates Are Not Pipeline Stages | Research stages own artifacts; VALIDATE and REVIEW inspect and own nothing. |
 
 ## Numbering
 
@@ -32,7 +33,7 @@ recorded in each file's header.
 
 ## Adding an ADR
 
-Next number is `0011`. Use the same four sections, and state Status as
+Next number is `0012`. Use the same four sections, and state Status as
 `Proposed` until accepted. An ADR that replaces an earlier one sets
 `Supersedes:` and the superseded ADR is marked `Superseded by:` rather than
 deleted — the same preservation rule the system applies to its own findings

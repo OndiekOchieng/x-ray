@@ -8,7 +8,7 @@
  * may persist them as a separate audit record.
  */
 
-import type { PipelineStage } from '@/lib/xray/domain'
+import type { ResearchStage } from '@/lib/xray/domain'
 
 /** Failure modes from `docs/calibration/failure-modes/`. */
 export type FailureModeId = 'FM-001' | 'FM-002' | 'FM-003' | 'FM-004' | 'FM-005' | 'FM-006'
@@ -89,8 +89,14 @@ export interface ReviewFinding {
 export interface RevisionRequest {
   id: string
   findingId: string
-  /** The stage that can actually address the concern. */
-  stage: PipelineStage
+  /**
+   * The research stage that can actually address the concern.
+   *
+   * Always an artifact-producing stage. A finding never routes to `REVIEW`:
+   * the Reviewer is the inspector, not the repair step (#6 D15). It never
+   * routes to `VALIDATE` either — a gate cannot revise what it inspects.
+   */
+  stage: ResearchStage
   action: string
   targets: readonly ReviewTarget[]
 }

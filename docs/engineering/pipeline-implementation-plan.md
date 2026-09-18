@@ -32,32 +32,79 @@ These are not open, and no slice reopens them:
 
 ## 6a — Stage contracts and run state
 
+**Status: delivered.** `lib/xray/pipeline/`, 50 checks in `pnpm check:pipeline`.
+
 **Delivers** typed stage contracts, the in-flight accumulator, the append-only
 run journal, retry and resume. No adapters, no providers, no stage bodies that
 need one.
 
+- Vocabulary split per [ADR-0011](../adr/0011-control-gates-are-not-stages.md):
+  `ResearchStage` transforms state and owns artifacts; `ControlGate` inspects
+  and owns nothing. Disjoint types, disjoint journal shapes (`StageRun` /
+  `GateRun`), disjoint id namespaces (`SR-…` / `GR-…`).
+- Stage ownership is declared and enforced: `STAGE_OUTPUTS` says which
+  collections each stage may write, and a stage writing outside it fails.
 - Pipeline owns a mutable canonical-input accumulator; `XRayGraph` gains **no**
   mutation API and is rebuilt as the read aggregate when a stage needs to
   inspect (D3).
 - Deterministic stage-scoped identity allocation in the reserved namespaces
-  (D5). No random generation for anything referenced by id.
-- `RunJournal`: append-only, `StageRun`-compatible, in memory, shaped so #7
-  persists the same conceptual records (D11).
+  (D5). No random generation, no clock, anywhere in allocation.
+- `RunJournal`: append-only, in memory, shaped so #7 persists the same
+  conceptual records (D11).
 - STAGED validation after each artifact-producing stage; a stage that
   introduces an ERROR fails there and blocks downstream execution (D9).
-- Sequential execution (D10).
+- Sequential execution (D10), with rollback of a failed attempt so a retry
+  allocates exactly the identifiers its predecessor did.
+- Both control gates run after the research stages: `VALIDATE` (FULL), then
+  `REVIEW` — skipped, not run, if `VALIDATE` blocked.
 
-**Checkpoint.** A hand-built sequence of stage stubs traverses the pipeline,
-produces a journal, and survives a forced mid-run failure and retry without
-renumbering artifacts.
+**Checkpoint.** Met. Stage stubs replay XRAY-KE-001 end to end, reproduce the
+canonical graph artifact-for-artifact, survive a stage failing twice before
+succeeding without renumbering anything, and resume from an interrupted run.
 
-**Rollback.** Additive only, under `lib/xray/pipeline/`. Nothing existing is
-modified; reverting the slice removes a directory.
+**Rollback.** Additive under `lib/xray/pipeline/`, plus three narrow edits
+noted below.
 
-**Verification gate.** `pnpm check:fixtures` green. New `check:pipeline`
-covering: identity stable across retry; retrying one stage does not renumber
-another's artifacts; journal is append-only; accumulator rebuild produces a
-graph identical to `createXRayGraph` over the same arrays.
+**Verification gate.** Met. `pnpm check:fixtures` green (282 checks across six
+harnesses, `tsc --noEmit` clean). `pnpm check:pipeline` covers identity
+stability across retry, non-renumbering, journal append-only enforcement,
+accumulator/`createXRayGraph` equivalence, gate/stage separation, and one
+meta-proof that the ownership guard is what stops an illegal write.
+
+### What 6a changed outside `lib/xray/pipeline/`
+
+Three edits, each required by the decision or discovered by the replay.
+
+**1. The stage vocabulary split (ADR-0011).** `ResearchStage` and `ControlGate`
+added to the domain; `PipelineStage` frozen at its existing members and
+documented as legacy. `RevisionRequest.stage` and `CHECK_ROUTING` narrowed to
+`ResearchStage`. No historical record was rewritten.
+
+**2. `GAPS` owns the finding back-reference.** `Finding.gapIds` points at gaps
+that stage 9 identifies, but grading is stage 8. A finding cannot carry the
+link when `GRADE` writes it, so `GAPS` produces the gaps and revises the
+findings to record them. The alternative — reordering `GAPS` before `GRADE` —
+was rejected: Protocol v0.1 grades at 8 and identifies gaps at 9, and
+reordering the frozen method to suit the type model is not a change #6 is
+authorised to make (D12).
+
+**3. `XR-INV-008` gains a narrow STAGED exemption.** Between `GRADE` and
+`GAPS`, an unresolved finding necessarily names no gap, so the invariant fired
+and failed `GRADE` for executing in the specified order. The rule is now
+skipped under STAGED *only while no gap exists*, and binds again the moment one
+does — so a finding that `GAPS` fails to link is still caught under STAGED and
+still attributed to `GAPS`. `FULL` never grants the exemption, so graduation is
+unchanged. This mirrors the exemption the validator already made in the
+opposite direction for orphaned gaps. Three adversarial checks in
+`check:validation` hold the boundary.
+
+### Known contract gap, recorded not worked around
+
+`PLAN` owns no canonical collection. Protocol v0.1 stage 4 produces a research
+plan, but the domain has no `ResearchPlan` artifact and #6 is not the slice
+that invents one. `PLAN` executes and records a run while contributing nothing
+to the graph. Inventing the type, or letting `PLAN` write another stage's
+collection, were both rejected.
 
 ---
 

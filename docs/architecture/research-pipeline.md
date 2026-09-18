@@ -245,6 +245,35 @@ interface ResearchStop {
 The `ResearchStop` type is reproduced in
 [domain-model.md](./domain-model.md#researchstop).
 
+### Amendment — 2026-09-18 · stages, gates and lifecycle boundaries
+
+The §16 diagram draws every box the same way, and the executable model cannot.
+Three kinds of step, per [ADR-0011](../adr/0011-control-gates-are-not-stages.md):
+
+| Kind | Members | Owns artifacts | Journal record |
+|---|---|---|---|
+| Research stage | INGEST DECOMPOSE CLASSIFY PLAN TRACE PROVENANCE DISCONFIRM RECONCILE GRADE GAPS | yes | `StageRun` (`SR-…`) |
+| Control gate | VALIDATE, REVIEW | no | `GateRun` (`GR-…`) |
+| Lifecycle boundary | PERSIST (#7), SYNTHESIZE, RESOLVE (#10) | n/a in #6 | not run here |
+
+A gate has no artifact-output-revision field to write into, so it cannot claim
+to have changed canonical state. `REVIEW` references the `ReviewHistory` round
+rather than restating its verdict.
+
+`PipelineStage` keeps its original members as the legacy vocabulary so
+XRAY-KE-001's historical records stay readable. New contracts use
+`ResearchStage` and `ControlGate`.
+
+### Amendment — 2026-09-18 · `GRADE` precedes `GAPS`, so the gap link is written by `GAPS`
+
+`Finding.gapIds` is a back-reference. The gap it names is identified at stage 9;
+the grade is assigned at stage 8. `GRADE` therefore writes findings without the
+link, and `GAPS` produces the gaps and revises the findings to record it. Stage
+ownership (`STAGE_OUTPUTS`) grants `GAPS` both collections for this reason.
+
+XR-INV-008 is correspondingly exempt under STAGED validation *while no gap
+exists*, and binds again as soon as one does. FULL always enforces it.
+
 ### Amendment — 2026-09-18 · stopping is not graduating
 
 The conditions above answer **why research stopped**. They do not answer

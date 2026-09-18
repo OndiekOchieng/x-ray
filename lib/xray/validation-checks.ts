@@ -543,6 +543,49 @@ check('D1 · an orphaned gap is legal in STAGED mode', () => {
   return inFull ? null : 'orphaned gap not rejected in FULL either, so the rule is inert'
 })
 
+/**
+ * The mirror exemption, discovered by 6a.
+ *
+ * The architecture grades at stage 8 and identifies gaps at stage 9, so
+ * between them an unresolved finding names no gap because the gap does not
+ * exist yet. Three checks, because the exemption is only safe if it is
+ * narrow: it must lapse the moment a gap exists, and FULL must never grant it.
+ */
+check('6a · an unresolved finding with no gap is legal in STAGED before GAPS runs', () => {
+  const graph = mutated((g) => {
+    find(g.findings, 'FND-C003').gapIds = []
+    g.gaps.length = 0
+  })
+  const code = 'XR-INV-008/UNRESOLVED_FINDING_WITHOUT_GAP'
+  const staged = validateXRayGraph(graph, { mode: 'STAGED' })
+  return staged.violations.some((v) => v.code === code)
+    ? 'GRADE would fail for producing an unresolved finding in the specified order'
+    : null
+})
+
+check('6a · the exemption lapses once a gap exists', () => {
+  const graph = mutated((g) => {
+    find(g.findings, 'FND-C003').gapIds = []
+  })
+  const code = 'XR-INV-008/UNRESOLVED_FINDING_WITHOUT_GAP'
+  const staged = validateXRayGraph(graph, { mode: 'STAGED' })
+  return staged.violations.some((v) => v.code === code)
+    ? null
+    : 'a finding naming no gap survives STAGED even after GAPS has run'
+})
+
+check('6a · FULL never grants the exemption', () => {
+  const graph = mutated((g) => {
+    find(g.findings, 'FND-C003').gapIds = []
+    g.gaps.length = 0
+  })
+  const code = 'XR-INV-008/UNRESOLVED_FINDING_WITHOUT_GAP'
+  const full = validateXRayGraph(graph, { mode: 'FULL' })
+  return full.violations.some((v) => v.code === code)
+    ? null
+    : 'graduation would accept an unresolved finding that exposes no gap'
+})
+
 bites(
   'XR-INV-009 · ATI eligibility disagreeing with resolution path is rejected',
   'XR-INV-009/ATI_ELIGIBILITY_MISMATCH',

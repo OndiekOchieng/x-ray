@@ -405,8 +405,10 @@ export const DETERMINISTIC_CHECKS: readonly DeterministicCheck[] = [
   },
 ] as const
 
-/** Which pipeline stage can address a given check. */
-export const CHECK_ROUTING: Readonly<Record<string, { stage: import('@/lib/xray/domain').PipelineStage; action: string }>> = {
+/** Which research stage can address a given check. Never a control gate. */
+export const CHECK_ROUTING: Readonly<
+  Record<string, { stage: import('@/lib/xray/domain').ResearchStage; action: string }>
+> = {
   'FM-001/SETTLED_GRADE_ON_INCOMPARABLE_EVIDENCE': {
     stage: 'GRADE',
     action: 'Re-grade against what the located evidence actually measures.',

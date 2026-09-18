@@ -75,6 +75,13 @@ added one ADR:
 16. [research-pipeline §19](./research-pipeline.md#research-saturation) —
     stopping is necessary but not sufficient for graduation
 
+Pipeline slice 6a (2026-09-18) resolved the stage-vocabulary conflict:
+
+17. [ADR-0011](../adr/0011-control-gates-are-not-stages.md) — research stages
+    own artifacts; `VALIDATE` and `REVIEW` are control gates that own nothing
+18. [research-pipeline §16](./research-pipeline.md) — `GRADE` precedes `GAPS`,
+    so the `Finding.gapIds` back-reference is written by `GAPS`
+
 These are v0.1 clarifications. They are **not** Protocol v0.2.
 
 ---
