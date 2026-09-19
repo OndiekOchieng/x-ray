@@ -1,0 +1,15 @@
+PASS v1 seed
+PASS v2 same canonical id different content
+PASS duplicate scoped id rejected
+PASS v1-only source
+PASS cross-version evidence source rejected
+PASS bad claim namespace rejected
+PASS bad source enum rejected
+PASS invalid date-only precision rejected
+PASS invalid gap eligibility rejected
+PASS immutable source rejected
+FAIL latest pointer cannot rewind unexpectedly accepted
+PASS negative ordinal rejected
+PASS duplicate ordinal rejected
+foreign_keys 66
+failure_count 1
