@@ -11,6 +11,11 @@ await db.exec(precisionUp);
 await db.exec(readFileSync(new URL('../db/migrations/0002_source_retrieval_precision.down.sql', import.meta.url),'utf8'));
 await db.exec(precisionUp);
 console.log('PASS source precision up/down/up');
+const auditUp=readFileSync(new URL('../db/migrations/0003_reevaluation_audit.up.sql', import.meta.url),'utf8');
+await db.exec(auditUp);
+await db.exec(readFileSync(new URL('../db/migrations/0003_reevaluation_audit.down.sql', import.meta.url),'utf8'));
+await db.exec(auditUp);
+console.log('PASS re-evaluation audit up/down/up');
 const q=async sql=>db.exec(sql);
 let failed=0;
 async function pass(name,sql){try{await q(sql);console.log('PASS',name)}catch(e){failed++;console.log('FAIL',name,e.message)}}

@@ -1,0 +1,12 @@
+lib/xray/persistence/version-commit.ts(88,70): error TS2345: Argument of type 'string' is not assignable to parameter of type 'ClaimId'.
+lib/xray/persistence/version-commit.ts(89,72): error TS2345: Argument of type 'string' is not assignable to parameter of type 'ClaimId'.
+lib/xray/persistence/version-commit-checks.ts(31,21): error TS2322: Type 'Evidence | { id: string; sourceId: string; proposition: string; claimIds: readonly ["C001"]; relationship: EvidenceRelationship; strength: EvidenceStrength; measurement?: Measurement | undefined; timeScope?: TimeScope | undefined; quotedPassage?: string | undefined; locationInSource?: string | undefined; }' is not assignable to type 'Evidence'.
+  Type '{ id: string; sourceId: string; proposition: string; claimIds: readonly ["C001"]; relationship: EvidenceRelationship; strength: EvidenceStrength; measurement?: Measurement; timeScope?: TimeScope; quotedPassage?: string; locationInSource?: string; }' is not assignable to type 'Evidence'.
+    Types of property 'claimIds' are incompatible.
+      The type 'readonly ["C001"]' is 'readonly' and cannot be assigned to the mutable type 'ClaimId[]'.
+lib/xray/persistence/version-commit-checks.ts(31,40): error TS2322: Type '{ id: string; sourceId: string; proposition: string; claimIds: readonly ["C001"]; relationship: EvidenceRelationship; strength: EvidenceStrength; measurement?: Measurement; timeScope?: TimeScope; quotedPassage?: string; locationInSource?: string; }' is not assignable to type 'Evidence'.
+  Types of property 'claimIds' are incompatible.
+    The type 'readonly ["C001"]' is 'readonly' and cannot be assigned to the mutable type 'ClaimId[]'.
+lib/xray/persistence/version-commit-checks.ts(86,53): error TS18046: 'row' is of type 'unknown'.
+lib/xray/persistence/version-commit-checks.ts(88,21): error TS2571: Object is of type 'unknown'.
+lib/xray/persistence/version-commit-checks.ts(88,51): error TS2571: Object is of type 'unknown'.

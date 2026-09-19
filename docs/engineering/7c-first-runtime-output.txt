@@ -1,0 +1,25 @@
+
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+/Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/version-commit.ts:17
+export class VersionConflict extends Error {
+  constructor(readonly expected: number, readonly actual: number | null) {
+                       ^^^^^^^^^^^^^^^^
+    super(`Expected predecessor v${expected}, found ${actual === null ? 'no committed version' : `v${actual}`}`)
+
+SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: TypeScript parameter property is not supported in strip-only mode
+    at parseTypeScript (node:internal/modules/typescript:57:40)
+    at processTypeScriptCode (node:internal/modules/typescript:129:37)
+    at stripTypeScriptModuleTypes (node:internal/modules/typescript:172:22)
+    at Object.getFileProtocolModuleFormat [as file:] (node:internal/modules/esm/get_format:206:26)
+    at defaultGetFormat (node:internal/modules/esm/get_format:283:36)
+    at defaultLoad (node:internal/modules/esm/load:96:16)
+    at nextLoad (node:internal/modules/esm/hooks:769:28)
+    at AsyncLoaderHooksOnLoaderHookWorker.load (node:internal/modules/esm/hooks:406:26)
+    at MessagePort.handleMessage (node:internal/modules/esm/worker:251:24)
+    at [nodejs.internal.kHybridDispatch] (node:internal/event_target:848:20) {
+  code: 'ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX'
+}
+
+Node.js v26.8.2

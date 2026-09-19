@@ -6,6 +6,7 @@ import type {
   Gap, Investigation, InvestigationVersion, Source, SourceDependency, StageRun,
 } from '@/lib/xray/domain'
 
+/** One pinned PostgreSQL client/connection; a pool's per-query routing is unsafe for BEGIN/COMMIT. */
 export interface SnapshotDatabase {
   query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>
 }
@@ -91,19 +92,15 @@ function owners(graph: XRayGraph, owner: LinkOwner): Record<string, unknown>[] {
   return graph[owner] as unknown as Record<string, unknown>[]
 }
 
-/** One transaction inserts a completed v1 snapshot and advances its identity pointer. */
-export async function writeInitialSnapshot(db: SnapshotDatabase, graph: XRayGraph): Promise<void> {
+/** Insert a complete immutable version inside the caller's transaction. */
+export async function insertSnapshotRows(db: SnapshotDatabase, graph: XRayGraph): Promise<void> {
   const investigation = graph.investigation
   const version = graph.version
-  if (!version || investigation.currentVersion !== 1 || version.version !== 1 || version.investigationId !== investigation.id) {
-    throw new Error('writeInitialSnapshot requires a coherent initial v1 graph')
-  }
+  if (!version || version.investigationId !== investigation.id || investigation.currentVersion !== version.version)
+    throw new Error('Snapshot identity/version mismatch')
   if (graph.atiRequests.length > 0) throw new Error('ATI lifecycle records are outside immutable snapshots')
-  await db.query('BEGIN')
-  try {
-    await insert(db, 'investigations', { id: investigation.id })
     await insert(db, 'investigation_versions', {
-      investigation_id: investigation.id, version_number: 1, created_at: version.createdAt,
+      investigation_id: investigation.id, version_number: version.version, created_at: version.createdAt,
       trigger: version.trigger, supersedes_version: optional(version.supersedesVersion),
       protocol_version: investigation.protocolVersion, status: investigation.status,
       surface_source_id: investigation.surfaceSourceId, focus: optional(investigation.focus),
@@ -115,22 +112,22 @@ export async function writeInitialSnapshot(db: SnapshotDatabase, graph: XRayGrap
       investigation_research_stop_leads: json(investigation.researchStop?.unresolvedHighPriorityLeads),
     })
     for (const table of Object.keys(entityFields) as Collection[]) {
-      for (const item of graph[table]) await insert(db, table, entityRow(item as unknown as Record<string, unknown>, table, investigation.id, 1))
+      for (const item of graph[table]) await insert(db, table, entityRow(item as unknown as Record<string, unknown>, table, investigation.id, version.version))
     }
     for (const [ordinal, item] of graph.sourceDependencies.entries()) await insert(db, 'source_dependencies', {
-      investigation_id: investigation.id, version_number: 1, ordinal, id: item.id,
+      investigation_id: investigation.id, version_number: version.version, ordinal, id: item.id,
       source_id: item.sourceId, depends_on_source_id: optional(item.dependsOnSourceId),
       origin_description: optional(item.originDescription), relationship: item.relationship, confidence: item.confidence,
     })
     for (const [ordinal, item] of graph.evidenceProvenance.entries()) await insert(db, 'evidence_provenance', {
-      investigation_id: investigation.id, version_number: 1, ordinal, id: item.id,
+      investigation_id: investigation.id, version_number: version.version, ordinal, id: item.id,
       evidence_id: item.evidenceId, origin_kind: item.origin.kind,
       origin_source_id: item.origin.kind === 'SOURCE' ? item.origin.sourceId : null,
       origin_description: item.origin.kind === 'UNIDENTIFIED' ? item.origin.description : null,
       relationship: item.relationship, confidence: item.confidence,
     })
     for (const [ordinal, item] of investigation.stageRuns.entries()) await insert(db, 'version_stage_runs', {
-      investigation_id: investigation.id, version_number: 1, ordinal, id: item.id,
+      investigation_id: investigation.id, version_number: version.version, ordinal, id: item.id,
       stage: item.stage, status: item.status, input_artifact_version: item.inputArtifactVersion,
       output_artifact_version: optional(item.outputArtifactVersion), model: optional(item.model),
       started_at: optional(item.startedAt), completed_at: optional(item.completedAt), error: optional(item.error),
@@ -139,12 +136,26 @@ export async function writeInitialSnapshot(db: SnapshotDatabase, graph: XRayGrap
       for (const item of owners(graph, owner)) {
         const values = item[key] as string[]
         for (const [ordinal, id] of values.entries()) await insert(db, table, {
-          investigation_id: investigation.id, version_number: 1,
+          investigation_id: investigation.id, version_number: version.version,
           ...(owner === 'investigation' || owner === 'version' ? {} : { owner_id: item.id }),
           ordinal, [target]: id,
         })
       }
     }
+ }
+
+/** One transaction inserts a completed v1 snapshot and advances its identity pointer. */
+export async function writeInitialSnapshot(db: SnapshotDatabase, graph: XRayGraph): Promise<void> {
+  const investigation = graph.investigation
+  const version = graph.version
+  if (!version || investigation.currentVersion !== 1 || version.version !== 1 || version.investigationId !== investigation.id) {
+    throw new Error('writeInitialSnapshot requires a coherent initial v1 graph')
+  }
+  if (graph.atiRequests.length > 0) throw new Error('ATI lifecycle records are outside immutable snapshots')
+  await db.query('BEGIN')
+  try {
+    await insert(db, 'investigations', { id: investigation.id })
+    await insertSnapshotRows(db, graph)
     await db.query('UPDATE investigations SET latest_committed_version = 1 WHERE id = $1', [investigation.id])
     await db.query('COMMIT')
   } catch (error) {
