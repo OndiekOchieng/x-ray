@@ -3,9 +3,10 @@
 **Status:** Reference · derived from XRAY-KE-001
 **Scope:** reasoning behaviour at ambiguous boundaries
 
-Six worked cases and six failure modes, drawn from the one benchmark X-Ray has
-actually run. They record *how a difficult judgment should come out* — not what
-is true about any road.
+CAL-001…CAL-006 and FM-001…FM-006 come from XRAY-KE-001. CAL-007…CAL-016
+and FM-007…FM-010 are v0.3 reasoning cases. Their Kenyatta/Maralal anchor is
+synthetic and makes no historical assertion. The cases record *how a difficult
+judgment should come out* — not what is true about any subject.
 
 ---
 
@@ -63,6 +64,12 @@ to paste into a model.
 | [CAL-005](./cases/CAL-005-scheduled-is-not-occurred.md) | Scheduled is not occurred | C004 | XR-INV-001 |
 | [CAL-006](./cases/CAL-006-unexplained-financial-bridge-remains-unresolved.md) | Unexplained bridge stays unresolved | C002 | XR-INV-006, XR-INV-007 |
 
+CAL-007…CAL-016 cover institutional characterization, changing relationships,
+proposition dimensions, causal and agency chains, source scope, aggregate and
+component claims, archive power, and falsifiability. Their metadata and exact
+files are listed in [index.json](./index.json); executable mutations run through
+`pnpm check:source-position-review`.
+
 ## Failure modes
 
 | ID | Error shape | Demonstrated by |
@@ -112,11 +119,11 @@ What is being built now is the corpus it would need to exist at all.
 
 ## Provenance
 
-Every case is grounded in the frozen benchmark corpus
+CAL-001…CAL-006 are grounded in the frozen benchmark corpus
 ([benchmarks/XRAY-KE-001](../benchmarks/XRAY-KE-001/README.md)) and the
-canonical fixture (`lib/xray/fixtures/xray-ke-001/`). No case introduces a
-research fact absent from the frozen runs, and none uses evidence dated after
-the **2026-09-13** research cutoff.
+canonical fixture (`lib/xray/fixtures/xray-ke-001/`). CAL-007…CAL-016 use an
+explicitly synthetic v0.3 calibration fixture. They add no historical finding
+to the benchmark and no evidence dated after its **2026-09-13** cutoff.
 
 Fixture ids cited here are checked against the fixture by
 `pnpm check:fixtures`, so a case cannot silently outlive the record it

@@ -22,7 +22,7 @@
  * and nothing is reported as a pass that was never run.
  */
 
-import type { Claim, Evidence, Finding } from '@/lib/xray/domain'
+import type { Claim, Evidence, Finding, Source, SourcePosition } from '@/lib/xray/domain'
 import type { CapabilityResult } from '@/lib/xray/capability'
 import type { CalibrationCaseId, FailureModeId, ReviewSeverity, ReviewTarget } from './types'
 
@@ -66,12 +66,26 @@ export interface RhetoricQuery {
   finding: Finding
 }
 
+/** One calibrated v0.3 judgment about evidentiary reach, with graph context. */
+export interface EvidentiaryReachQuery {
+  kind: 'EVIDENTIARY_REACH'
+  checkId: string
+  claim: Claim
+  finding: Finding
+  evidence: readonly Evidence[]
+  sources: readonly Source[]
+  sourcePositions: readonly SourcePosition[]
+  relatedClaims: readonly Claim[]
+  relatedFindings: readonly Finding[]
+}
+
 export type ReviewerModelQuery =
   | AtomicityQuery
   | LayerInferenceQuery
   | SemanticCompatibilityQuery
   | ReversibilityQuery
   | RhetoricQuery
+  | EvidentiaryReachQuery
 
 /**
  * The port. An implementation belongs to #6.
@@ -112,6 +126,8 @@ export interface PortDependentCheck {
   failureMode: FailureModeId
   calibrationCases: readonly CalibrationCaseId[]
   queryKind: ReviewerModelQuery['kind']
+  /** v0.3 semantic checks do not reinterpret immutable v0.1/v0.2 reviews. */
+  minProtocolVersion?: '0.3'
   /** Why graph structure cannot settle it. */
   reason: string
 }
@@ -177,3 +193,42 @@ export const PORT_DEPENDENT_CHECKS: readonly PortDependentCheck[] = [
       '"Expected to inspect" becoming "inspected" is a tense change between two strings. The graph sees two strings.',
   },
 ] as const
+
+/** Protocol v0.3 judgments remain model-assisted; the graph cannot settle prose semantics. */
+const REACH_CHECKS: readonly PortDependentCheck[] = [
+  ['SOURCE_POSITION_COLLAPSE', 'Source position collapsed across contexts', 'FM-007', 'CAL-008'],
+  ['PRIMARY_SOURCE_OVERREACH', 'Primary record overread as underlying truth', 'FM-007', 'CAL-011'],
+  ['INSTITUTIONAL_CHARACTERIZATION_PROMOTION', 'Institutional characterization promoted to underlying fact', 'FM-007', 'CAL-007'],
+  ['RECORD_PRODUCING_POWER_BLINDNESS', 'Archive absence ignores record-producing power', 'FM-007', 'CAL-016'],
+  ['RELATIONSHIP_TIME_COLLAPSE', 'Relationship at T1 projected across T2', 'FM-007', 'CAL-008'],
+  ['PROPOSITION_DIMENSION_DRIFT', 'Actor, category, time, or measure changed', 'FM-008', 'CAL-009'],
+  ['CAUSAL_LINK_INHERITANCE', 'Confidence inherited across a causal chain', 'FM-009', 'CAL-010'],
+  ['CAUSAL_STRENGTH_PROMOTION', 'Contribution promoted to primary, necessary, or sufficient cause', 'FM-009', 'CAL-010'],
+  ['COMMON_OUTCOME_COORDINATION', 'Common outcome promoted to coordination', 'FM-009', 'CAL-014'],
+  ['AUTHENTIC_RECORD_SCOPE_LAUNDERING', 'Authentic record attached to wrong category or denominator', 'FM-008', 'CAL-011'],
+  ['AGGREGATE_COMPONENT_INHERITANCE', 'Aggregate change transferred to a component', 'FM-008', 'CAL-013'],
+  ['CROSS_DIMENSION_RECOVERY', 'Recovery in one dimension transferred to another', 'FM-008', 'CAL-012'],
+  ['UNFALSIFIABLE_SYSTEM_NARRATIVE', 'System explanation lacks observable falsifier', 'FM-010', 'CAL-015'],
+  ['ACTOR_IDENTITY_LAUNDERING', 'Vague collective conceals materially distinct actors', 'FM-009', 'CAL-014'],
+  ['AGENCY_CHAIN_INHERITANCE', 'Identity, coordination, intent, mechanism, planning, or effect inferred from another link', 'FM-009', 'CAL-014'],
+  ['RETROSPECTIVE_INTENT_PROJECTION', 'Later benefit projected backward as earlier intent', 'FM-009', 'CAL-014'],
+  ['INSTITUTIONAL_ACTOR_CONTINUITY', 'Institutional label mistaken for continuity of decision-makers or plan', 'FM-009', 'CAL-014'],
+].map(([suffix, title, failureMode, calibrationCase]) => ({
+  checkId: `V03/${suffix}`, title, failureMode: failureMode as FailureModeId,
+  calibrationCases: [calibrationCase as CalibrationCaseId], queryKind: 'EVIDENTIARY_REACH' as const,
+  minProtocolVersion: '0.3' as const,
+  reason: 'This requires interpreting proposition scope and evidentiary reach; graph structure alone cannot decide it.',
+}))
+
+export const V03_PORT_DEPENDENT_CHECKS = REACH_CHECKS
+
+const atLeastV03 = (version: string): boolean => {
+  const match = /^v?(\d+)\.(\d+)(?:\.|$)/.exec(version)
+  return match !== null && (Number(match[1]) > 0 || Number(match[2]) >= 3)
+}
+
+export function activePortChecks(protocolVersion: string): readonly PortDependentCheck[] {
+  return atLeastV03(protocolVersion)
+    ? [...PORT_DEPENDENT_CHECKS, ...V03_PORT_DEPENDENT_CHECKS]
+    : PORT_DEPENDENT_CHECKS
+}

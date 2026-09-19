@@ -27,7 +27,7 @@ import type { XRayGraph } from '@/lib/xray/selectors'
 import { evidenceForClaim } from '@/lib/xray/selectors'
 import { isAvailable, unavailable, type CapabilityResult } from '@/lib/xray/capability'
 import type { ModelJudgment, ReviewerModel, ReviewerModelQuery } from './port'
-import { PORT_DEPENDENT_CHECKS } from './port'
+import { activePortChecks } from './port'
 
 /** One question, and the artifact it concerns. */
 export interface JudgmentRequest {
@@ -59,7 +59,7 @@ export function judgmentRequests(graph: XRayGraph): readonly JudgmentRequest[] {
   const findings = [...graph.findings].sort((a, b) => (a.id < b.id ? -1 : 1))
   const evidence = [...graph.evidence].sort((a, b) => (a.id < b.id ? -1 : 1))
 
-  for (const check of PORT_DEPENDENT_CHECKS) {
+  for (const check of activePortChecks(graph.investigation.protocolVersion)) {
     switch (check.queryKind) {
       case 'CLAIM_ATOMICITY': {
         for (const claim of claims) {
@@ -130,6 +130,25 @@ export function judgmentRequests(graph: XRayGraph): readonly JudgmentRequest[] {
             checkId: check.checkId,
             subjectId: finding.id,
             query: { kind: 'RHETORICAL_OVERCLAIM', claim, finding },
+          })
+        }
+        break
+      }
+
+      case 'EVIDENTIARY_REACH': {
+        for (const finding of findings) {
+          const claim = graph.index.claim.get(finding.claimId)
+          if (!claim) continue
+          out.push({
+            checkId: check.checkId, subjectId: finding.id,
+            query: {
+              kind: 'EVIDENTIARY_REACH', checkId: check.checkId, claim, finding,
+              evidence: evidenceForClaim(graph, claim.id),
+              sources: graph.sources,
+              sourcePositions: graph.sourcePositions,
+              relatedClaims: claims,
+              relatedFindings: findings,
+            },
           })
         }
         break
