@@ -19,6 +19,7 @@ meaning preserved.
 | 6 | [runtime-architecture.md](./runtime-architecture.md) | Web / API / adapters / PostgreSQL; implementation boundaries |
 | 7 | [investigation-versioning.md](./investigation-versioning.md) | Immutable snapshots; new receipts; affected-claim re-evaluation |
 | 8 | [publication-and-cache.md](./publication-and-cache.md) | Cached public X-Rays; the synthesis boundary |
+| 9 | [source-position-and-evidentiary-reach.md](./source-position-and-evidentiary-reach.md) | Protocol v0.3 delta: where the producer stood and how the source could know |
 
 If you read only two: **evidence-graph.md** and
 **validation-and-invariants.md**. They carry the architecture's actual
@@ -26,7 +27,7 @@ commitments.
 
 ## Where the rest lives
 
-- **Decisions** — [../adr/](../adr/README.md) (ADR-0001 … ADR-0009)
+- **Decisions** — [../adr/](../adr/README.md) (ADR-0001 … ADR-0012)
 - **Research method** — [../protocol/v0.1/](../protocol/v0.1/XRAY_RESEARCH_PROTOCOL_v0.1.md)
 - **Benchmark evidence** — [../benchmarks/XRAY-KE-001/](../benchmarks/XRAY-KE-001/README.md)
 - **Acceptance / scope / build order** — [../engineering/](../engineering/acceptance-fixtures.md)
@@ -90,7 +91,13 @@ Pipeline slice 6b (2026-09-18) specified the two adapter boundaries:
 20. [ADR-0010 amendment](../adr/0010-research-retrieval-boundary.md) — bounded
     content crosses the retrieval boundary, in memory only; retention is #7
 
-These are v0.1 clarifications. They are **not** Protocol v0.2.
+Protocol v0.3 architecture checkpoint (2026-09-19) added one accepted architecture delta:
+
+21. [ADR-0012](../adr/0012-source-position-and-evidentiary-reach.md) and [source-position-and-evidentiary-reach.md](./source-position-and-evidentiary-reach.md) — SourcePosition is canonical contextual state; KnowledgeBasis is proposition-specific on Evidence; no trust score or new research stage.
+
+The detailed investigation and implementation split are recorded in [source-position-architecture-investigation.md](../engineering/source-position-architecture-investigation.md).
+
+These amendments preserve the v0.1 baseline while explicitly recording later architecture decisions.
 
 ---
 

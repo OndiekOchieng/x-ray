@@ -13,8 +13,9 @@ X-Ray is **civic research infrastructure**, not a truth oracle.
 
 Given a public claim — from a news article, speech, report or official
 statement — X-Ray reconstructs the evidence underneath it: what was actually
-asserted, what independently testable claims it decomposes into, what records
-support or challenge them, which of those records are genuinely independent,
+asserted, what independently testable claims it decomposes into, who produced
+the relevant records, from what position and knowledge basis, what records
+support or challenge the claims, which origins are genuinely independent,
 what the evidence can and cannot establish, what is missing, and what would
 settle it.
 
@@ -24,7 +25,7 @@ between a claim and its evidence **inspectable**.
 The core loop:
 
 ```text
-CLAIM → RECEIPTS → PROVENANCE → CHALLENGE → RECONCILIATION
+CLAIM → SOURCE POSITION → RECEIPTS → PROVENANCE → CHALLENGE → RECONCILIATION
       → WHAT CAN WE ESTABLISH? → WHAT CAN'T WE? → WHAT WOULD SETTLE IT? → ACT
 ```
 
@@ -49,29 +50,48 @@ split by concern.
 | [runtime-architecture](./architecture/runtime-architecture.md) | Web, API, adapters, PostgreSQL; implementation boundaries |
 | [investigation-versioning](./architecture/investigation-versioning.md) | Immutable snapshots; new receipts; affected-claim re-evaluation |
 | [publication-and-cache](./architecture/publication-and-cache.md) | Cached public X-Rays; the synthesis boundary |
+| [source-position-and-evidentiary-reach](./architecture/source-position-and-evidentiary-reach.md) | Protocol v0.3 architecture delta: SourcePosition and KnowledgeBasis |
 
 **If you read only two:** `evidence-graph.md` and
 `validation-and-invariants.md`. They carry the actual commitments. Everything
 else follows from them.
 
+Protocol v0.3's first architecture reconciliation is now accepted in
+[ADR-0012](./adr/0012-source-position-and-evidentiary-reach.md): SourcePosition
+is canonical contextual state and KnowledgeBasis belongs on Evidence. Runtime
+implementation is tracked separately from persistence.
+
 ---
 
 ## 3. Where the research protocol lives
 
-**→ [`protocol/v0.1/`](./protocol/v0.1/XRAY_RESEARCH_PROTOCOL_v0.1.md)**
+**→ [`protocol/v0.3/`](./protocol/v0.3/XRAY_RESEARCH_PROTOCOL_v0.3.md)** — current for new manual investigations
 
 | File | What it is |
 | --- | --- |
-| [XRAY_RESEARCH_PROTOCOL_v0.1.md](./protocol/v0.1/XRAY_RESEARCH_PROTOCOL_v0.1.md) | The research method: ten principles and the stage-by-stage procedure |
-| [XRAY_RESEARCH_ACTION_PROMPT_v0.1.md](./protocol/v0.1/XRAY_RESEARCH_ACTION_PROMPT_v0.1.md) | The prompt used to execute a run |
+| [XRAY_RESEARCH_PROTOCOL_v0.3.md](./protocol/v0.3/XRAY_RESEARCH_PROTOCOL_v0.3.md) | Current research method: source position, proposition identity, evidentiary reach, causal non-inheritance, record-producing power, and system-level falsifiability |
+| [XRAY_RESEARCH_ACTION_PROMPT_v0.3.md](./protocol/v0.3/XRAY_RESEARCH_ACTION_PROMPT_v0.3.md) | Current prompt used to execute a manual v0.3 research run |
+| [CALIBRATION_CANDIDATES_v0.3.md](./protocol/v0.3/CALIBRATION_CANDIDATES_v0.3.md) | Protocol-side candidates from the cross-domain v0.2 runs; executable adoption deferred to #13 |
+| [Protocol v0.2](./protocol/v0.2/XRAY_RESEARCH_PROTOCOL_v0.2.md) | Frozen historical protocol used for the manual protocol-evolution runs |
+| [Protocol v0.1](./protocol/v0.1/XRAY_RESEARCH_PROTOCOL_v0.1.md) | Frozen historical protocol used for XRAY-KE-001 comparability |
 
 The protocol is the **method**; the architecture is the **system that
 enforces it**. Invariants exist because a protocol principle needed to hold
 regardless of which model executes it
 ([ADR-0005](./adr/0005-epistemic-invariants-outside-prompts.md)).
 
-Protocol v0.1 is preserved as written. Architecture v0.1 targets Protocol
-v0.2, which does not exist yet.
+Protocol v0.1 and v0.2 remain preserved as historical evidence. Protocol v0.3
+is the current manual-investigation contract.
+
+The central v0.3 addition is:
+
+> **Before using a record as evidence, establish who produced it, from what
+> position, under what power relationship, for what purpose, how they could
+> know, and what proposition the record can directly establish.**
+
+v0.3 keeps Source Position, Knowledge Basis, Proposition Provenance, and
+Source Dependency distinct. ADR-0012 makes the first two canonical while
+preserving the existing provenance layers.
 
 ---
 
@@ -99,30 +119,31 @@ is the origin of
 
 ## 5. Where ADRs live
 
-**→ [`adr/`](./adr/README.md)** — nine decisions, `Status / Context /
+**→ [`adr/`](./adr/README.md)** — twelve decisions, `Status / Context /
 Decision / Consequences`.
 
 | | | | |
 | --- | --- | --- | --- |
 | [0001](./adr/0001-evidence-graph-canonical-state.md) Evidence graph is canonical | [0002](./adr/0002-staged-research-pipeline.md) Staged pipeline | [0003](./adr/0003-relational-store-first.md) Relational store first | [0004](./adr/0004-model-adapter-boundary.md) Model behind adapter |
 | [0005](./adr/0005-epistemic-invariants-outside-prompts.md) Invariants outside prompt | [0006](./adr/0006-immutable-investigation-versions.md) Immutable versions | [0007](./adr/0007-gap-first-class-state.md) Gap is first-class | [0008](./adr/0008-ati-resolution-adapter.md) ATI is an adapter |
-| [0009](./adr/0009-benchmark-runs-as-acceptance-evidence.md) Benchmarks as acceptance evidence | | | |
+| [0009](./adr/0009-benchmark-runs-as-acceptance-evidence.md) Benchmarks as acceptance evidence | [0010](./adr/0010-research-retrieval-boundary.md) Retrieval boundary | [0011](./adr/0011-control-gates-are-not-stages.md) Control gates | [0012](./adr/0012-source-position-and-evidentiary-reach.md) Source position |
 
 ---
 
 ## 6. Where calibration lives
 
-**→ [`calibration/`](./calibration/README.md)** — six worked cases and six
-failure modes.
+**→ [`calibration/`](./calibration/README.md)** — six executable worked cases
+and six failure modes.
 
 The protocol says what to do. The invariants say what is representable and what
 is forbidden. Calibration says **which answer is right when the rule permits
-two** — the judgment two competent models disagreed on.
+two**.
 
 | | |
 | --- | --- |
 | [cases/](./calibration/cases) | CAL-001 … CAL-006, each grounded in canonical XRAY-KE-001 ids |
 | [failure-modes/](./calibration/failure-modes) | FM-001 … FM-006, written to recur outside this benchmark |
+| [v0.3 candidates](./protocol/v0.3/CALIBRATION_CANDIDATES_v0.3.md) | PCAL-007 … PCAL-016; protocol-side candidates awaiting #13 architecture decisions |
 
 Calibration cases are **not source-of-truth facts**. They are regression
 examples for reasoning behaviour, and they do not override evidence in a live
@@ -138,10 +159,11 @@ investigation.
 | --- | --- |
 | [acceptance-fixtures.md](./engineering/acceptance-fixtures.md) | What the XRAY-KE-001 suite must assert; required reconciliations; forbidden inferences |
 | [v0-scope.md](./engineering/v0-scope.md) | What v0 builds — and what it deliberately does not |
-| [build-order.md](./engineering/build-order.md) | The 15-step build order and the 14-point definition of done |
+| [build-order.md](./engineering/build-order.md) | Original build order and definition of done |
 
-These are **design documents**. No executable fixtures exist yet. The
-acceptance suite is step 6 of the build order; making it green is step 12.
+Current execution authority is GitHub issue
+[#1 — Forge: X-Ray v1 execution tracker](https://github.com/OndiekOchieng/x-ray/issues/1),
+which supersedes stale prose sequencing when the two differ.
 
 ---
 
@@ -150,34 +172,32 @@ acceptance suite is step 6 of the build order; making it green is step 12.
 ```text
 docs/
 ├── README.md                   ← you are here
-├── architecture/               System Architecture v0.1, split by concern
-├── protocol/v0.1/              The research method (preserved as written)
+├── architecture/               System Architecture v0.1 + accepted later deltas
+├── protocol/v0.3/              Current manual research contract
+├── protocol/v0.2/              Frozen protocol-evolution contract
+├── protocol/v0.1/              Frozen XRAY-KE-001 research method
 ├── adr/                        ADR-0001 … ADR-0009
 ├── benchmarks/XRAY-KE-001/     Reference benchmark + immutable raw runs
-├── calibration/                Worked judgment cases + recurring failure modes
-└── engineering/                Acceptance design, scope, build order
+├── calibration/                Existing executable judgment corpus
+└── engineering/                Acceptance design and engineering evidence
 ```
 
 ---
 
 ## Conventions
 
-**Versioning.** Architecture is v0.1. Protocol is v0.1. They version
-independently; Architecture v0.1 targets a Protocol v0.2 that does not exist
-yet.
+**Versioning.** Architecture and protocol version independently.
+Protocol v0.1 and v0.2 are frozen historical evidence. Protocol v0.3 is current
+for new manual investigations.
 
-**Amendments.** Scaffold reconciliation on 2026-09-15 produced five
-clarifications to Architecture v0.1. They are recorded inline where they
-apply, marked as clarifications, and indexed in
-[validation-and-invariants § Architecture v0.1 clarifications](./architecture/validation-and-invariants.md#architecture-v01-clarifications).
-They are **not** Protocol v0.2.
+**Protocol / architecture boundary.** v0.3 records the research method learned
+from repeated manual investigations. ADR-0012 records the accepted source-position
+architecture delta; follow-up implementation issues own runtime and persistence
+changes rather than silently mutating the historical baseline.
 
-**Immutability.** Anything under `benchmarks/*/raw/` and `protocol/*/` is
-historical evidence: preserved, never rewritten. Corrections go into analysis
-documents, never into the artifacts. This is the same rule the system applies
-to its own investigations
-([ADR-0006](./adr/0006-immutable-investigation-versions.md)).
+**Immutability.** Anything under `benchmarks/*/raw/` and released
+`protocol/*/` is historical evidence: preserved, never rewritten after use as
+a run contract. Corrections and later lessons belong in a new version.
 
-**Status.** Architecture v0.1 is *Proposed*. Engine v0.1 is not built. A UI
-scaffold exists and is a visual prototype only — it does not implement the
-canonical domain model.
+**Status.** Architecture v0.1 remains the baseline with accepted later deltas,
+including ADR-0012. Protocol v0.3 is the current manual research method.
