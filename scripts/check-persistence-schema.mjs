@@ -16,6 +16,11 @@ await db.exec(auditUp);
 await db.exec(readFileSync(new URL('../db/migrations/0003_reevaluation_audit.down.sql', import.meta.url),'utf8'));
 await db.exec(auditUp);
 console.log('PASS re-evaluation audit up/down/up');
+const sourcePositionUp=readFileSync(new URL('../db/migrations/0004_source_position_knowledge_basis.up.sql', import.meta.url),'utf8');
+await db.exec(sourcePositionUp);
+await db.exec(readFileSync(new URL('../db/migrations/0004_source_position_knowledge_basis.down.sql', import.meta.url),'utf8'));
+await db.exec(sourcePositionUp);
+console.log('PASS source-position schema up/down/up');
 const q=async sql=>db.exec(sql);
 let failed=0;
 async function pass(name,sql){try{await q(sql);console.log('PASS',name)}catch(e){failed++;console.log('FAIL',name,e.message)}}
