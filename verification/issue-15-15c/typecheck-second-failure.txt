@@ -1,0 +1,12 @@
+lib/xray/persistence/source-position-version-checks.ts(52,50): error TS2322: Type 'Claim | { id: "DC004"; investigationId: string; text: string; sourcePassage?: string | undefined; layer: ClaimLayer; type: ClaimType; priority: Priority; ... 4 more ...; origin: "SURFACE"; } | { ...; }' is not assignable to type 'Claim'.
+  Type '{ id: "DC004"; investigationId: InvestigationId; text: string; sourcePassage?: string; layer: ClaimLayer; type: ClaimType; ... 5 more ...; origin: "SURFACE"; }' is not assignable to type 'Claim'.
+    Type '{ id: "DC004"; investigationId: InvestigationId; text: string; sourcePassage?: string; layer: ClaimLayer; type: ClaimType; ... 5 more ...; origin: "SURFACE"; }' is not assignable to type 'ClaimBase & { origin: "DISCOVERED"; id: `DC${string}`; }'.
+      Type '{ id: "DC004"; investigationId: InvestigationId; text: string; sourcePassage?: string; layer: ClaimLayer; type: ClaimType; ... 5 more ...; origin: "SURFACE"; }' is not assignable to type '{ origin: "DISCOVERED"; id: `DC${string}`; }'.
+        Types of property 'origin' are incompatible.
+          Type '"SURFACE"' is not assignable to type '"DISCOVERED"'.
+lib/xray/persistence/source-position-version-checks.ts(52,66): error TS2322: Type '{ id: "DC004"; investigationId: string; text: string; sourcePassage?: string | undefined; layer: ClaimLayer; type: ClaimType; priority: Priority; entities: string[]; ambiguities: string[]; measurement?: Measurement | undefined; timeScope?: TimeScope | undefined; origin: "SURFACE"; } | { ...; }' is not assignable to type 'Claim'.
+  Type '{ id: "DC004"; investigationId: InvestigationId; text: string; sourcePassage?: string; layer: ClaimLayer; type: ClaimType; ... 5 more ...; origin: "SURFACE"; }' is not assignable to type 'Claim'.
+    Type '{ id: "DC004"; investigationId: InvestigationId; text: string; sourcePassage?: string; layer: ClaimLayer; type: ClaimType; ... 5 more ...; origin: "SURFACE"; }' is not assignable to type 'ClaimBase & { origin: "DISCOVERED"; id: `DC${string}`; }'.
+      Type '{ id: "DC004"; investigationId: InvestigationId; text: string; sourcePassage?: string; layer: ClaimLayer; type: ClaimType; ... 5 more ...; origin: "SURFACE"; }' is not assignable to type '{ origin: "DISCOVERED"; id: `DC${string}`; }'.
+        Types of property 'origin' are incompatible.
+          Type '"SURFACE"' is not assignable to type '"DISCOVERED"'.

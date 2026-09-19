@@ -1,0 +1,4 @@
+lib/xray/persistence/source-position-version-checks.ts(87,49): error TS18046: 'workspace' is of type 'unknown'.
+lib/xray/persistence/source-position-version-checks.ts(101,20): error TS18046: 'found' is of type 'unknown'.
+lib/xray/persistence/source-position-version-checks.ts(103,18): error TS2571: Object is of type 'unknown'.
+lib/xray/persistence/source-position-version-checks.ts(113,18): error TS2571: Object is of type 'unknown'.

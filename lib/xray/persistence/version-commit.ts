@@ -48,6 +48,7 @@ export function changedClaimIds(previous: XRayGraph, candidate: XRayGraph): Set<
     }
   }
   collect(previous.evidence, candidate.evidence, (item) => item.claimIds)
+  collect(previous.sourcePositions, candidate.sourcePositions, (item) => item.claimIds)
   collect(previous.findings, candidate.findings, (item) => [item.claimId])
   collect(previous.gaps, candidate.gaps, (item) => item.claimIds)
   collect(previous.discrepancies, candidate.discrepancies, (item) => item.claimIds)

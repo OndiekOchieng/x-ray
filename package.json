@@ -13,6 +13,7 @@
     "check:source-position-schema": "node scripts/check-source-position-schema.mjs",
     "check:persistence-roundtrip": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/snapshot-checks.ts",
     "check:persistence-versioning": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/version-commit-checks.ts",
+    "check:source-position-versioning": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/source-position-version-checks.ts",
     "check:source-position": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/source-position-checks.ts",
     "check:source-position-pipeline": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/source-position-pipeline-checks.ts",
     "check:source-position-review": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/source-position-review-checks.ts",
