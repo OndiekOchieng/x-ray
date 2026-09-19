@@ -42,7 +42,7 @@ const audit: ReEvaluationAudit[] = [
   { claimId: 'C002', reason: 'REVIEW_REVISION', detail: 'Reassessed; finding unchanged.', causes: [] },
 ]
 async function migrate(db: PGlite) {
-  for (const number of ['0001_version_ownership', '0002_source_retrieval_precision', '0003_reevaluation_audit']) {
+  for (const number of ['0001_version_ownership', '0002_source_retrieval_precision', '0003_reevaluation_audit', '0004_source_position_knowledge_basis']) {
     const sql = readFileSync(new URL(`../../../db/migrations/${number}.up.sql`, import.meta.url), 'utf8')
     await db.exec(sql)
   }

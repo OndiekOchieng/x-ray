@@ -3,7 +3,7 @@ import type { XRayGraph } from '@/lib/xray/selectors/graph'
 import { createXRayGraph } from '@/lib/xray/selectors/graph'
 import type {
   Claim, Disconfirmation, Discrepancy, Evidence, EvidenceProvenance, Finding,
-  Gap, Investigation, InvestigationVersion, Source, SourceDependency, StageRun,
+  Gap, Investigation, InvestigationVersion, Source, SourcePosition, SourceDependency, StageRun,
 } from '@/lib/xray/domain'
 
 /** One pinned PostgreSQL client/connection; a pool's per-query routing is unsafe for BEGIN/COMMIT. */
@@ -37,13 +37,14 @@ async function rows(db: SnapshotDatabase, table: string, investigationId: string
 const entityFields = {
   claims: ['text','sourcePassage','origin','layer','type','priority','measurement','timeScope','entities','ambiguities'],
   sources: ['title','publisher','institution','author','url','publishedAt','retrievedAt','sourceType','evidenceClass','originStatus','accessibility','contentHash'],
-  evidence: ['sourceId','proposition','relationship','strength','measurement','timeScope','quotedPassage','locationInSource'],
+  evidence: ['sourceId','proposition','relationship','strength','measurement','timeScope','quotedPassage','locationInSource','knowledgeBasis'],
+  sourcePositions: ['sourceId','relationship','relationshipDescription','powerOrDependency','productionPurpose','timeScope','basis','confidence','basisDescription'],
   discrepancies: ['description','classification','reconciliation','resolved'],
   disconfirmations: ['claimId','preliminaryHypothesis','counterHypothesis','result','effectOnFinding','searchStrategy'],
   findings: ['claimId','status','confidence','rationale','gradedAt','wouldChangeFinding'],
   gaps: ['missingEvidence','whyItMatters','resolvingEvidence','likelyHolder','searchAlreadyAttempted','status','effectOnFinding','resolutionPath','atiEligible','identifiers'],
 } as const
-const jsonFields = new Set(['measurement','timeScope','entities','ambiguities','searchStrategy','wouldChangeFinding','resolvingEvidence','likelyHolder','searchAlreadyAttempted','identifiers'])
+const jsonFields = new Set(['measurement','timeScope','entities','ambiguities','powerOrDependency','searchStrategy','wouldChangeFinding','resolvingEvidence','likelyHolder','searchAlreadyAttempted','identifiers'])
 
 type Collection = keyof typeof entityFields
 function entityRow(item: Record<string, unknown>, table: Collection, investigationId: string, version: number) {
@@ -62,6 +63,7 @@ function entityFromRow(row: Record<string, unknown>, table: Collection) {
 const links = [
   ['investigation_claims', 'investigation', 'claimIds', 'claim_id'],
   ['investigation_sources', 'investigation', 'sourceIds', 'source_id'],
+  ['investigation_source_positions', 'investigation', 'sourcePositionIds', 'source_position_id'],
   ['investigation_evidence', 'investigation', 'evidenceIds', 'evidence_id'],
   ['investigation_discrepancies', 'investigation', 'discrepancyIds', 'discrepancy_id'],
   ['investigation_disconfirmations', 'investigation', 'disconfirmationIds', 'disconfirmation_id'],
@@ -73,6 +75,8 @@ const links = [
   ['version_findings', 'version', 'findingIds', 'finding_id'],
   ['version_gaps', 'version', 'gapIds', 'gap_id'],
   ['evidence_claims', 'evidence', 'claimIds', 'claim_id'],
+  ['source_position_claims', 'sourcePositions', 'claimIds', 'claim_id'],
+  ['source_position_supporting_evidence', 'sourcePositions', 'supportingEvidenceIds', 'evidence_id'],
   ['discrepancy_claims', 'discrepancies', 'claimIds', 'claim_id'],
   ['discrepancy_evidence', 'discrepancies', 'evidenceIds', 'evidence_id'],
   ['disconfirmation_supporting_evidence', 'disconfirmations', 'strongestSupportingEvidenceIds', 'evidence_id'],
@@ -106,13 +110,14 @@ export async function insertSnapshotRows(db: SnapshotDatabase, graph: XRayGraph)
       surface_source_id: investigation.surfaceSourceId, focus: optional(investigation.focus),
       investigation_created_at: investigation.createdAt, research_cutoff_at: optional(investigation.researchCutoffAt),
       completed_at: optional(investigation.completedAt),
+      source_position_membership_present: investigation.sourcePositionIds !== undefined,
       research_stop_reason: optional(version.researchStop?.reason),
       research_stop_leads: json(version.researchStop?.unresolvedHighPriorityLeads),
       investigation_research_stop_reason: optional(investigation.researchStop?.reason),
       investigation_research_stop_leads: json(investigation.researchStop?.unresolvedHighPriorityLeads),
     })
     for (const table of Object.keys(entityFields) as Collection[]) {
-      for (const item of graph[table]) await insert(db, table, entityRow(item as unknown as Record<string, unknown>, table, investigation.id, version.version))
+      for (const item of graph[table]) await insert(db, snake(table), entityRow(item as unknown as Record<string, unknown>, table, investigation.id, version.version))
     }
     for (const [ordinal, item] of graph.sourceDependencies.entries()) await insert(db, 'source_dependencies', {
       investigation_id: investigation.id, version_number: version.version, ordinal, id: item.id,
@@ -134,7 +139,8 @@ export async function insertSnapshotRows(db: SnapshotDatabase, graph: XRayGraph)
     })
     for (const [table, owner, key, target] of links) {
       for (const item of owners(graph, owner)) {
-        const values = item[key] as string[]
+        const values = item[key] as string[] | undefined
+        if (values === undefined) continue
         for (const [ordinal, id] of values.entries()) await insert(db, table, {
           investigation_id: investigation.id, version_number: version.version,
           ...(owner === 'investigation' || owner === 'version' ? {} : { owner_id: item.id }),
@@ -192,7 +198,7 @@ export async function readSnapshot(db: SnapshotDatabase, investigationId: string
   }
   const artifacts: Record<string, Record<string, unknown>[]> = {}
   for (const table of Object.keys(entityFields) as Collection[]) {
-    artifacts[table] = (await rows(db, table, investigationId, versionNumber)).map((item) => entityFromRow(item, table))
+    artifacts[table] = (await rows(db, snake(table), investigationId, versionNumber)).map((item) => entityFromRow(item, table))
   }
   const dependencies = (await rows(db, 'source_dependencies', investigationId, versionNumber, 'ordinal')).map((item) => ({
     id: item.id, sourceId: item.source_id, relationship: item.relationship, confidence: item.confidence,
@@ -210,6 +216,7 @@ export async function readSnapshot(db: SnapshotDatabase, investigationId: string
     ...withOptional(item, ['outputArtifactVersion','model','startedAt','completedAt','error']),
   }))
   for (const [table, owner, key, target] of links) {
+    if (key === 'sourcePositionIds' && row.source_position_membership_present !== true) continue
     if (owner === 'investigation' || owner === 'version') {
       (owner === 'investigation' ? investigation : version)[key] = await readLinks(db, investigationId, versionNumber, table, target)
     } else {
@@ -218,12 +225,12 @@ export async function readSnapshot(db: SnapshotDatabase, investigationId: string
   }
   // Investigation memberships define collection order. Edge collections have their own ordinals.
   for (const [collection, membership] of [
-    ['claims','claimIds'],['sources','sourceIds'],['evidence','evidenceIds'],
+    ['claims','claimIds'],['sources','sourceIds'],['sourcePositions','sourcePositionIds'],['evidence','evidenceIds'],
     ['discrepancies','discrepancyIds'],['disconfirmations','disconfirmationIds'],
     ['findings','findingIds'],['gaps','gapIds'],
   ] as const) {
     const byId = new Map(artifacts[collection].map((item) => [item.id, item]))
-    artifacts[collection] = (investigation[membership] as string[]).map((id) => {
+    artifacts[collection] = ((investigation[membership] as string[] | undefined) ?? []).map((id) => {
       const item = byId.get(id)
       if (!item) throw new Error(`Snapshot member missing: ${collection} ${id}`)
       return item
@@ -233,6 +240,7 @@ export async function readSnapshot(db: SnapshotDatabase, investigationId: string
     investigation: investigation as unknown as Investigation,
     version: version as unknown as InvestigationVersion,
     claims: artifacts.claims as unknown as Claim[], sources: artifacts.sources as unknown as Source[],
+    sourcePositions: artifacts.sourcePositions as unknown as SourcePosition[],
     evidence: artifacts.evidence as unknown as Evidence[], discrepancies: artifacts.discrepancies as unknown as Discrepancy[],
     disconfirmations: artifacts.disconfirmations as unknown as Disconfirmation[],
     findings: artifacts.findings as unknown as Finding[], gaps: artifacts.gaps as unknown as Gap[],
