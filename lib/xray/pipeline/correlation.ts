@@ -156,6 +156,19 @@ export class CorrelationLedger {
   keys(): readonly CorrelationKey[] {
     return [...this.assigned.keys()]
   }
+
+  bindings(): readonly (readonly [CorrelationKey, string])[] {
+    return [...this.assigned.entries()]
+  }
+
+  static fromBindings(bindings: readonly (readonly [CorrelationKey, string])[]): CorrelationLedger {
+    const ledger = new CorrelationLedger()
+    for (const [key, id] of bindings) {
+      if (ledger.has(key)) throw new Error(`Duplicate correlation binding ${key}`)
+      ledger.assign(key, () => id)
+    }
+    return ledger
+  }
 }
 
 export interface CorrelatedProposal<P> {

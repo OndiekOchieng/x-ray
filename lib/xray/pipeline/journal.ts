@@ -171,6 +171,22 @@ export class RunJournal {
     this.investigationId = investigationId
   }
 
+  static fromEntries(investigationId: InvestigationId, entries: readonly JournalEntry[]): RunJournal {
+    const journal = new RunJournal(investigationId)
+    for (const entry of entries) {
+      if (entry.sequence !== journal.length) throw new JournalError(`Expected journal sequence ${journal.length}`)
+      switch (entry.kind) {
+        case 'STAGE': journal.appendStage(entry.run); break
+        case 'GATE': journal.appendGate(entry.run); break
+        case 'CAPABILITY': journal.appendCapability(entry.run); break
+        case 'STOP': journal.appendStop(entry.run); break
+        case 'INVALIDATION': journal.appendInvalidation(entry.run); break
+        default: throw new JournalError(`Unknown journal entry kind: ${String((entry as { kind: unknown }).kind)}`)
+      }
+    }
+    return journal
+  }
+
   get entries(): readonly JournalEntry[] {
     return this.log
   }

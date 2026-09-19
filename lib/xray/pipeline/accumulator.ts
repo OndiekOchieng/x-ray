@@ -54,6 +54,15 @@ export interface AccumulatorCheckpoint {
   readonly _stop?: ResearchStop
 }
 
+/** JSON-compatible values needed to resume stage-owned replacement exactly. */
+export interface AccumulatorState {
+  investigation: Investigation
+  version?: InvestigationVersion
+  collections: Record<ArtifactCollection, unknown[]>
+  outputs: { stage: ResearchStage; collections: { collection: ArtifactCollection; ids: string[] }[] }[]
+  activeResearchStop?: ResearchStop
+}
+
 export class GraphAccumulator {
   private readonly collections: Mutable
   private readonly investigation: Investigation
@@ -182,6 +191,28 @@ export class GraphAccumulator {
         [stage, new Map([...byCollection].map(([key, ids]) => [key, new Set(ids)]))])),
       _stop: this.stop,
     }
+  }
+
+  exportState(): AccumulatorState {
+    return {
+      investigation: structuredClone(this.investigation),
+      ...(this.version === undefined ? {} : { version: structuredClone(this.version) }),
+      collections: structuredClone(this.copyCollections()),
+      outputs: [...this.outputs].map(([stage, byCollection]) => ({
+        stage, collections: [...byCollection].map(([collection, ids]) => ({ collection, ids: [...ids] })),
+      })),
+      ...(this.stop === undefined ? {} : { activeResearchStop: structuredClone(this.stop) }),
+    }
+  }
+
+  static fromState(state: AccumulatorState): GraphAccumulator {
+    const accumulator = new GraphAccumulator(state.investigation, {
+      ...state.collections, ...(state.version === undefined ? {} : { version: state.version }),
+    } as Partial<XRayGraphInput>)
+    accumulator.outputs = new Map(state.outputs.map(({ stage, collections }) => [stage,
+      new Map(collections.map(({ collection, ids }) => [collection, new Set(ids)]))]))
+    accumulator.stop = state.activeResearchStop
+    return accumulator
   }
 
   /**

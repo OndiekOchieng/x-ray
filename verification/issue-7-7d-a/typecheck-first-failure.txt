@@ -1,0 +1,2 @@
+lib/xray/persistence/workspace-checks.ts(91,18): error TS2571: Object is of type 'unknown'.
+lib/xray/persistence/workspace-checks.ts(115,18): error TS2571: Object is of type 'unknown'.
