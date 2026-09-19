@@ -41,6 +41,7 @@ export type Priority = 'HIGH' | 'MEDIUM' | 'LOW'
 export type InvestigationId = string
 export type SourceId = string
 export type SourceDependencyId = string
+export type SourcePositionId = string
 export type EvidenceId = string
 export type DiscrepancyId = string
 export type DisconfirmationId = string

@@ -49,6 +49,20 @@ export type EvidenceStrength =
   | 'CONTEXTUAL'
   | 'WEAK'
 
+/** How the source could know this particular proposition (ADR-0012). */
+export type KnowledgeBasis =
+  | 'DIRECT_OBSERVATION'
+  | 'SELF_REPORT'
+  | 'PARTICIPANT_ACCOUNT'
+  | 'MEASUREMENT'
+  | 'ADMINISTRATIVE_RECORD'
+  | 'INSTITUTIONAL_CHARACTERIZATION'
+  | 'ATTRIBUTED_SOURCE'
+  | 'EXPERT_INTERPRETATION'
+  | 'SECONDARY_SYNTHESIS'
+  | 'INFERENCE'
+  | 'UNKNOWN'
+
 /**
  * A material proposition extracted from a Source and connected to Claims.
  *
@@ -72,6 +86,9 @@ export interface Evidence {
   claimIds: ClaimId[]
 
   strength: EvidenceStrength
+
+  /** Optional so historical immutable snapshots remain exactly reconstructible. */
+  knowledgeBasis?: KnowledgeBasis
 
   /**
    * The quantity this evidence measures, where it measures one.

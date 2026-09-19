@@ -55,6 +55,7 @@ import type {
   Investigation,
   InvestigationVersion,
   Source,
+  SourcePosition,
   SourceDependency,
 } from '@/lib/xray/domain'
 
@@ -64,6 +65,8 @@ export interface XRayGraphInput {
   version?: InvestigationVersion
   claims: readonly Claim[]
   sources: readonly Source[]
+  /** Absent on historical graphs; normalized to an empty query collection. */
+  sourcePositions?: readonly SourcePosition[]
   sourceDependencies: readonly SourceDependency[]
   evidence: readonly Evidence[]
   /** Proposition-level origins. See `selectors/provenance.ts`. */
@@ -79,6 +82,9 @@ export interface XRayGraphInput {
 interface GraphIndex {
   readonly claim: ReadonlyMap<string, Claim>
   readonly source: ReadonlyMap<string, Source>
+  readonly sourcePosition: ReadonlyMap<string, SourcePosition>
+  readonly positionsBySource: ReadonlyMap<string, SourcePosition[]>
+  readonly positionsByClaim: ReadonlyMap<string, SourcePosition[]>
   readonly evidence: ReadonlyMap<string, Evidence>
   readonly discrepancy: ReadonlyMap<string, Discrepancy>
   readonly finding: ReadonlyMap<string, Finding>
@@ -99,6 +105,7 @@ interface GraphIndex {
 }
 
 export interface XRayGraph extends XRayGraphInput {
+  readonly sourcePositions: readonly SourcePosition[]
   readonly evidenceProvenance: readonly EvidenceProvenance[]
   readonly atiRequests: readonly ATIRequest[]
   readonly index: GraphIndex
@@ -133,6 +140,13 @@ const push = <T>(map: Map<string, T[]>, key: string, value: T): void => {
 
 /** Build the query aggregate. Cheap; call per read cycle rather than caching. */
 export function createXRayGraph(input: XRayGraphInput): XRayGraph {
+  const sourcePositions = input.sourcePositions ?? []
+  const positionsBySource = new Map<string, SourcePosition[]>()
+  const positionsByClaim = new Map<string, SourcePosition[]>()
+  for (const position of sourcePositions) {
+    push(positionsBySource, position.sourceId, position)
+    for (const claimId of position.claimIds) push(positionsByClaim, claimId, position)
+  }
   const findingsByClaim = new Map<string, Finding[]>()
   for (const f of input.findings) push(findingsByClaim, f.claimId, f)
 
@@ -154,11 +168,15 @@ export function createXRayGraph(input: XRayGraphInput): XRayGraph {
 
   return {
     ...input,
+    sourcePositions,
     evidenceProvenance: input.evidenceProvenance ?? [],
     atiRequests: input.atiRequests ?? [],
     index: {
       claim: new Map(input.claims.map((c) => [c.id, c])),
       source: new Map(input.sources.map((s) => [s.id, s])),
+      sourcePosition: new Map(sourcePositions.map((position) => [position.id, position])),
+      positionsBySource,
+      positionsByClaim,
       evidence: new Map(input.evidence.map((e) => [e.id, e])),
       discrepancy: new Map(input.discrepancies.map((d) => [d.id, d])),
       finding: new Map(input.findings.map((f) => [f.id, f])),
