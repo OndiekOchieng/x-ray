@@ -262,12 +262,19 @@ export function validateStructure(graph: XRayGraph, mode: ValidationMode = 'FULL
       'CONTEXTUAL',
       'WEAK',
     ])
-    if (evidence.knowledgeBasis !== undefined) requireEnum('Evidence', evidence.id, 'knowledgeBasis', evidence.knowledgeBasis, [
-      'DIRECT_OBSERVATION', 'SELF_REPORT', 'PARTICIPANT_ACCOUNT', 'MEASUREMENT', 'ADMINISTRATIVE_RECORD',
-      'INSTITUTIONAL_CHARACTERIZATION', 'ATTRIBUTED_SOURCE',
-      'EXPERT_INTERPRETATION', 'SECONDARY_SYNTHESIS', 'INFERENCE', 'UNKNOWN',
-    ])
-    else if (mode === 'FULL' && requiresKnowledgeBasis(graph.investigation.protocolVersion)) out.push({
+    if (evidence.knowledgeBasis !== undefined) {
+      requireEnum('Evidence', evidence.id, 'knowledgeBasis', evidence.knowledgeBasis, [
+        'DIRECT_OBSERVATION', 'SELF_REPORT', 'PARTICIPANT_ACCOUNT', 'MEASUREMENT', 'ADMINISTRATIVE_RECORD',
+        'INSTITUTIONAL_CHARACTERIZATION', 'ATTRIBUTED_SOURCE',
+        'EXPERT_INTERPRETATION', 'SECONDARY_SYNTHESIS', 'INFERENCE', 'UNKNOWN',
+      ])
+      if (evidence.knowledgeBasis === 'UNKNOWN' && mode === 'FULL' &&
+          requiresKnowledgeBasis(graph.investigation.protocolVersion)) out.push({
+        code: 'STRUCTURAL/UNKNOWN_KNOWLEDGE_BASIS', class: 'STRUCTURAL', severity: 'ERROR',
+        targets: [target('Evidence', evidence.id)],
+        message: `Evidence ${evidence.id} has UNKNOWN knowledgeBasis; v0.3+ FULL requires a concrete basis.`,
+      })
+    } else if (mode === 'FULL' && requiresKnowledgeBasis(graph.investigation.protocolVersion)) out.push({
       code: 'STRUCTURAL/MISSING_KNOWLEDGE_BASIS', class: 'STRUCTURAL', severity: 'ERROR',
       targets: [target('Evidence', evidence.id)],
       message: `Evidence ${evidence.id} lacks knowledgeBasis required for v0.3+ FULL validation.`,

@@ -54,9 +54,15 @@ void checkPipeline().catch((error: unknown) => { console.error(error); process.e
 const v03 = createXRayGraph({ ...historical, investigation: { ...historical.investigation, protocolVersion: '0.3.0' } })
 assert.equal(validateXRayGraph(v03, { mode: 'STAGED' }).violations.some((v) => v.code === 'STRUCTURAL/MISSING_KNOWLEDGE_BASIS'), false)
 assert.equal(validateXRayGraph(v03, { mode: 'FULL' }).violations.filter((v) => v.code === 'STRUCTURAL/MISSING_KNOWLEDGE_BASIS').length, historical.evidence.length)
-const complete = createXRayGraph({ ...v03, evidence: v03.evidence.map((e) => ({ ...e, knowledgeBasis: 'UNKNOWN' as const })) })
-assert.equal(validateXRayGraph(complete, { mode: 'FULL' }).violations.some((v) => v.code === 'STRUCTURAL/MISSING_KNOWLEDGE_BASIS'), false)
+const unknown = createXRayGraph({ ...v03, evidence: v03.evidence.map((e) => ({ ...e, knowledgeBasis: 'UNKNOWN' as const })) })
+assert.equal(validateXRayGraph(unknown, { mode: 'FULL' }).violations.filter((v) => v.code === 'STRUCTURAL/UNKNOWN_KNOWLEDGE_BASIS').length, historical.evidence.length)
+assert.equal(validateXRayGraph(unknown, { mode: 'STAGED' }).violations.some((v) => v.code === 'STRUCTURAL/UNKNOWN_KNOWLEDGE_BASIS'), false)
+const complete = createXRayGraph({ ...v03, evidence: v03.evidence.map((e) => ({ ...e, knowledgeBasis: 'SECONDARY_SYNTHESIS' as const })) })
+assert.equal(validateXRayGraph(complete, { mode: 'FULL' }).violations.some((v) => v.code === 'STRUCTURAL/MISSING_KNOWLEDGE_BASIS' || v.code === 'STRUCTURAL/UNKNOWN_KNOWLEDGE_BASIS'), false)
 assert.equal(validateXRayGraph(historical, { mode: 'FULL' }).violations.some((v) => v.code === 'STRUCTURAL/MISSING_KNOWLEDGE_BASIS'), false)
+const v02 = createXRayGraph({ ...historical, investigation: { ...historical.investigation, protocolVersion: '0.2.0' } })
+assert.equal(validateXRayGraph(v02, { mode: 'FULL' }).violations.some((v) => v.code === 'STRUCTURAL/MISSING_KNOWLEDGE_BASIS'), false)
+assert.equal(validateXRayGraph(createXRayGraph({ ...v02, evidence: unknown.evidence }), { mode: 'FULL' }).violations.some((v) => v.code === 'STRUCTURAL/UNKNOWN_KNOWLEDGE_BASIS'), false)
 console.log('14b: v0.3 FULL basis requirement and historical/STAGED compatibility PASS')
 
 const badPosition = {
