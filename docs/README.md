@@ -50,14 +50,16 @@ split by concern.
 | [runtime-architecture](./architecture/runtime-architecture.md) | Web, API, adapters, PostgreSQL; implementation boundaries |
 | [investigation-versioning](./architecture/investigation-versioning.md) | Immutable snapshots; new receipts; affected-claim re-evaluation |
 | [publication-and-cache](./architecture/publication-and-cache.md) | Cached public X-Rays; the synthesis boundary |
+| [source-position-and-evidentiary-reach](./architecture/source-position-and-evidentiary-reach.md) | Protocol v0.3 architecture delta: SourcePosition and KnowledgeBasis |
 
 **If you read only two:** `evidence-graph.md` and
 `validation-and-invariants.md`. They carry the actual commitments. Everything
 else follows from them.
 
-Protocol v0.3 intentionally introduces methodological requirements whose
-canonical architecture impact is **not yet settled**. Issue #13 owns that
-reconciliation.
+Protocol v0.3's first architecture reconciliation is now accepted in
+[ADR-0012](./adr/0012-source-position-and-evidentiary-reach.md): SourcePosition
+is canonical contextual state and KnowledgeBasis belongs on Evidence. Runtime
+implementation is tracked separately from persistence.
 
 ---
 
@@ -88,8 +90,8 @@ The central v0.3 addition is:
 > know, and what proposition the record can directly establish.**
 
 v0.3 keeps Source Position, Knowledge Basis, Proposition Provenance, and
-Source Dependency conceptually distinct. Whether and how those distinctions
-become canonical graph artifacts is intentionally deferred to #13.
+Source Dependency distinct. ADR-0012 makes the first two canonical while
+preserving the existing provenance layers.
 
 ---
 
@@ -117,14 +119,14 @@ is the origin of
 
 ## 5. Where ADRs live
 
-**→ [`adr/`](./adr/README.md)** — nine decisions, `Status / Context /
+**→ [`adr/`](./adr/README.md)** — twelve decisions, `Status / Context /
 Decision / Consequences`.
 
 | | | | |
 | --- | --- | --- | --- |
 | [0001](./adr/0001-evidence-graph-canonical-state.md) Evidence graph is canonical | [0002](./adr/0002-staged-research-pipeline.md) Staged pipeline | [0003](./adr/0003-relational-store-first.md) Relational store first | [0004](./adr/0004-model-adapter-boundary.md) Model behind adapter |
 | [0005](./adr/0005-epistemic-invariants-outside-prompts.md) Invariants outside prompt | [0006](./adr/0006-immutable-investigation-versions.md) Immutable versions | [0007](./adr/0007-gap-first-class-state.md) Gap is first-class | [0008](./adr/0008-ati-resolution-adapter.md) ATI is an adapter |
-| [0009](./adr/0009-benchmark-runs-as-acceptance-evidence.md) Benchmarks as acceptance evidence | | | |
+| [0009](./adr/0009-benchmark-runs-as-acceptance-evidence.md) Benchmarks as acceptance evidence | [0010](./adr/0010-research-retrieval-boundary.md) Retrieval boundary | [0011](./adr/0011-control-gates-are-not-stages.md) Control gates | [0012](./adr/0012-source-position-and-evidentiary-reach.md) Source position |
 
 ---
 
@@ -170,7 +172,7 @@ which supersedes stale prose sequencing when the two differ.
 ```text
 docs/
 ├── README.md                   ← you are here
-├── architecture/               System Architecture v0.1, pending #13 reconciliation
+├── architecture/               System Architecture v0.1 + accepted later deltas
 ├── protocol/v0.3/              Current manual research contract
 ├── protocol/v0.2/              Frozen protocol-evolution contract
 ├── protocol/v0.1/              Frozen XRAY-KE-001 research method
@@ -189,14 +191,13 @@ Protocol v0.1 and v0.2 are frozen historical evidence. Protocol v0.3 is current
 for new manual investigations.
 
 **Protocol / architecture boundary.** v0.3 records the research method learned
-from repeated manual investigations. It does not silently mutate Architecture
-v0.1. Issue #13 decides which source-position/evidentiary-reach semantics
-belong in canonical domain state, Reviewer, Validator, pipeline contracts, and
-persistence.
+from repeated manual investigations. ADR-0012 records the accepted source-position
+architecture delta; follow-up implementation issues own runtime and persistence
+changes rather than silently mutating the historical baseline.
 
 **Immutability.** Anything under `benchmarks/*/raw/` and released
 `protocol/*/` is historical evidence: preserved, never rewritten after use as
 a run contract. Corrections and later lessons belong in a new version.
 
-**Status.** Architecture v0.1 remains the implemented/proposed architectural
-baseline pending #13. Protocol v0.3 is the current manual research method.
+**Status.** Architecture v0.1 remains the baseline with accepted later deltas,
+including ADR-0012. Protocol v0.3 is the current manual research method.
