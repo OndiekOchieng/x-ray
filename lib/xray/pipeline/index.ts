@@ -66,6 +66,8 @@ export type {
 // --- 6b: adapter boundaries ------------------------------------------------
 
 export { isProposalRef } from './proposals'
+export { canonicalizeSourcePositions } from './source-position'
+export type { SourcePositionHandles } from './source-position'
 export type {
   ClaimClassificationProposal,
   ClaimProposal,
@@ -77,6 +79,7 @@ export type {
   GapProposal,
   Proposal,
   ProposalRef,
+  SourcePositionProposal,
 } from './proposals'
 
 export {

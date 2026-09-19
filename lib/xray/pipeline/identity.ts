@@ -33,6 +33,7 @@ import type {
   GapId,
   SourceDependencyId,
   SourceId,
+  SourcePositionId,
   StageRunId,
   SurfaceClaimId,
 } from '@/lib/xray/domain'
@@ -69,6 +70,7 @@ export interface IdentityAllocator {
   /** `DC001`, `DC002`, … — disjoint from `C…` by construction. */
   discoveredClaim(): DiscoveredClaimId
   source(): SourceId
+  sourcePosition(): SourcePositionId
   evidence(): EvidenceId
   sourceDependency(): SourceDependencyId
   evidenceProvenance(): string
@@ -89,6 +91,7 @@ export interface IdentityAllocator {
 export interface IdentitySeed {
   claims: readonly string[]
   sources: readonly string[]
+  sourcePositions?: readonly string[]
   evidence: readonly string[]
   sourceDependencies: readonly string[]
   evidenceProvenance: readonly string[]
@@ -101,6 +104,7 @@ export function seedFrom(input: XRayGraphInput): IdentitySeed {
   return {
     claims: input.claims.map((c) => c.id),
     sources: input.sources.map((s) => s.id),
+    sourcePositions: (input.sourcePositions ?? []).map((p) => p.id),
     evidence: input.evidence.map((e) => e.id),
     sourceDependencies: input.sourceDependencies.map((d) => d.id),
     evidenceProvenance: (input.evidenceProvenance ?? []).map((p) => p.id),
@@ -121,6 +125,7 @@ export function createIdentityAllocator(seed: IdentitySeed): IdentityAllocator {
     surfaceClaim: highestOrdinal(seed.claims, 'C'),
     discoveredClaim: highestOrdinal(seed.claims, 'DC'),
     source: highestOrdinal(seed.sources, 'SRC-'),
+    sourcePosition: highestOrdinal(seed.sourcePositions ?? [], 'SP-'),
     evidence: highestOrdinal(seed.evidence, 'EV-'),
     sourceDependency: highestOrdinal(seed.sourceDependencies, 'SD-'),
     evidenceProvenance: highestOrdinal(seed.evidenceProvenance, 'EP-'),
@@ -139,6 +144,7 @@ export function createIdentityAllocator(seed: IdentitySeed): IdentityAllocator {
     surfaceClaim: () => `C${ordinal(++counters.surfaceClaim)}` as SurfaceClaimId,
     discoveredClaim: () => `DC${ordinal(++counters.discoveredClaim)}` as DiscoveredClaimId,
     source: () => `SRC-${ordinal(++counters.source)}`,
+    sourcePosition: () => `SP-${ordinal(++counters.sourcePosition)}`,
     evidence: () => `EV-${ordinal(++counters.evidence)}`,
     sourceDependency: () => `SD-${ordinal(++counters.sourceDependency)}`,
     evidenceProvenance: () => `EP-${ordinal(++counters.evidenceProvenance)}`,

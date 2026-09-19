@@ -59,6 +59,9 @@ import type {
   Measurement,
   Priority,
   ResolutionPath,
+  KnowledgeBasis,
+  SourcePositionBasis,
+  SourcePositionRelationship,
   TimeScope,
 } from '@/lib/xray/domain'
 
@@ -121,6 +124,7 @@ export interface EvidenceProposal {
   proposition: string
   relationship: EvidenceRelationship
   strength: EvidenceStrength
+  knowledgeBasis?: KnowledgeBasis
   /** Claims this bears on, by stage-issued handle. */
   claimRefs: readonly ProposalRef[]
   measurement?: Measurement
@@ -134,6 +138,23 @@ export interface EvidenceProposal {
    */
   quotedPassage?: string
   locationInSource?: string
+}
+
+/** Context proposed by a model; the stage resolves handles and owns identity. */
+export interface SourcePositionProposal {
+  /** Present when PROVENANCE revises a position offered by TRACE. */
+  positionRef?: ProposalRef
+  sourceRef: ProposalRef
+  claimRefs: readonly ProposalRef[]
+  relationship: SourcePositionRelationship
+  relationshipDescription?: string
+  powerOrDependency: readonly string[]
+  productionPurpose?: string
+  timeScope?: TimeScope
+  basis: SourcePositionBasis
+  confidence: Confidence
+  supportingEvidenceRefs: readonly ProposalRef[]
+  basisDescription?: string
 }
 
 /** A claim discovered while tracing, rather than read off the surface source. */
@@ -213,6 +234,7 @@ export type Proposal =
   | ClaimClassificationProposal
   | DiscoveredClaimProposal
   | EvidenceProposal
+  | SourcePositionProposal
   | DisconfirmationProposal
   | DiscrepancyProposal
   | FindingProposal

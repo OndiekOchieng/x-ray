@@ -152,13 +152,15 @@ export class GraphAccumulator {
 
   /** Canonical arrays as they stand. Copies: callers cannot mutate the run. */
   snapshot(): XRayGraphInput {
+    const { sourcePositions, ...collections } = this.copyCollections()
     return {
       investigation: this.investigationSnapshot(),
       ...(this.version ? { version: this.version } : {}),
-      ...(this.copyCollections() as unknown as Omit<
+      ...(collections as unknown as Omit<
         XRayGraphInput,
-        'investigation' | 'version' | 'atiRequests'
+        'investigation' | 'version' | 'atiRequests' | 'sourcePositions'
       >),
+      sourcePositions: sourcePositions as XRayGraphInput['sourcePositions'],
     }
   }
 
@@ -209,6 +211,8 @@ export class GraphAccumulator {
       researchStop: this.stop,
       claimIds: ids('claims') as Investigation['claimIds'],
       sourceIds: ids('sources'),
+      ...(this.investigation.sourcePositionIds !== undefined || ids('sourcePositions').length > 0
+        ? { sourcePositionIds: ids('sourcePositions') } : {}),
       evidenceIds: ids('evidence'),
       discrepancyIds: ids('discrepancies'),
       disconfirmationIds: ids('disconfirmations'),

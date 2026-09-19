@@ -44,6 +44,7 @@ import type {
   FindingProposal,
   GapProposal,
   ProposalRef,
+  SourcePositionProposal,
 } from './proposals'
 import type { RetrievalQuery, RetrievedDocument } from './retrieval-port'
 
@@ -98,6 +99,7 @@ export interface TraceInput extends ModelInputBase {
 
 export interface TraceProposals {
   evidence: readonly EvidenceProposal[]
+  sourcePositions?: readonly SourcePositionProposal[]
   /** Claims surfaced by the material that were not on the surface record. */
   discoveredClaims: readonly DiscoveredClaimProposal[]
   /** Further retrieval worth attempting. Advisory; the stage decides. */
