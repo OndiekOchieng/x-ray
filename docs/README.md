@@ -58,20 +58,22 @@ else follows from them.
 
 ## 3. Where the research protocol lives
 
-**→ [`protocol/v0.1/`](./protocol/v0.1/XRAY_RESEARCH_PROTOCOL_v0.1.md)**
+**→ [`protocol/v0.2/`](./protocol/v0.2/XRAY_RESEARCH_PROTOCOL_v0.2.md)** — current for new investigations
 
 | File | What it is |
 | --- | --- |
-| [XRAY_RESEARCH_PROTOCOL_v0.1.md](./protocol/v0.1/XRAY_RESEARCH_PROTOCOL_v0.1.md) | The research method: ten principles and the stage-by-stage procedure |
-| [XRAY_RESEARCH_ACTION_PROMPT_v0.1.md](./protocol/v0.1/XRAY_RESEARCH_ACTION_PROMPT_v0.1.md) | The prompt used to execute a run |
+| [XRAY_RESEARCH_PROTOCOL_v0.2.md](./protocol/v0.2/XRAY_RESEARCH_PROTOCOL_v0.2.md) | Current research method, including explicit provenance, validation/review, anonymous-source independence, framing, influence/intent/effect boundaries, and counterfactual handling |
+| [XRAY_RESEARCH_ACTION_PROMPT_v0.2.md](./protocol/v0.2/XRAY_RESEARCH_ACTION_PROMPT_v0.2.md) | Current prompt used to execute a manual research run |
+| [Protocol v0.1](./protocol/v0.1/XRAY_RESEARCH_PROTOCOL_v0.1.md) | Frozen historical protocol used for XRAY-KE-001 comparability |
 
 The protocol is the **method**; the architecture is the **system that
 enforces it**. Invariants exist because a protocol principle needed to hold
 regardless of which model executes it
 ([ADR-0005](./adr/0005-epistemic-invariants-outside-prompts.md)).
 
-Protocol v0.1 is preserved as written. Architecture v0.1 targets Protocol
-v0.2, which does not exist yet.
+Protocol v0.1 remains preserved as historical evidence. Protocol v0.2 is the
+current manual-investigation contract and incorporates lessons from XRAY-KE-001
+and the XRAY-US-001 protocol-evolution run.
 
 ---
 
@@ -151,7 +153,8 @@ acceptance suite is step 6 of the build order; making it green is step 12.
 docs/
 ├── README.md                   ← you are here
 ├── architecture/               System Architecture v0.1, split by concern
-├── protocol/v0.1/              The research method (preserved as written)
+├── protocol/v0.2/              Current research method for new manual runs
+├── protocol/v0.1/              Frozen XRAY-KE-001 research method
 ├── adr/                        ADR-0001 … ADR-0009
 ├── benchmarks/XRAY-KE-001/     Reference benchmark + immutable raw runs
 ├── calibration/                Worked judgment cases + recurring failure modes
@@ -162,9 +165,10 @@ docs/
 
 ## Conventions
 
-**Versioning.** Architecture is v0.1. Protocol is v0.1. They version
-independently; Architecture v0.1 targets a Protocol v0.2 that does not exist
-yet.
+**Versioning.** Architecture and protocol version independently.
+Protocol v0.1 is frozen historical evidence. Protocol v0.2 is current for new
+manual investigations and carries forward the architectural boundaries learned
+from XRAY-KE-001 plus the methodological findings exposed by XRAY-US-001.
 
 **Amendments.** Scaffold reconciliation on 2026-09-15 produced five
 clarifications to Architecture v0.1. They are recorded inline where they
