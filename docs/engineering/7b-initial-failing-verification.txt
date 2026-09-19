@@ -1,0 +1,33 @@
+lib/xray/persistence/snapshot.ts(202,131): error TS18046: 'value' is of type 'unknown'.
+lib/xray/persistence/snapshot.ts(208,44): error TS18046: 'item' is of type 'unknown'.
+lib/xray/persistence/snapshot.ts(208,130): error TS18046: 'item' is of type 'unknown'.
+lib/xray/persistence/snapshot.ts(217,63): error TS18046: 'item' is of type 'unknown'.
+lib/xray/persistence/snapshot.ts(223,13): error TS2352: Conversion of type 'Record<string, unknown>[]' to type 'Claim[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is not comparable to type 'Claim'.
+    Type 'Record<string, unknown>' is not comparable to type 'ClaimBase & { origin: "DISCOVERED"; id: `DC${string}`; }'.
+      Type 'Record<string, unknown>' is missing the following properties from type 'ClaimBase': investigationId, text, layer, type, and 3 more.
+lib/xray/persistence/snapshot.ts(223,51): error TS2352: Conversion of type 'Record<string, unknown>[]' to type 'Source[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'Source': id, title, retrievedAt, sourceType, and 3 more.
+lib/xray/persistence/snapshot.ts(224,15): error TS2352: Conversion of type 'Record<string, unknown>[]' to type 'Evidence[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'Evidence': id, sourceId, proposition, relationship, and 2 more.
+lib/xray/persistence/snapshot.ts(224,64): error TS2352: Conversion of type 'Record<string, unknown>[]' to type 'Discrepancy[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'Discrepancy': id, claimIds, evidenceIds, description, and 2 more.
+lib/xray/persistence/snapshot.ts(225,23): error TS2352: Conversion of type 'Record<string, unknown>[]' to type 'Disconfirmation[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'Disconfirmation': id, claimId, preliminaryHypothesis, counterHypothesis, and 5 more.
+lib/xray/persistence/snapshot.ts(226,15): error TS2352: Conversion of type 'Record<string, unknown>[]' to type 'Finding[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'Finding': id, claimId, status, confidence, and 8 more.
+lib/xray/persistence/snapshot.ts(226,54): error TS2352: Conversion of type 'Record<string, unknown>[]' to type 'Gap[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is not comparable to type 'Gap'.
+    Type 'Record<string, unknown>' is not comparable to type 'GapBase & { resolutionPath: "WAIT_FOR_RECORD" | "FIELD_VERIFICATION" | "SOURCE_CLARIFICATION" | "DATASET_QUERY" | "EXPERT_INTERPRETATION" | "OTHER"; atiEligible: false; }'.
+      Type 'Record<string, unknown>' is missing the following properties from type 'GapBase': id, claimIds, missingEvidence, whyItMatters, and 4 more.
+lib/xray/persistence/snapshot-checks.ts(13,3): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.
+lib/xray/persistence/snapshot-checks.ts(15,3): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.
+lib/xray/persistence/snapshot-checks.ts(16,3): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.
+lib/xray/persistence/snapshot-checks.ts(17,3): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.
+lib/xray/persistence/snapshot-checks.ts(20,3): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.
+lib/xray/persistence/snapshot-checks.ts(21,20): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.
+lib/xray/persistence/snapshot-checks.ts(37,28): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.
+lib/xray/persistence/snapshot-checks.ts(38,28): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.
+lib/xray/persistence/snapshot-checks.ts(39,16): error TS2571: Object is of type 'unknown'.
+lib/xray/persistence/snapshot-checks.ts(40,16): error TS2571: Object is of type 'unknown'.
+lib/xray/persistence/snapshot-checks.ts(47,3): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.

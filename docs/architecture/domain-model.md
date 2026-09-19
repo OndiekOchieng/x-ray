@@ -234,8 +234,8 @@ interface Source {
 
   url?: string;
 
-  publishedAt?: string;
-  retrievedAt: string;
+  publishedAt?: string; // ISO month, date, or date-time at recorded precision
+  retrievedAt: string; // ISO date or date-time at the precision actually recorded
 
   sourceType:
     | "LEGISLATION"

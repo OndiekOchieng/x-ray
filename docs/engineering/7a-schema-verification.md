@@ -19,4 +19,4 @@ The first constraint run failed because a pointer rewind was accepted. The origi
 
 ## Boundary
 
-The schema can represent the frozen XRAY-KE-001 graph, including date-only source publication values, optional/absent values, both provenance layers, ordered ID lists, the SATURATION stop and legacy StageRuns. This is a representation and constraint check, not the 7b graph→store→graph proof. No repository mapper, v2 commit flow, durable resume, API, publication, or ATI lifecycle was implemented.
+The 7b deep round-trip exposed a 7a representation error: the frozen sources record date-only `retrievedAt`, while the initial migration required a date-time. Migration 0002 broadens that column to the existing date-or-date-time domain without normalizing the recorded value. The schema can then represent the frozen graph, including optional/absent values, both provenance layers, ordered ID lists, the SATURATION stop and legacy StageRuns. The original 7a check was a representation/constraint check, not the 7b graph→store→graph proof. No v2 commit flow, durable resume, API, publication, or ATI lifecycle was implemented.
