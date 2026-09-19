@@ -80,6 +80,9 @@ try {
   await writeInitialSnapshot(v03db, fixture)
   const v03 = await readSnapshot(v03db, fixture.investigation.id, 1)
   assert.deepStrictEqual(v03, fixture)
+  const v03Validation = validateXRayGraph(v03, { mode: 'FULL' })
+  assert.equal(v03Validation.valid, true, JSON.stringify(v03Validation.violations))
+  console.log('15b: reconstructed v0.3 FULL validation PASS')
   assert.deepStrictEqual(v03.investigation.sourcePositionIds, ['SP-002', 'SP-001'])
   assert.deepStrictEqual(v03.sourcePositions.map((item) => item.claimIds), fixture.sourcePositions.map((item) => item.claimIds))
   assert.deepStrictEqual(v03.sourcePositions.map((item) => item.supportingEvidenceIds), fixture.sourcePositions.map((item) => item.supportingEvidenceIds))
@@ -93,6 +96,25 @@ try {
   console.log('15b: v0.3 SourcePosition/KnowledgeBasis and four independent layers round-trip PASS')
 } finally {
   await v03db.close()
+}
+
+const emptyDb = new PGlite()
+try {
+  await migrate(emptyDb)
+  const historical = createXrayKe001Graph()
+  const presentEmpty = createXRayGraph({ ...historical,
+    investigation: { ...historical.investigation, sourcePositionIds: [] },
+    sourcePositions: [],
+  })
+  await writeInitialSnapshot(emptyDb, presentEmpty)
+  const restoredEmpty = await readSnapshot(emptyDb, presentEmpty.investigation.id, 1)
+  assert.deepStrictEqual(restoredEmpty, presentEmpty)
+  assert.equal(Object.hasOwn(restoredEmpty.investigation, 'sourcePositionIds'), true)
+  assert.deepStrictEqual(restoredEmpty.investigation.sourcePositionIds, [])
+  assert.equal(((await emptyDb.query('SELECT source_position_membership_present FROM investigation_versions')).rows[0] as { source_position_membership_present: boolean }).source_position_membership_present, true)
+  console.log('15b: explicitly present empty membership round-trip PASS')
+} finally {
+  await emptyDb.close()
 }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1 })
