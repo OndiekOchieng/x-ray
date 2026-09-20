@@ -50,9 +50,10 @@ function verifyReferences(audit: ExecutionAudit): void {
 }
 
 /** Append only new entries/rounds/results; reject any changed historical prefix. */
-export async function appendExecutionAudit(db: SnapshotDatabase, executionRunId: string, audit: ExecutionAudit): Promise<void> {
+export async function appendExecutionAudit(db: SnapshotDatabase, executionRunId: string, audit: ExecutionAudit,
+  options: { inTransaction?: boolean } = {}): Promise<void> {
   verifyReferences(audit)
-  await db.query('BEGIN')
+  if (!options.inTransaction) await db.query('BEGIN')
   try {
     const run = (await db.query('SELECT investigation_id FROM execution_runs WHERE id=$1 FOR UPDATE', [executionRunId])).rows
     if (run.length !== 1 || run[0].investigation_id !== audit.journal.investigationId)
@@ -84,9 +85,9 @@ export async function appendExecutionAudit(db: SnapshotDatabase, executionRunId:
         encoded(runPayload), entry.kind === 'GATE' && entry.run.result?.kind === 'VALIDATION' ? entry.run.id : null,
         entry.kind === 'GATE' && entry.run.result?.kind === 'REVIEW_HISTORY' ? entry.run.result.roundIndex : null])
     }
-    await db.query('COMMIT')
+    if (!options.inTransaction) await db.query('COMMIT')
   } catch (error) {
-    await db.query('ROLLBACK')
+    if (!options.inTransaction) await db.query('ROLLBACK')
     throw error
   }
 }

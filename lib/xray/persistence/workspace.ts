@@ -32,7 +32,8 @@ interface WorkspacePayload {
 }
 
 /** Atomically checkpoint working state and the execution status on one pinned connection. */
-export async function saveCandidateCheckpoint(db: SnapshotDatabase, checkpoint: CandidateCheckpoint): Promise<void> {
+export async function saveCandidateCheckpoint(db: SnapshotDatabase, checkpoint: CandidateCheckpoint,
+  options: { inTransaction?: boolean } = {}): Promise<void> {
   if (checkpoint.artifactVersion < 0 || !Number.isInteger(checkpoint.artifactVersion) ||
       checkpoint.journal.investigationId !== checkpoint.investigationId ||
       checkpoint.accumulator.snapshot().investigation.id !== checkpoint.investigationId)
@@ -44,7 +45,7 @@ export async function saveCandidateCheckpoint(db: SnapshotDatabase, checkpoint: 
     journalEntries: checkpoint.journal.entries,
   }
   const state: WorkspaceEnvelope = { format: 1, data: encodeValue(payload) }
-  await db.query('BEGIN')
+  if (!options.inTransaction) await db.query('BEGIN')
   try {
     await db.query('INSERT INTO investigations(id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [checkpoint.investigationId])
     await db.query(`INSERT INTO execution_runs(id, investigation_id, started_at, status)
@@ -56,9 +57,9 @@ export async function saveCandidateCheckpoint(db: SnapshotDatabase, checkpoint: 
     await db.query(`INSERT INTO candidate_workspaces(execution_run_id,state,updated_at) VALUES ($1,$2,$3)
       ON CONFLICT (execution_run_id) DO UPDATE SET state=EXCLUDED.state, updated_at=EXCLUDED.updated_at`,
     [checkpoint.executionRunId, JSON.stringify(state), checkpoint.updatedAt])
-    await db.query('COMMIT')
+    if (!options.inTransaction) await db.query('COMMIT')
   } catch (error) {
-    await db.query('ROLLBACK')
+    if (!options.inTransaction) await db.query('ROLLBACK')
     throw error
   }
 }

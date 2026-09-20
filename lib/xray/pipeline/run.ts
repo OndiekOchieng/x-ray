@@ -105,6 +105,19 @@ export interface RunOptions {
   revision?: RevisionRequest
   /** Prior rounds are retained across revisions. */
   reviewHistory?: ReviewHistory
+  /** Awaited after each durable stage attempt/gate and before returning. */
+  onBoundary?: (boundary: PipelineBoundary) => Promise<void>
+}
+
+export interface PipelineBoundary {
+  kind: 'STAGE_ATTEMPT' | 'VALIDATE' | 'REVIEW' | 'TERMINAL'
+  status: RunStatus | 'PENDING'
+  journal: RunJournal
+  accumulator: GraphAccumulator
+  ledger: CorrelationLedger
+  artifactVersion: number
+  validation?: ValidationResult
+  reviewHistory?: ReviewHistory
 }
 
 export type RunStatus =
@@ -185,6 +198,12 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
   let artifactVersion = options.startArtifactVersion ?? 0
   let failedStage: ResearchStage | undefined
   const capabilityGaps: CapabilityUnavailable[] = []
+  const boundary = async (kind: PipelineBoundary['kind'], status: PipelineBoundary['status'],
+    validation?: ValidationResult, reviewHistory?: ReviewHistory) => {
+    await options.onBoundary?.({ kind, status, journal, accumulator, ledger, artifactVersion,
+      ...(validation === undefined ? {} : { validation }),
+      ...(reviewHistory === undefined ? {} : { reviewHistory }) })
+  }
 
   // -------------------------------------------------------------------------
   // Research stages
@@ -308,6 +327,10 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
           completedAt: clock(),
           error: (err as Error).message,
         })
+      } finally {
+        // Outside the stage error handler: persistence failure must never be
+        // misreported as a failed research attempt.
+        await boundary('STAGE_ATTEMPT', 'PENDING')
       }
     }
 
@@ -323,6 +346,7 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
   }
 
   if (failedStage !== undefined) {
+    await boundary('TERMINAL', 'STAGE_FAILED')
     return {
       investigationId,
       status: 'STAGE_FAILED',
@@ -341,6 +365,7 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
   // -------------------------------------------------------------------------
 
   if (journal.staleStages().length > 0) {
+    await boundary('TERMINAL', 'CAPABILITY_BLOCKED')
     return {
       investigationId, status: 'CAPABILITY_BLOCKED', journal, accumulator,
       graph: accumulator.rebuild(), artifactVersion, capabilityGaps: journal.activeCapabilityEntries().map((entry) => entry.unavailable), ledger,
@@ -374,6 +399,7 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
     },
     clock,
   })
+  await boundary('VALIDATE', 'PENDING', validation)
 
   // #4 D1 — the Reviewer runs only on validator-clean graphs.
   if (validateOutcome === 'BLOCKED') {
@@ -385,6 +411,8 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
       clock,
       error: 'VALIDATE gate blocked the run; the Reviewer does not run on a failing graph.',
     })
+    await boundary('REVIEW', 'PENDING', validation)
+    await boundary('TERMINAL', 'GATE_BLOCKED', validation)
 
     return {
       investigationId,
@@ -415,6 +443,10 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
     },
     clock,
   })
+  await boundary('REVIEW', 'PENDING', validation, reviewHistory)
+
+  await boundary('TERMINAL', journal.activeCapabilityEntries().length > 0 ? 'CAPABILITY_BLOCKED' : 'COMPLETED',
+    validation, reviewHistory)
 
   return {
     investigationId,
