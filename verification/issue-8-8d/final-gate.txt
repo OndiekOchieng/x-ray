@@ -1,0 +1,28 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/lifecycle-checks.ts
+
+X-Ray investigation lifecycle — 8d integrated gate
+==================================================================================
+ ok   L1 · execute · a run traverses every stage and both gates                 
+ ok   L2 · inspect · status exposes the persisted stage sequence                
+ ok   L3 · candidate · working state is retrievable and labelled CANDIDATE      
+ ok   L4 · revise · a revision reopens the completed run through the route      
+ ok   L5 · validate/review · the run recorded a real stop, validation and review
+ ok   L6 · graduate · the promoted candidate assesses as eligible BLOCKED       
+ ok   L7 · commit · an eligible assessment commits v2 and links the exact run   
+ ok   L8 · version · v2 round-trips exactly through the route                   
+ ok   L9 · history · v1 is unchanged and history is ordered [1,2]               
+ ok   L10 · projection · the UI query path serves v2 from storage               
+ ok   F1 · a committed run cannot be resumed                                    
+ ok   F1 · a committed run stays inspectable but is not active work             
+ ok   F2 · a stale predecessor conflicts; there is no silent rebase             
+ ok   F3 · a capability-blocked run is retrievable and not committable          
+ ok   F4 · a stage failure is retrievable and does not commit                   
+ ok   F5 · a completed-but-uncommitted run does not look committed              
+ ok   F6 · unknown investigation, run, version and candidate stay typed 404s    
+ ok   F7 · no path falls back to the benchmark for a stored id                  
+ ok   F8 · no response leaks SQL, prompts, secrets, stacks or ledger internals  
+==================================================================================
+19/19 passed
+
+20 route responses inspected for leakage.
+
