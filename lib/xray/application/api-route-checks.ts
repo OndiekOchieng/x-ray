@@ -22,6 +22,7 @@ import { getInvestigationGraph } from '@/lib/xray/investigations'
 import {
   setDatabaseProvider, setExecutionRuntimeProvider, submittedInvestigation,
 } from './runtime'
+import { InvestigationService } from './investigation-service'
 import type { ExecutionRuntime } from './inline-execution'
 
 import { POST as createInvestigation } from '@/app/api/investigations/route'
@@ -371,17 +372,83 @@ async function main(): Promise<void> {
     })
 
     // -- F13: the UI query path ------------------------------------------------
-    await check('F13 · the UI path reads stored investigations and never falls back', async () => {
+    await check('F13 · the UI path reads a stored investigation by id', async () => {
       const storedView = await getInvestigationGraph(STORED_ID)
       if (!storedView) return 'the stored investigation did not resolve'
-      if (storedView.investigation.id !== STORED_ID) return 'a different investigation was served'
-      const unknown = await getInvestigationGraph('XRAY-DOES-NOT-EXIST')
-      if (unknown !== null) return `an unknown id resolved to ${unknown.investigation.id}`
-      const submitted = await getInvestigationGraph(firstId)
-      if (submitted !== null) return 'an investigation with no committed version resolved to a graph'
+      return storedView.investigation.id === STORED_ID ? null : 'a different investigation was served'
+    })
+
+    // -- Storage resolution is tri-state, and only one state may reach the
+    // benchmark. These four run in order: XRAY-KE-001 must be absent from
+    // storage for the third, and present for the first two.
+
+    await check('R3 · a typed unknown in storage may resolve the benchmark by its exact id', async () => {
       const benchmark = await getInvestigationGraph('XRAY-KE-001')
       return benchmark?.investigation.id === 'XRAY-KE-001'
-        ? null : 'the benchmark is no longer reachable by its own id'
+        ? null : 'the benchmark is not reachable when storage holds no such id'
+    })
+
+    await check('R4 · an arbitrary unknown id stays null', async () => {
+      for (const id of ['XRAY-DOES-NOT-EXIST', 'xray-ke-001', 'XRAY-KE-002', '../XRAY-KE-001']) {
+        const result = await getInvestigationGraph(id)
+        if (result !== null) return `${id} resolved to ${result.investigation.id}`
+      }
+      return null
+    })
+
+    await check('R1 · a stored investigation with no committed version is null, not the benchmark', async () => {
+      // The benchmark id now exists in storage, with nothing committed.
+      await new InvestigationService(db, () => AT, () => 'XRAY-KE-001')
+        .createInvestigation({ sourceUrl: 'https://example.org/stored-benchmark-id' })
+      const result = await getInvestigationGraph('XRAY-KE-001')
+      if (result === null) return null
+      return result.investigation.id === 'XRAY-KE-001'
+        ? 'the frozen benchmark shadowed a stored investigation that has committed nothing'
+        : `resolved to ${result.investigation.id}`
+    })
+
+    await check('R1 · a submitted investigation with no committed version is also null', async () => {
+      const result = await getInvestigationGraph(firstId)
+      return result === null ? null : 'working state was served as a committed graph'
+    })
+
+    await check('R2 · an unexpected storage failure propagates and never reaches the benchmark', async () => {
+      setDatabaseProvider(async () => ({
+        query: async () => { throw new Error('connection terminated unexpectedly') },
+      }))
+      try {
+        const result = await getInvestigationGraph('XRAY-KE-001').then(
+          (graph) => ({ graph }), (error: unknown) => ({ error }))
+        if ('graph' in result)
+          return result.graph === null
+            ? 'a read failure was reported as no such investigation'
+            : 'a read failure was answered with the frozen benchmark'
+        return (result.error as Error).message === 'connection terminated unexpectedly'
+          ? null : `propagated the wrong error: ${(result.error as Error).message}`
+      } finally { setDatabaseProvider(async () => db) }
+    })
+
+    await check('R2 · a committed pointer cannot dangle: storage forbids the state', async () => {
+      // Intended as a second propagation proof — a pointer claiming a version
+      // that has no rows. The state turns out to be unreachable: the advance
+      // trigger rejects an arbitrary number, and the foreign key rejects a
+      // plausible one. Recorded as a schema guarantee rather than dropped,
+      // because the reason the propagation path cannot be exercised is itself
+      // worth holding in place.
+      const outcome = await db.query(
+        'UPDATE investigations SET latest_committed_version=1 WHERE id=$1', ['XRAY-KE-001'])
+        .then(() => null, (error: unknown) => error as Error)
+      if (outcome === null) return 'a version pointer with no version rows was accepted'
+      return /latest_committed_fk|foreign key/.test(outcome.message)
+        ? null : `rejected for the wrong reason: ${outcome.message}`
+    })
+
+    await check('R · the retrieval seam uses no catch-all', async () => {
+      const source = readFileSync(new URL('../investigations.ts', import.meta.url), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+      if (/\.catch\(\s*\(\s*\)\s*=>/.test(source)) return 'a catch-all swallows storage errors'
+      return /InvestigationResourceNotFound/.test(source)
+        ? null : 'the typed unknown case is no longer distinguished'
     })
 
     // -- Report ----------------------------------------------------------------

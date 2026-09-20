@@ -22,12 +22,21 @@ No SQL, fixture registry, provider SDK, prompt or pipeline logic in any handler.
 `lib/xray/application/runtime.ts` holds two settable providers — a database and an
 execution runtime. Neither is this slice's to build: wiring a pool, a live provider or
 a worker is out of scope, so the routes ask for both by name and the host supplies
-them. Unconfigured is a typed error, never a silent default; a route that answered from
-nothing would report an empty investigation as though it had been researched.
+them.
 
-The default execution runtime is not a stub provider and produces nothing. Every
-research stage returns a capability gap, so a run started with no adapters records its
-gaps and blocks, which is the honest answer for a build with no provider wired.
+**The two seams behave differently when unconfigured, on purpose.**
+
+An unconfigured *database* throws `HostNotConfigured` and the route answers **503**.
+There is no honest answer to a retrieval question without storage; a route that
+answered from nothing would report an empty investigation as though it had been
+researched.
+
+An unconfigured *execution runtime* does **not** throw and never produces a 503.
+`getExecutionRuntime()` falls back to a runtime whose every research stage returns a
+capability gap, so the run starts, journals its gaps and blocks. That is 8b's model
+holding: a missing adapter is incomplete capability, not a broken request, and the
+caller gets a real run id and a durable blocked status rather than an error. It is not
+a stub provider and produces nothing.
 
 ### HTTP mapping
 
@@ -39,7 +48,7 @@ gaps and blocks, which is the honest answer for a build with no provider wired.
 | Invalid submission, malformed body, query or version | 400 | `INVALID_INPUT` |
 | Resume refused on a completed or committed run | 409 | `EXECUTION_NOT_RETRYABLE` |
 | Stale predecessor | 409 | `VERSION_CONFLICT` |
-| Seam unconfigured | 503 | `SERVICE_UNAVAILABLE` |
+| Database seam unconfigured | 503 | `SERVICE_UNAVAILABLE` |
 | Anything else | 500 | `INTERNAL_ERROR`, fixed sentence |
 
 The default branch is deliberately uninformative. An error we did not anticipate is, by
@@ -87,6 +96,47 @@ investigations are public is a publication decision, and publication is #9.
 **Not moved into 8c:** library/featured/global-gap behaviour, publication or cache
 lifecycle, ATI lifecycle, live provider wiring, worker or queue, search or discovery.
 
+## Remediation — storage failure could fall through to the benchmark
+
+The first review blocked on this. `readStoredGraph` used `.catch(() => null)` and
+`getInvestigationGraph` treated any `null` as permission to consult the benchmark, so
+three materially different states collapsed into one:
+
+1. storage says the investigation does not exist;
+2. storage says it exists but has committed no version;
+3. the storage read failed.
+
+Only the first may reach a fixture. As written, a database failure could silently
+become benchmark data, and a stored `XRAY-KE-001` with nothing committed could be
+shadowed by the frozen fixture — so the claim that a stored investigation can never be
+shadowed was not yet true.
+
+Storage resolution is now tri-state — `COMMITTED_GRAPH`,
+`KNOWN_WITHOUT_COMMITTED_VERSION`, `UNKNOWN_IN_STORAGE` — and only the typed
+`InvestigationResourceNotFound('INVESTIGATION', …)` produces the third. Every other
+error propagates. There is no catch-all, and a check asserts the source contains none.
+
+| Resolution | Result |
+|---|---|
+| `COMMITTED_GRAPH` | the stored graph |
+| `KNOWN_WITHOUT_COMMITTED_VERSION` | `null`; the benchmark is not consulted |
+| `UNKNOWN_IN_STORAGE` | the benchmark may answer, for its own id only |
+| unexpected read error | propagates |
+
+### Remediation proof
+
+- A stored `XRAY-KE-001` identity with no committed version resolves to `null`. The
+  frozen benchmark does not shadow it.
+- A submitted investigation with no committed version is likewise `null`; working state
+  is not served as a committed graph.
+- A storage read that throws `connection terminated unexpectedly` propagates that
+  error. It becomes neither `null` nor benchmark data.
+- A typed unknown leaves the benchmark reachable by its exact id.
+- `XRAY-DOES-NOT-EXIST`, `xray-ke-001`, `XRAY-KE-002` and `../XRAY-KE-001` all stay
+  `null` — the benchmark answers to one spelling of one id.
+- A source-text check fails if a catch-all returns, or if the typed unknown case stops
+  being distinguished.
+
 ## Preserved failed verification
 
 The first route gate run was 12/16 (`first-attempt.txt`). All four were the harness
@@ -110,6 +160,18 @@ The runtime now ingests a source first — the same shape 8b proved.
 **F7 compared against a badly re-serialized copy** rather than the graph itself.
 Rewritten to compare artifact ids per collection plus the v0.3 source positions and
 knowledge bases.
+
+### A proof that could not be written
+
+A second propagation proof was intended: a `latest_committed_version` pointer naming a
+version with no rows, to show that inconsistency reaches the caller rather than a
+fixture. The state turns out to be unreachable. The advance trigger rejected an
+arbitrary number — *"latest committed version must advance exactly once"* — and the
+`latest_committed_fk` foreign key rejected a plausible one. Both rejections are in
+`pointer-constraint-failure.txt`.
+
+The check was kept and inverted: it now asserts that storage refuses the state, because
+the reason the propagation path cannot be exercised is itself worth holding in place.
 
 **F11 rejected `publishedAt: "2020-10"`.** Month precision is deliberate: a source
 published in a month X-Ray cannot narrow is stored as recorded, not padded to a day it
@@ -144,12 +206,13 @@ and real route params.
   ledger internals, stack traces and environment configuration: none present.
 - An injected database failure carrying a host, port and password returns a fixed
   sentence and a 500; none of the secret text reaches the caller.
-- An unconfigured deployment returns 503, not a defect in the request.
+- An unconfigured database seam returns 503, not a defect in the request. An
+  unconfigured execution runtime deliberately does not: it blocks the run instead.
 - The UI query path reads the stored investigation by id, returns `null` for an unknown
   id, returns `null` for a submitted investigation with no committed version, and still
   reaches the benchmark by its own id.
 
-`pnpm check:api-routes`: PASS (`final-gate.txt`). `pnpm build` compiles all seven
+`pnpm check:api-routes`: PASS, 23 scenarios (`final-gate.txt`). `pnpm build` compiles all seven
 routes. `check:fixtures`, `check:inline-execution`, `check:investigation-service`, the
 four persistence gates and `tsc --noEmit`: PASS.
 

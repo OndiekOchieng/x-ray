@@ -21,7 +21,7 @@
 import { createXRayGraph, type XRayGraph } from './selectors'
 import { createXrayKe001Graph } from './fixtures/xray-ke-001/graph'
 import { claimById, gapById } from './selectors'
-import { InvestigationService } from './application/investigation-service'
+import { InvestigationResourceNotFound, InvestigationService } from './application/investigation-service'
 import { databaseConfigured, getDatabase } from './application/runtime'
 import {
   claimSummaryViews,
@@ -53,33 +53,69 @@ export function benchmarkInvestigationIds(): string[] {
 }
 
 /**
- * A stored investigation, reconstructed from its latest committed version.
+ * What storage had to say about an id.
  *
- * `null` when the investigation is unknown, or known but has committed no
- * version yet. An investigation whose research has not yet produced a version
- * has nothing to display, and showing working state here would require picking
- * a run — which the candidate contract forbids, because guessing "latest run"
- * serves one execution's evidence under another's name.
+ * Three states, kept apart on purpose. Collapsing them into one `null` is what
+ * lets a fixture answer a question storage was supposed to answer: a failed
+ * read and an absent record become indistinguishable, and the frozen benchmark
+ * quietly stands in for whichever it was.
  */
-async function readStoredGraph(id: string): Promise<XRayGraph | null> {
+type StorageResolution =
+  | { kind: 'COMMITTED_GRAPH'; graph: XRayGraph }
+  /** The investigation exists; its research has produced no version yet. */
+  | { kind: 'KNOWN_WITHOUT_COMMITTED_VERSION' }
+  /** Storage answered, and holds no such investigation. */
+  | { kind: 'UNKNOWN_IN_STORAGE' }
+
+/**
+ * Ask storage about an id.
+ *
+ * Only the typed `INVESTIGATION` not-found means "storage has no such id".
+ * Every other error propagates: a connection failure, a query error or a
+ * missing version behind a pointer that claims one are all conditions the
+ * caller must see, and none of them is evidence that an investigation does not
+ * exist. A catch-all here would turn an outage into a silent fixture read.
+ */
+async function readStoredGraph(id: string): Promise<StorageResolution> {
   const service = new InvestigationService(await getDatabase())
-  const identity = await service.getInvestigation(id).catch(() => null)
-  if (!identity || identity.latestCommittedVersion === null) return null
+
+  let identity
+  try {
+    identity = await service.getInvestigation(id)
+  } catch (error) {
+    if (error instanceof InvestigationResourceNotFound && error.resource === 'INVESTIGATION')
+      return { kind: 'UNKNOWN_IN_STORAGE' }
+    throw error
+  }
+
+  if (identity.latestCommittedVersion === null) return { kind: 'KNOWN_WITHOUT_COMMITTED_VERSION' }
+
   const committed = await service.getCommittedVersion(id, identity.latestCommittedVersion)
-  return createXRayGraph(committed.graph)
+  return { kind: 'COMMITTED_GRAPH', graph: createXRayGraph(committed.graph) }
 }
 
 /**
- * The canonical graph for an investigation, or `null` if unknown.
+ * The canonical graph for an investigation, or `null` if there is nothing to show.
  *
- * Stored data wins. The benchmark answers only for its own id, and only after
- * storage has declined — so a stored investigation can never be shadowed by a
- * fixture, and a fixture can never stand in for a stored one.
+ * Storage decides first, and its answer is final in two of the three cases:
+ *
+ *   COMMITTED_GRAPH                    the stored graph
+ *   KNOWN_WITHOUT_COMMITTED_VERSION    `null` — the benchmark is not consulted
+ *   UNKNOWN_IN_STORAGE                 the benchmark may answer, for its own id
+ *
+ * A stored investigation therefore cannot be shadowed by a fixture even when it
+ * has committed nothing yet, and an unexpected read failure reaches the caller
+ * instead of being answered with somebody else's evidence.
+ *
+ * Working state is deliberately not shown for a known investigation with no
+ * version: displaying it would require picking a run, and guessing "latest run"
+ * serves one execution's evidence under another's name.
  */
 export async function getInvestigationGraph(id: string): Promise<XRayGraph | null> {
   if (databaseConfigured()) {
-    const stored = await readStoredGraph(id)
-    if (stored) return stored
+    const resolution = await readStoredGraph(id)
+    if (resolution.kind === 'COMMITTED_GRAPH') return resolution.graph
+    if (resolution.kind === 'KNOWN_WITHOUT_COMMITTED_VERSION') return null
   }
   const benchmark = BENCHMARKS[id]
   return benchmark ? benchmark() : null
