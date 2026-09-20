@@ -1,9 +1,15 @@
+'use cache'
+
 /**
  * The Cache Components wrappers (ADR-0016).
  *
  * Thin on purpose. All logic lives in `public-view.ts`, which imports no
  * bundler-only module and can therefore be exercised without a running server.
  * What is here is the cache declaration itself.
+ *
+ * The file-level `'use cache'` directive marks every export here as a cache
+ * entry and marks the module server-only, which is what the bundler needs to
+ * know when the module is reached through a dynamic import.
  *
  * `cacheLife('max')` in Next 16.3 means `revalidate: 30 days, expire: never` —
  * the long-lived posture for a value that cannot become wrong, because #7's
@@ -27,7 +33,6 @@ import type { XRayGraphInput } from '@/lib/xray/selectors'
 export async function cachedVersionGraph(
   investigationId: string, version: number,
 ): Promise<XRayGraphInput> {
-  'use cache'
   cacheLife('max')
   return loadVersionGraph(investigationId, version)
 }
@@ -35,7 +40,6 @@ export async function cachedVersionGraph(
 export async function cachedVersionProjection(
   investigationId: string, version: number,
 ): Promise<PublicVersionView> {
-  'use cache'
   cacheLife('max')
   return loadPublicVersionProjection(investigationId, version)
 }
@@ -43,7 +47,6 @@ export async function cachedVersionProjection(
 export async function cachedAssuranceDisclosure(
   executionRunId: string, graduationIndex: number,
 ): Promise<AssuranceDisclosure> {
-  'use cache'
   cacheLife('max')
   return loadAssuranceDisclosure(executionRunId, graduationIndex)
 }

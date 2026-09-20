@@ -29,12 +29,10 @@ import {
   claimViewById,
   gapView,
   investigationView,
-  libraryEntryView,
   type ClaimSummaryView,
   type ClaimView,
   type GapView,
   type InvestigationView,
-  type LibraryEntryView,
 } from './projections'
 
 /**
@@ -189,15 +187,15 @@ export function getGapPayload(gapId: string): GapPayload | null {
   return null
 }
 
-/** Every cached investigation, for the public library. */
-export function getLibraryEntries(): LibraryEntryView[] {
-  return benchmarkInvestigationIds().map((id) => libraryEntryView(BENCHMARKS[id]()))
-}
-
-/** The investigation featured on the home page, if any. */
-export function getFeaturedInvestigation(): LibraryEntryView | null {
-  return getLibraryEntries()[0] ?? null
-}
+/*
+ * Public discovery is NOT here.
+ *
+ * The library and featured selection moved to the publication boundary in #9
+ * slice 9e and live in `lib/xray/publication/public-library.ts`. They are not
+ * re-exported from this module, because this module answers an internal
+ * storage question and the public one has its own trust boundary (ADR-0015).
+ * A benchmark that ships in this repository is not public merely by existing.
+ */
 
 // ---------------------------------------------------------------------------
 // Demo source resolution

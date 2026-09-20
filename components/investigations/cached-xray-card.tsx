@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { ArrowRightIcon } from 'lucide-react'
 
-import type { LibraryEntryView } from '@/lib/xray/projections'
+import type { LibraryCard } from '@/lib/xray/publication/library-card'
 
 /**
  * A cached X-Ray, summarised.
@@ -10,7 +10,7 @@ import type { LibraryEntryView } from '@/lib/xray/projections'
  * markup, so the card kept reporting eleven receipts against a five-record
  * fixture.
  */
-export function CachedXRayCard({ entry }: { entry: LibraryEntryView }) {
+export function CachedXRayCard({ entry }: { entry: LibraryCard }) {
   const stats = [
     { value: entry.claimCount, label: 'claims' },
     { value: entry.receiptCount, label: 'evidence points' },
@@ -18,7 +18,7 @@ export function CachedXRayCard({ entry }: { entry: LibraryEntryView }) {
   ]
 
   return (
-    <Link href={`/investigation/${entry.investigationId}`} className="group block">
+    <Link href={entry.href} className="group block">
       <div className="rounded-lg border border-border p-6 transition-colors hover:bg-muted/50">
         <div className="mb-4 flex items-start justify-between">
           <div className="flex-1">
@@ -26,7 +26,7 @@ export function CachedXRayCard({ entry }: { entry: LibraryEntryView }) {
             <p className="text-sm text-muted-foreground">{entry.surfacePublisher}</p>
           </div>
           <span className="ml-4 rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-            {entry.investigationId}
+            {`v${entry.version}`}
           </span>
         </div>
 
@@ -41,7 +41,7 @@ export function CachedXRayCard({ entry }: { entry: LibraryEntryView }) {
 
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
-            Investigated {entry.investigatedAt.slice(0, 10)}
+            Investigated {(entry.investigatedAt ?? entry.publishedAt).slice(0, 10)}
           </p>
           <div className="flex items-center gap-2 text-sm font-medium text-primary transition-transform group-hover:translate-x-1">
             Explore X-Ray

@@ -1,10 +1,15 @@
 import { AppShell } from '@/components/layout/app-shell'
 import { SourceInput } from '@/components/investigations/source-input'
 import { CachedXRayCard } from '@/components/investigations/cached-xray-card'
-import { getFeaturedInvestigation } from '@/lib/xray/investigations'
+import { connection } from 'next/server'
 
-export default function Page() {
-  const featured = getFeaturedInvestigation()
+import { featuredPublication } from '@/lib/xray/publication/public-library'
+
+export const instant = false
+
+export default async function Page() {
+  await connection()
+  const featured = await featuredPublication()
 
   return (
     <AppShell>

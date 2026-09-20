@@ -20,7 +20,8 @@
  */
 
 import {
-  createXRayGraph, graphCounts, type GraphCounts, type XRayGraph,
+  createXRayGraph, graphCounts, independentEvidenceOriginsForClaim, originKey,
+  type GraphCounts, type XRayGraph,
 } from '@/lib/xray/selectors'
 import { claimSummaryViews, type ClaimSummaryView } from '@/lib/xray/projections'
 import { InvestigationService } from '@/lib/xray/application/investigation-service'
@@ -57,7 +58,23 @@ export interface PublicVersionView {
   }
   /** Derived at projection time, never stored. */
   counts: GraphCounts
+  /**
+   * Distinct confirmed independent origins across every claim.
+   *
+   * Reported beside the source count, never instead of it: repetition is not
+   * corroboration (XR-INV-004), and a library card that showed only
+   * publications would imply otherwise.
+   */
+  independentOrigins: number
   claims: ClaimSummaryView[]
+}
+
+function countIndependentOrigins(graph: XRayGraph): number {
+  const origins = new Set<string>()
+  for (const claim of graph.claims)
+    for (const origin of independentEvidenceOriginsForClaim(graph, claim.id))
+      origins.add(originKey(origin))
+  return origins.size
 }
 
 export function projectPublicVersion(graph: XRayGraph): PublicVersionView {
@@ -76,6 +93,7 @@ export function projectPublicVersion(graph: XRayGraph): PublicVersionView {
       ...(surface?.publishedAt ? { publishedAt: surface.publishedAt } : {}),
     },
     counts: graphCounts(graph),
+    independentOrigins: countIndependentOrigins(graph),
     claims: claimSummaryViews(graph),
   }
 }

@@ -37,7 +37,8 @@
     "check:benchmark-corpus": "node scripts/check-benchmark-corpus.mjs",
     "check:publication": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/publication-checks.ts",
     "check:public-resolver": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/public-resolver-checks.ts",
-    "check:public-routes": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/publication/public-route-checks.ts"
+    "check:public-routes": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/publication/public-route-checks.ts",
+    "check:public-library": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/publication/public-library-checks.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

@@ -1,0 +1,35 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/publication/public-library-checks.ts
+
+X-Ray public library and lifecycle — 9e
+==============================================================================
+ ok   1 · a database with no publications yields an empty library           
+ ok   2/27 · a committed draft contributes nothing and causes zero reads    
+ ok   22 · the draft deterministic slug produces no search hit              
+ ok   3/4 · first publication produces one entry matching the head          
+ ok   5/6 · card fields and counts come from the exact published projection 
+ ok   7/L · a newer committed unpublished version does not alter the card   
+ ok   8 · publishing the newer version moves the card to it                 
+ ok   13 · a deliberate rollback moves the card to the older version        
+ ok   9/10 · withdrawing the head removes the card while the URL stays 410  
+ ok   11 · republishing restores the card                                   
+ ok   12 · a historical non-head withdrawal leaves the current card present 
+ ok   14 · cards link through the public namespace, never the internal route
+ ok   15/16 · an unpublished benchmark is absent and cannot be featured     
+ ok   16 · featured selection reads no benchmark registry                   
+ ok   17 · title matching is case-insensitive and trimmed                   
+ ok   18 · publisher matching works                                         
+ ok   19/20 · exact slug search works and an empty query returns everything 
+ ok   21 · a withdrawn entry produces no search hit                         
+ ok   23 · search never inspects evidence prose                             
+ ok   24/25 · no canonical library table or stored display field exists     
+ ok   26 · membership is resolved before any graph read                     
+ ok   28 · a storage failure propagates rather than emptying the library    
+ ok   29/30/31 · the full publish → withdraw → republish lifecycle          
+ ok   32/33 · the internal explorer and benchmark path are intact           
+ ok   N · accepted 9b/9c/9d boundaries are untouched by discovery           
+==============================================================================
+25/25 passed
+
+Drafts and withdrawn heads caused zero canonical reads. The projection cache
+was a permanent memo throughout: discovery still changed on the next request.
+
