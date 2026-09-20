@@ -4,6 +4,8 @@ import type { XRayGraph } from '@/lib/xray/selectors/graph'
 import type { GraduationResult } from '@/lib/xray/acceptance/runner'
 import { fingerprintGraph } from '@/lib/xray/review'
 import { insertSnapshotRows, readSnapshot, type SnapshotDatabase } from './snapshot'
+import { candidateDigest, readLatestGraduation } from './graduation-audit'
+import { loadCandidateCheckpoint } from './workspace'
 
 export type ReEvaluationReason = 'NEW_EVIDENCE' | 'CORRECTION' | 'REVIEW_REVISION' | 'EXTERNAL_RECORD_RESPONSE' | 'OTHER'
 export type CausalReference = { kind: 'SOURCE' | 'EVIDENCE' | 'REVIEW' | 'ATI_RESPONSE'; id: string }
@@ -155,9 +157,20 @@ export async function commitNextVersion(db: SnapshotDatabase, options: CommitVer
     if (!isDeepStrictEqual(graph, captured)) throw new Error('Candidate changed after assessment')
     assertCommittable(graph, assessment)
     assertVersionDiff(previous, graph, reEvaluationAudit)
-    const run = (await db.query(`SELECT id FROM execution_runs WHERE id=$1 AND investigation_id=$2
-      AND committed_version IS NULL AND status='COMPLETED' FOR UPDATE`, [executionRunId, graph.investigation.id])).rows
+    const run = (await db.query(`SELECT id,status FROM execution_runs WHERE id=$1 AND investigation_id=$2
+      AND committed_version IS NULL AND status IN ('COMPLETED','CAPABILITY_BLOCKED') FOR UPDATE`,
+      [executionRunId, graph.investigation.id])).rows
     if (run.length !== 1) throw new Error('Producing execution run is missing or incomplete')
+    if (run[0].status === 'CAPABILITY_BLOCKED' && assessment.verdict !== 'BLOCKED')
+      throw new Error('Capability-blocked execution cannot assert PASS')
+    const graduation = await readLatestGraduation(db, executionRunId)
+    if (!graduation || !isDeepStrictEqual(graduation.result, assessment) ||
+        graduation.result.graphFingerprint !== fingerprintGraph(graph) ||
+        graduation.candidateDigest !== candidateDigest(graph))
+      throw new Error('Persisted graduation audit does not match candidate')
+    const workspace = await loadCandidateCheckpoint(db, executionRunId)
+    if (workspace.journal.staleStages().length > 0 || candidateDigest(workspace.accumulator.rebuild()) !== graduation.candidateDigest)
+      throw new Error('Candidate workspace is stale or changed since graduation')
     await insertSnapshotRows(db, graph)
     for (const item of reEvaluationAudit) {
       await db.query(`INSERT INTO claim_reevaluation_audit
@@ -171,8 +184,9 @@ export async function commitNextVersion(db: SnapshotDatabase, options: CommitVer
           cause.kind === 'REVIEW' ? cause.id : null, cause.kind === 'ATI_RESPONSE' ? cause.id : null])
       }
     }
-    const linked = (await db.query(`UPDATE execution_runs SET committed_version=$1 WHERE id=$2 AND committed_version IS NULL RETURNING id`,
-      [graph.version.version, executionRunId])).rows
+    const linked = (await db.query(`UPDATE execution_runs SET committed_version=$1,committed_graduation_index=$2
+      WHERE id=$3 AND committed_version IS NULL RETURNING id`,
+      [graph.version.version, graduation.assessmentIndex, executionRunId])).rows
     if (linked.length !== 1) throw new Error('Execution run link failed')
     const moved = (await db.query(`UPDATE investigations SET latest_committed_version=$1
       WHERE id=$2 AND latest_committed_version=$3 RETURNING id`, [graph.version.version, graph.investigation.id, expectedPredecessor])).rows

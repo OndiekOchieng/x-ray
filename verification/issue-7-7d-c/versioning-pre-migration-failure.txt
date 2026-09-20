@@ -1,0 +1,15 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/version-commit-checks.ts
+7c: v1 committed and deep-equal PASS
+AssertionError [ERR_ASSERTION]: The input did not match the regular expression /foreign key|violates/i. Input:
+
+'error: relation "run_graduations" does not exist'
+
+    at async run (file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/version-commit-checks.ts:69:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: [N],
+  expected: /foreign key|violates/i,
+  operator: 'rejects',
+  diff: 'simple'
+}
+[ELIFECYCLE] Command failed with exit code 1.

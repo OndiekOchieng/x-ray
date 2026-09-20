@@ -1,3 +1,4 @@
+import { prepareAssessedRun } from './graduation-check-support'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
@@ -15,7 +16,7 @@ const graphInput = (graph: XRayGraph) => {
 }
 const ids = (values: Set<string>) => [...values].sort()
 async function migrate(db: PGlite) {
-  for (const name of ['0001_version_ownership','0002_source_retrieval_precision','0003_reevaluation_audit','0004_source_position_knowledge_basis']) {
+  for (const name of ['0001_version_ownership','0002_source_retrieval_precision','0003_reevaluation_audit','0004_source_position_knowledge_basis','0005_execution_audit','0006_graduation_audit']) {
     await db.exec(readFileSync(new URL(`../../../db/migrations/${name}.up.sql`, import.meta.url), 'utf8'))
   }
 }
@@ -92,7 +93,7 @@ async function run() {
     assert.deepStrictEqual(workspaceCandidate, candidate)
     console.log('15c: opaque workspace state retains candidate collection, basis, order and identity PASS')
 
-    await createRun('RUN-INJECTED-FAILURE')
+    await prepareAssessedRun(db, 'RUN-INJECTED-FAILURE', candidate, assessment)
     const failingDb: SnapshotDatabase = { query: async (sql, params) => {
       if (sql.includes('INSERT INTO claim_reevaluation_audit')) throw new Error('injected after snapshot rows')
       return db.query(sql, params)
@@ -108,7 +109,7 @@ async function run() {
     assert.deepStrictEqual(await readSnapshot(db, base.investigation.id, 1), v1)
     console.log('15c: injected post-snapshot failure rolls back all v2 rows and pointer PASS')
 
-    await createRun('RUN-V2')
+    await prepareAssessedRun(db, 'RUN-V2', candidate, assessment)
     await commitNextVersion(db, { expectedPredecessor: 1, graph: candidate,
       assessment, reEvaluationAudit: audit, executionRunId: 'RUN-V2' })
     assert.deepStrictEqual(await readSnapshot(db, base.investigation.id, 1), v1)
@@ -117,7 +118,7 @@ async function run() {
     assert.equal(((await db.query('SELECT latest_committed_version FROM investigations WHERE id=$1', [base.investigation.id])).rows[0] as { latest_committed_version: number }).latest_committed_version, 2)
     console.log('15c: v2 SourcePosition/KnowledgeBasis deep round-trip; v1 immutable PASS')
 
-    await createRun('RUN-STALE-15C')
+    await prepareAssessedRun(db, 'RUN-STALE-15C', candidate, assessment)
     await assert.rejects(commitNextVersion(db, { expectedPredecessor: 1, graph: candidate,
       assessment, reEvaluationAudit: audit, executionRunId: 'RUN-STALE-15C' }), VersionConflict)
     assert.deepStrictEqual(await readSnapshot(db, base.investigation.id, 2), candidate)
