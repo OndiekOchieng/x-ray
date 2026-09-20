@@ -1,0 +1,497 @@
+{
+  "version": "1.0-draft",
+  "governingDecision": "ADR-0009",
+  "principle": "Acceptance targets semantic behavior, not prose.",
+  "promotionStates": [
+    "SETTLED_ANALYSIS",
+    "FROZEN_BENCHMARK",
+    "EXECUTABLE_FIXTURE"
+  ],
+  "benchmarks": [
+    {
+      "id": "XRAY-KE-001",
+      "title": "Ruto five-day tour / Mamboleo–Miwani–Chemelil–Muhoroni–Kipsitet road",
+      "jurisdiction": "Kenya",
+      "domain": [
+        "infrastructure",
+        "public-finance",
+        "political-reporting"
+      ],
+      "surfaceUrl": "https://citizen.digital/article/inside-rutos-five-day-tour-of-kisumu-siaya-migori-and-homa-bay-n390083",
+      "protocolVersion": "0.1.0",
+      "state": "EXECUTABLE_FIXTURE",
+      "existingFailureModes": [
+        "FM-001",
+        "FM-002",
+        "FM-003",
+        "FM-004",
+        "FM-005",
+        "FM-006"
+      ],
+      "observedPatterns": [
+        "SCOPE_COLLAPSE",
+        "SOURCE_COUNT_INFLATION",
+        "TEMPORAL_PROMOTION",
+        "PROXY_MEASURE_CONTRADICTION"
+      ],
+      "requiredDistinctions": [
+        "main carriageway vs feeder/spur scope",
+        "project completion vs surfaced-road coverage",
+        "scheduled inspection vs occurred inspection"
+      ],
+      "forbiddenCollapses": [
+        "122 km wider project scope => 63 km mainline claim false",
+        "project completion percentage => surfaced-length percentage",
+        "repeated publications => independent corroboration",
+        "scheduled => occurred"
+      ],
+      "materialGaps": [
+        "authoritative derivation of KSh16.7B",
+        "direct surfaced-kilometres measurement"
+      ],
+      "promotionNeeds": []
+    },
+    {
+      "id": "XRAY-US-001",
+      "title": "Military AI incident reporting",
+      "jurisdiction": "United States",
+      "domain": [
+        "defence",
+        "technology",
+        "anonymous-sourcing"
+      ],
+      "surfaceUrl": null,
+      "protocolVersion": "0.2",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-003",
+        "FM-009"
+      ],
+      "observedPatterns": [
+        "SOURCE_COUNT_INFLATION",
+        "CAUSAL_INHERITANCE",
+        "ANONYMOUS_ORIGIN_DEPENDENCY"
+      ],
+      "requiredDistinctions": [
+        "official context vs incident proof",
+        "wrong cargo vs interception vs near-war consequence"
+      ],
+      "forbiddenCollapses": [
+        "official contextual statement => reported incident occurred",
+        "one causal link established => downstream consequence established"
+      ],
+      "materialGaps": [
+        "originating incident evidence and independent confirmation"
+      ],
+      "promotionNeeds": [
+        "recover exact surface URL",
+        "freeze raw run/evidence artifacts",
+        "author semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-BF-001",
+      "title": "Burkina Faso language reform",
+      "jurisdiction": "Burkina Faso",
+      "domain": [
+        "law",
+        "language-policy"
+      ],
+      "surfaceUrl": null,
+      "protocolVersion": "0.2",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-008"
+      ],
+      "observedPatterns": [
+        "CATEGORY_DRIFT",
+        "PROPOSITION_DIMENSION_LAUNDERING"
+      ],
+      "requiredDistinctions": [
+        "official language vs working language",
+        "legal event vs legal category"
+      ],
+      "forbiddenCollapses": [
+        "language-policy change => claimed legal category change"
+      ],
+      "materialGaps": [
+        "operative legal text and amendment history"
+      ],
+      "promotionNeeds": [
+        "recover exact surface URL",
+        "freeze operative legal sources and run artifacts",
+        "author semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-KE-002",
+      "title": "Muhoroni Sugar recovery claims",
+      "jurisdiction": "Kenya",
+      "domain": [
+        "industry",
+        "public-enterprise"
+      ],
+      "surfaceUrl": null,
+      "protocolVersion": "0.2",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-008"
+      ],
+      "observedPatterns": [
+        "PROPOSITION_DIMENSION_LAUNDERING",
+        "RECOVERY_DIMENSION_COLLAPSE"
+      ],
+      "requiredDistinctions": [
+        "operational recovery",
+        "financial recovery",
+        "institutional recovery",
+        "community recovery"
+      ],
+      "forbiddenCollapses": [
+        "factory operating => enterprise financially/institutionally/community recovered"
+      ],
+      "materialGaps": [
+        "dimension-specific recovery measures"
+      ],
+      "promotionNeeds": [
+        "recover exact surface URL",
+        "freeze raw run/evidence artifacts",
+        "author semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-KE-003",
+      "title": "Amboseli elephant deaths",
+      "jurisdiction": "Kenya",
+      "domain": [
+        "wildlife",
+        "toxicology",
+        "causal-reporting"
+      ],
+      "surfaceUrl": null,
+      "protocolVersion": "0.2",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-009"
+      ],
+      "observedPatterns": [
+        "CAUSAL_INHERITANCE"
+      ],
+      "requiredDistinctions": [
+        "cyanide detected",
+        "cyanide caused death",
+        "source/pathway",
+        "intent/actor"
+      ],
+      "forbiddenCollapses": [
+        "toxin detected => source established",
+        "cause supported => intent established"
+      ],
+      "materialGaps": [
+        "source/pathway evidence",
+        "actor/intent evidence"
+      ],
+      "promotionNeeds": [
+        "recover exact surface URL",
+        "freeze forensic/official evidence and run artifacts",
+        "author semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-HIST-001",
+      "title": "Holocaust-denial registry interpretation",
+      "jurisdiction": "Historical / Europe",
+      "domain": [
+        "history",
+        "archival-records",
+        "misinformation"
+      ],
+      "surfaceUrl": null,
+      "protocolVersion": "0.2",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-007",
+        "FM-008"
+      ],
+      "observedPatterns": [
+        "SOURCE_POSITION_OVERREACH",
+        "PROPOSITION_DIMENSION_LAUNDERING",
+        "AUTHENTIC_RECORD_INTERPRETATION_COLLAPSE"
+      ],
+      "requiredDistinctions": [
+        "record authenticity vs interpretation",
+        "event vs actor",
+        "scope/time/measure/category"
+      ],
+      "forbiddenCollapses": [
+        "authentic narrow record => broad interpretation authentic",
+        "correct event => claimed actor established"
+      ],
+      "materialGaps": [
+        "record scope and producer-purpose context"
+      ],
+      "promotionNeeds": [
+        "freeze exact challenged artifact and archival sources",
+        "author semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-KE-004",
+      "title": "Kenya Power remuneration claim",
+      "jurisdiction": "Kenya",
+      "domain": [
+        "corporate-governance",
+        "remuneration",
+        "public-reporting"
+      ],
+      "surfaceUrl": null,
+      "protocolVersion": "0.2",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-008"
+      ],
+      "observedPatterns": [
+        "AGGREGATE_COMPONENT_COLLAPSE",
+        "TIME_BASIS_COLLAPSE",
+        "CAUSAL_INHERITANCE"
+      ],
+      "requiredDistinctions": [
+        "salary vs total remuneration",
+        "annual vs recurring run-rate",
+        "stewardship vs causation"
+      ],
+      "forbiddenCollapses": [
+        "total remuneration +90% => salary +90%",
+        "annual payment => recurring salary",
+        "office-holder stewardship => causal responsibility"
+      ],
+      "materialGaps": [
+        "component-level remuneration schedule and time basis"
+      ],
+      "promotionNeeds": [
+        "recover exact surface URL",
+        "freeze remuneration records and run artifacts",
+        "author semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-AFR-001",
+      "title": "Black woman / ancestry essay",
+      "jurisdiction": "Africa / global historical claims",
+      "domain": [
+        "history",
+        "ancestry",
+        "social-claims"
+      ],
+      "surfaceUrl": null,
+      "protocolVersion": "0.2",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-008",
+        "FM-009"
+      ],
+      "observedPatterns": [
+        "PROPOSITION_DIMENSION_LAUNDERING",
+        "CAUSAL_INHERITANCE"
+      ],
+      "requiredDistinctions": [
+        "ancestry vs superiority",
+        "lineage vs sole origin",
+        "contribution vs primary cause vs necessity",
+        "market existence vs market motive"
+      ],
+      "forbiddenCollapses": [
+        "ancestral contribution => superiority",
+        "contribution => sole/necessary cause",
+        "market existence => motive established"
+      ],
+      "materialGaps": [
+        "claim-specific causal and comparative evidence"
+      ],
+      "promotionNeeds": [
+        "freeze exact essay version and run artifacts",
+        "author semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-KE-005",
+      "title": "Kenya Was Designed to Fail",
+      "jurisdiction": "Kenya",
+      "domain": [
+        "political-history",
+        "institutions",
+        "systems-explanation"
+      ],
+      "surfaceUrl": null,
+      "protocolVersion": "0.2",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-008",
+        "FM-009",
+        "FM-010"
+      ],
+      "observedPatterns": [
+        "AGENCY_INHERITANCE",
+        "ACTOR_LAUNDERING",
+        "UNFALSIFIABLE_SYSTEM_NARRATIVE"
+      ],
+      "requiredDistinctions": [
+        "continuity vs control",
+        "constraint vs authorship",
+        "education/network exposure vs agency",
+        "common effect vs common decision-maker"
+      ],
+      "forbiddenCollapses": [
+        "institutional continuity => continuous actor control",
+        "shared outcome => coordinated authorship",
+        "documented abuse => original design purpose"
+      ],
+      "materialGaps": [
+        "actor-specific decision evidence",
+        "observable falsifiers for system-level claims"
+      ],
+      "promotionNeeds": [
+        "freeze exact essay/video/article version and run artifacts",
+        "author semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-AFR-002",
+      "title": "How Arabs Erased 18 Million Afrikans",
+      "jurisdiction": "Africa / transregional historical claims",
+      "domain": [
+        "history",
+        "slavery",
+        "agency"
+      ],
+      "surfaceUrl": null,
+      "protocolVersion": "0.3",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-007",
+        "FM-009"
+      ],
+      "observedPatterns": [
+        "SOURCE_POSITION_OVERREACH",
+        "AGENCY_INHERITANCE",
+        "ACTOR_LAUNDERING",
+        "RETROSPECTIVE_INTENT_PROJECTION"
+      ],
+      "requiredDistinctions": [
+        "actor identity",
+        "coordination",
+        "intent",
+        "mechanism",
+        "temporal planning",
+        "effect"
+      ],
+      "forbiddenCollapses": [
+        "later effect/benefit => prior intent",
+        "institutional continuity => actor continuity",
+        "collective label => stable proven actor"
+      ],
+      "materialGaps": [
+        "actor-specific evidence at each agency-chain link"
+      ],
+      "promotionNeeds": [
+        "freeze exact surface artifact and source corpus",
+        "author semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-DRC-001",
+      "title": "Congo launches Ebola vaccination campaign for frontline workers",
+      "jurisdiction": "Democratic Republic of the Congo",
+      "domain": [
+        "public-health",
+        "vaccination",
+        "research"
+      ],
+      "surfaceUrl": "https://www.africanews.com/2026/09/20/congo-launches-ebola-vaccination-campaign-for-frontline-workers/",
+      "protocolVersion": "0.3",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-002",
+        "FM-003",
+        "FM-005",
+        "FM-008"
+      ],
+      "observedPatterns": [
+        "PROGRAM_COHORT_ALLOCATION_COLLAPSE",
+        "REGULATORY_CATEGORY_DRIFT",
+        "SOURCE_COUNT_INFLATION",
+        "TEMPORAL_SCOPE_DRIFT"
+      ],
+      "requiredDistinctions": [
+        "20,000 BRAVO study cohort vs 50,000 frontline-worker dose allocation",
+        "possible cross-protection vs demonstrated human efficacy",
+        "research protocol vs compassionate use",
+        "personal mandatory experience vs population-wide mandate"
+      ],
+      "forbiddenCollapses": [
+        "research cohort => entire campaign target",
+        "possible protection => demonstrated efficacy",
+        "research protocol => compassionate use",
+        "one worker's account => national mandate"
+      ],
+      "materialGaps": [
+        "exact DRC regulatory/research authorization governing Ervebo use against Bundibugyo"
+      ],
+      "promotionNeeds": [
+        "freeze surface article text and traced source set",
+        "author executable semantic assertions"
+      ]
+    },
+    {
+      "id": "XRAY-DRC-002",
+      "title": "Women and girls pay high price in DR Congo Ebola outbreak",
+      "jurisdiction": "Democratic Republic of the Congo",
+      "domain": [
+        "public-health",
+        "gender",
+        "survey-reporting"
+      ],
+      "surfaceUrl": "https://news.un.org/en/story/2026/09/1168368",
+      "protocolVersion": "0.3",
+      "state": "SETTLED_ANALYSIS",
+      "existingFailureModes": [
+        "FM-005",
+        "FM-007",
+        "FM-008",
+        "FM-009"
+      ],
+      "observedPatterns": [
+        "POPULATION_DENOMINATOR_LOSS",
+        "ANECDOTE_TO_POPULATION",
+        "SURVEY_REACH_INFLATION",
+        "CAUSAL_INHERITANCE",
+        "NUMERIC_POPULATION_DRIFT"
+      ],
+      "requiredDistinctions": [
+        "case share vs disproportionate risk",
+        "field testimony vs prevalence",
+        "survey result vs population estimate",
+        "caregiving exposure mechanism vs quantified causal contribution",
+        "51% vs 61% and 10–16 vs 10–17 population definitions",
+        "scheduled strategy launch vs occurred launch"
+      ],
+      "forbiddenCollapses": [
+        "54% of cases female => disproportionate risk established without denominator",
+        "community story => population prevalence",
+        "survey sample result => all women-led organizations",
+        "caregiving mechanism => quantified cause of observed sex difference",
+        "scheduled launch => occurred launch"
+      ],
+      "materialGaps": [
+        "underlying sex/age-disaggregated case dataset",
+        "UN Women survey sampling frame/methodology",
+        "quantified exposure contribution"
+      ],
+      "promotionNeeds": [
+        "freeze UN News surface and briefing transcript",
+        "capture underlying epidemiological dataset if available",
+        "author executable semantic assertions"
+      ]
+    }
+  ]
+}
