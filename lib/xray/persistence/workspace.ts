@@ -5,6 +5,7 @@ import { CorrelationLedger, type CorrelationKey } from '@/lib/xray/pipeline/corr
 import { RunJournal, type JournalEntry } from '@/lib/xray/pipeline/journal'
 import type { RunStatus } from '@/lib/xray/pipeline/run'
 import type { SnapshotDatabase } from './snapshot'
+import { encodeValue, decodeValue, type Encoded } from './value-codec'
 
 export type WorkspaceRunStatus = RunStatus | 'PENDING' | 'RUNNING'
 export interface CandidateCheckpoint {
@@ -17,33 +18,6 @@ export interface CandidateCheckpoint {
   accumulator: GraphAccumulator
   ledger: CorrelationLedger
   journal: RunJournal
-}
-
-type Encoded =
-  | { t: 'undefined' }
-  | { t: 'scalar'; v: string | number | boolean | null }
-  | { t: 'array'; v: Encoded[] }
-  | { t: 'object'; v: [string, Encoded][] }
-
-// An explicit undefined property and an absent property must remain different
-// through JSONB. Tagged nodes also avoid collisions with canonical object keys.
-function encode(value: unknown): Encoded {
-  if (value === undefined) return { t: 'undefined' }
-  if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number') {
-    if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('Non-finite workspace number')
-    return { t: 'scalar', v: value }
-  }
-  if (Array.isArray(value)) return { t: 'array', v: value.map(encode) }
-  if (typeof value === 'object') return { t: 'object', v: Object.entries(value).map(([key, member]) => [key, encode(member)]) }
-  throw new Error(`Unsupported workspace value: ${typeof value}`)
-}
-function decode(node: Encoded): unknown {
-  switch (node.t) {
-    case 'undefined': return undefined
-    case 'scalar': return node.v
-    case 'array': return node.v.map(decode)
-    case 'object': return Object.fromEntries(node.v.map(([key, value]) => [key, decode(value)]))
-  }
 }
 
 interface WorkspaceEnvelope {
@@ -69,7 +43,7 @@ export async function saveCandidateCheckpoint(db: SnapshotDatabase, checkpoint: 
     ledgerBindings: checkpoint.ledger.bindings(),
     journalEntries: checkpoint.journal.entries,
   }
-  const state: WorkspaceEnvelope = { format: 1, data: encode(payload) }
+  const state: WorkspaceEnvelope = { format: 1, data: encodeValue(payload) }
   await db.query('BEGIN')
   try {
     await db.query('INSERT INTO investigations(id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [checkpoint.investigationId])
@@ -97,7 +71,7 @@ export async function loadCandidateCheckpoint(db: SnapshotDatabase, executionRun
   const row = found[0]
   const envelope = row.state as WorkspaceEnvelope
   if (envelope.format !== 1) throw new Error('Unsupported candidate workspace format')
-  const payload = decode(envelope.data) as WorkspacePayload
+  const payload = decodeValue(envelope.data) as WorkspacePayload
   if (!Number.isInteger(payload.artifactVersion) || payload.artifactVersion < 0 ||
       payload.accumulator.investigation.id !== row.investigation_id)
     throw new Error('Stored workspace identity/revision mismatch')

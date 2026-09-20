@@ -15,6 +15,7 @@
     "check:persistence-versioning": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/version-commit-checks.ts",
     "check:source-position-versioning": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/source-position-version-checks.ts",
     "check:persistence-workspace": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/workspace-checks.ts",
+    "check:persistence-audit": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/execution-audit-checks.ts",
     "check:source-position": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/source-position-checks.ts",
     "check:source-position-pipeline": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/source-position-pipeline-checks.ts",
     "check:source-position-review": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/source-position-review-checks.ts",
