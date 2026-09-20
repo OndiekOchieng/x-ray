@@ -111,7 +111,7 @@ explicit named `MANUAL_STOP` reason. No time or cost budget was faked; the
 
 - A paused `TRACE` attempt: an independent read sees the durable `PLAN` success, the
   candidate at artifact revision 1, and the ledger binding already persisted — while
-  the run is still in flight and still `PENDING`.
+  the run is still in flight and observable as `RUNNING`.
 - The interrupted attempt is durable: `PLAN SUCCEEDED, TRACE FAILED`, revision held at
   1, two stage entries journalled, and no validation recorded, so no gate fabricated a
   verdict over incomplete state.

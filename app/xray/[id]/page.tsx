@@ -9,7 +9,7 @@ export default async function EvidenceExplorerRoute({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const payload = getExplorerPayload(id)
+  const payload = await getExplorerPayload(id)
 
   // Previously this route declared `dynamicParams = false` with a single
   // hardcoded param, so it could serve exactly one investigation for all time.

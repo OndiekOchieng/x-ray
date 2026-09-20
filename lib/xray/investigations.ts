@@ -5,17 +5,24 @@
  * by id and receives view models. Nothing above it imports a fixture module,
  * traverses the graph, or knows how an investigation is stored.
  *
- * TODAY this resolves one investigation from the frozen XRAY-KE-001 fixture.
- * When a real API and store exist, the replacement is confined to this file:
- * the registry becomes a client call and the exported functions become async.
- * No component should need to change.
+ * The investigation-specific reads now resolve through the application/query
+ * path: a stored investigation is reconstructed from its latest committed
+ * version, exactly as the API serves it.
  *
- * NOT IMPLEMENTED HERE, deliberately: no network, no database, no research.
+ * XRAY-KE-001 remains reachable through its own explicit fixture path, keyed by
+ * its own id. It is **not** a fallback. An unknown id resolves to `null` and
+ * the page is not-found; it never quietly becomes the benchmark's evidence.
+ *
+ * Library, featured and gap-search reads still come from the fixture path.
+ * Which investigations are public is a publication decision, and publication
+ * is #9 — answering it here would make a cache lifecycle out of a registry.
  */
 
+import { createXRayGraph, type XRayGraph } from './selectors'
 import { createXrayKe001Graph } from './fixtures/xray-ke-001/graph'
-import type { XRayGraph } from './selectors'
 import { claimById, gapById } from './selectors'
+import { InvestigationService } from './application/investigation-service'
+import { databaseConfigured, getDatabase } from './application/runtime'
 import {
   claimSummaryViews,
   claimView,
@@ -31,33 +38,55 @@ import {
 } from './projections'
 
 /**
- * Known investigations.
+ * Benchmark investigations available from the frozen corpus.
  *
- * A registry of graph factories keyed by id. The only entry is the frozen
- * benchmark; adding a second requires nothing but another factory.
+ * Keyed by their own ids only. Nothing resolves through this table by
+ * accident: a caller asking for some other id gets `null`.
  */
-const REGISTRY: Record<string, () => XRayGraph> = {
+const BENCHMARKS: Record<string, () => XRayGraph> = {
   'XRAY-KE-001': createXrayKe001Graph,
 }
 
-/** Ids this build can resolve. */
-export function knownInvestigationIds(): string[] {
-  return Object.keys(REGISTRY)
+/** Benchmark ids this build ships. Not "every investigation that exists". */
+export function benchmarkInvestigationIds(): string[] {
+  return Object.keys(BENCHMARKS)
+}
+
+/**
+ * A stored investigation, reconstructed from its latest committed version.
+ *
+ * `null` when the investigation is unknown, or known but has committed no
+ * version yet. An investigation whose research has not yet produced a version
+ * has nothing to display, and showing working state here would require picking
+ * a run — which the candidate contract forbids, because guessing "latest run"
+ * serves one execution's evidence under another's name.
+ */
+async function readStoredGraph(id: string): Promise<XRayGraph | null> {
+  const service = new InvestigationService(await getDatabase())
+  const identity = await service.getInvestigation(id).catch(() => null)
+  if (!identity || identity.latestCommittedVersion === null) return null
+  const committed = await service.getCommittedVersion(id, identity.latestCommittedVersion)
+  return createXRayGraph(committed.graph)
 }
 
 /**
  * The canonical graph for an investigation, or `null` if unknown.
  *
- * Returns `null` rather than falling back to a default. An unknown id must
- * surface as not-found, never as some other investigation's evidence.
+ * Stored data wins. The benchmark answers only for its own id, and only after
+ * storage has declined — so a stored investigation can never be shadowed by a
+ * fixture, and a fixture can never stand in for a stored one.
  */
-export function getInvestigationGraph(id: string): XRayGraph | null {
-  const factory = REGISTRY[id]
-  return factory ? factory() : null
+export async function getInvestigationGraph(id: string): Promise<XRayGraph | null> {
+  if (databaseConfigured()) {
+    const stored = await readStoredGraph(id)
+    if (stored) return stored
+  }
+  const benchmark = BENCHMARKS[id]
+  return benchmark ? benchmark() : null
 }
 
-export function getInvestigationView(id: string): InvestigationView | null {
-  const graph = getInvestigationGraph(id)
+export async function getInvestigationView(id: string): Promise<InvestigationView | null> {
+  const graph = await getInvestigationGraph(id)
   return graph ? investigationView(graph) : null
 }
 
@@ -68,8 +97,8 @@ export interface ExplorerPayload {
   navigator: ClaimSummaryView[]
 }
 
-export function getExplorerPayload(id: string): ExplorerPayload | null {
-  const graph = getInvestigationGraph(id)
+export async function getExplorerPayload(id: string): Promise<ExplorerPayload | null> {
+  const graph = await getInvestigationGraph(id)
   if (!graph) return null
   return {
     investigation: investigationView(graph),
@@ -84,15 +113,15 @@ export interface ProgressPayload {
   claims: ClaimSummaryView[]
 }
 
-export function getProgressPayload(id: string): ProgressPayload | null {
-  const graph = getInvestigationGraph(id)
+export async function getProgressPayload(id: string): Promise<ProgressPayload | null> {
+  const graph = await getInvestigationGraph(id)
   if (!graph) return null
   return { investigation: investigationView(graph), claims: claimSummaryViews(graph) }
 }
 
 /** One claim within one investigation. */
-export function getClaimView(investigationId: string, claimId: string): ClaimView | null {
-  const graph = getInvestigationGraph(investigationId)
+export async function getClaimView(investigationId: string, claimId: string): Promise<ClaimView | null> {
+  const graph = await getInvestigationGraph(investigationId)
   if (!graph) return null
   return claimViewById(graph, claimId) ?? null
 }
@@ -111,9 +140,8 @@ export interface GapPayload {
 }
 
 export function getGapPayload(gapId: string): GapPayload | null {
-  for (const id of knownInvestigationIds()) {
-    const graph = getInvestigationGraph(id)
-    if (!graph) continue
+  for (const id of benchmarkInvestigationIds()) {
+    const graph = BENCHMARKS[id]()
     const gap = gapById(graph, gapId)
     if (!gap) continue
     return {
@@ -127,10 +155,7 @@ export function getGapPayload(gapId: string): GapPayload | null {
 
 /** Every cached investigation, for the public library. */
 export function getLibraryEntries(): LibraryEntryView[] {
-  return knownInvestigationIds()
-    .map((id) => getInvestigationGraph(id))
-    .filter((g): g is XRayGraph => g !== null)
-    .map(libraryEntryView)
+  return benchmarkInvestigationIds().map((id) => libraryEntryView(BENCHMARKS[id]()))
 }
 
 /** The investigation featured on the home page, if any. */

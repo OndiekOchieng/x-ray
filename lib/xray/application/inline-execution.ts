@@ -102,7 +102,15 @@ export class InlineExecutionService {
     return this.read.getExecutionStatus(investigationId, executionRunId)
   }
 
-  async resumeExecution(investigationId: string, executionRunId: string): Promise<ExecutionStatusDto> {
+  /**
+   * Continue or reopen a run.
+   *
+   * An explicit `revision` takes precedence over anything the runtime plans.
+   * The caller asking for a revision is a decision about this run; the runtime
+   * only knows how to execute stages.
+   */
+  async resumeExecution(investigationId: string, executionRunId: string,
+    options: { revision?: RevisionRequest } = {}): Promise<ExecutionStatusDto> {
     const identity = await this.read.getInvestigation(investigationId)
     const status = await this.read.getExecutionStatus(investigationId, executionRunId)
     // A committed run is published history and is never re-entered (#7).
@@ -115,7 +123,10 @@ export class InlineExecutionService {
     const prior = await readExecutionAudit(this.db, executionRunId)
     if (!isDeepStrictEqual(prior.journal.entries, checkpoint.journal.entries))
       throw new Error('Workspace and journal audit diverge')
-    const plan = await this.runtime.resume(investigationId, identity.submission)
+    const planned = await this.runtime.resume(investigationId, identity.submission)
+    const plan: ExecutionPlan = options.revision
+      ? { ...planned, revision: options.revision }
+      : planned
     // A completed run has nothing left to continue; only a revision reopens it,
     // because a revision is a new instruction rather than unfinished work.
     if (status.status === 'COMPLETED' && !plan.revision)
