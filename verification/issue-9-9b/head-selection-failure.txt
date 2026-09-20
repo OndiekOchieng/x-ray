@@ -25,13 +25,14 @@ X-Ray publication event store — 9b
  ok   21 · an injected event failure rolls back the slug allocation too          
  ok   22 · two first-publication attempts yield one slug and one event           
  ok   23 · no publication act changed committed state or the version pointer     
- ok   24 · withdrawing a version that is not the head leaves the head alone      
+FAIL  24 · withdrawing a version that is not the head leaves the head alone        -> the head moved to v1
  ok   slug resolution answers which lineage owns an address                      
  ok   presentationHead is undefined before anything is published                 
 ===================================================================================
-26/26 passed
+25/26 passed
 
 Concurrency note: PGlite executes on one connection, so proof 22 establishes the
 outcome (one slug, one event, one typed refusal) but NOT native row-lock behaviour.
 Simultaneous first publication on native PostgreSQL is unproven and is not claimed.
 
+[ELIFECYCLE] Command failed with exit code 1.

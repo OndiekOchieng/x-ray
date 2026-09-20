@@ -476,6 +476,26 @@ async function main(): Promise<void> {
       return stray.n === 0 ? null : 'a principal column reached canonical tables'
     })
 
+    await check('24 · withdrawing a version that is not the head leaves the head alone', async () => {
+      // PUBLISH selects the head. WITHDRAW changes only the presentation state
+      // of its exact target, so taking down an older version must not take the
+      // alias down with it.
+      const id = 'XRAY-LINEAGE-NONHEAD'
+      const seeded = await seedLineage(db, id, 'RUN-NONHEAD')
+      await linkVersion(db, id, 1, 'RUN-NONHEAD-V1', seeded.v1, seeded.assessment)
+      await publishVersion(db, { investigationId: id, version: 1, principalId: P1, occurredAt: AT })
+      await publishVersion(db, { investigationId: id, version: 2, principalId: P1, occurredAt: AT })
+      await withdrawVersion(db, { investigationId: id, version: 1, principalId: P1,
+        occurredAt: AT, reason: 'PRIVACY_HARM' })
+
+      const head = await resolvePresentationHead(db, id)
+      if (head?.version !== 2) return `the head moved to v${head?.version}`
+      if (head.state !== 'PUBLISHED') return `the head reads ${head.state}`
+      const history = await readPublicationHistory(db, id)
+      if (exactVersionState(history, 1) !== 'WITHDRAWN') return 'v1 was not withdrawn'
+      return exactVersionState(history, 2) === 'PUBLISHED' ? null : 'v2 lost its state'
+    })
+
     await check('slug resolution answers which lineage owns an address', async () => {
       const owner = await resolveSlug(db, slugA)
       if (owner?.investigationId !== A) return `slug resolved to ${owner?.investigationId}`

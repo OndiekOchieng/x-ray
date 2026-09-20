@@ -63,10 +63,15 @@ what 9d discloses cannot drift from the assessment that produced it.
 
 ### Presentation head
 
-Replayed from event order. The head is the version named by the **latest deliberate
-act**, with its state being that act — never `MAX(version)`, because that definition
-cannot express a rollback to an earlier version. Exact-version state is derived from
-that version's own events alone.
+Replayed from event order. **`PUBLISH` selects the head; `WITHDRAW` only changes the
+presentation state of its exact target.**
+
+The head is the version named by the most recent `PUBLISH`, and its state is that
+version's own current state — which a later withdrawal of *that* version turns to
+`WITHDRAWN`. Withdrawing some other version leaves the head where it is.
+
+It is never `MAX(version)` either: that cannot express a deliberate rollback to an
+earlier version. Exact-version state derives from that version's own events alone.
 
 ## Preserved failed verification
 
@@ -107,8 +112,8 @@ independently.
 
 ## Checks
 
-25/25 in `pnpm check:publication` (`final-gate.txt`), covering all the released
-proofs: atomic first publication, slug determinism across titles and lineages,
+26/26 in `pnpm check:publication` (`final-gate.txt`), covering all the released
+proofs plus head selection: atomic first publication, slug determinism across titles and lineages,
 DB-enforced UPDATE/DELETE rejection, slug rename/reassign/reuse refusal, principal
 absence, uncommitted and unlinked versions, `PASS` and eligible `BLOCKED` publishing
 with blocker linkage retained, `FAIL`/`REVISE` refused, reason vocabulary, the
@@ -130,12 +135,26 @@ attribution stays out of the evidence graph structurally, not by convention.
 
 Migration 0008 up / down / up round-trips cleanly inside the gate.
 
-## Observed, not decided
+## Remediation — head selection corrected
 
-Withdrawing a version that is **not** the current head moves the head to it, because
-the released rule is that the head follows the latest deliberate act. The released
-examples only cover withdrawing the current head. Flagged for review rather than
-resolved by inventing a different rule.
+The first push derived the head from the **latest event of any kind**. I flagged the
+consequence rather than resolving it: withdrawing a version that was not the head
+moved the head to it, taking the alias down with an old version's takedown.
+
+Review closed it: **`PUBLISH` selects the presentation head. `WITHDRAW` only changes
+the presentation state of its exact target.**
+
+Proof 24 was written first, against the uncorrected code, and recorded failing with
+the exact symptom — *"the head moved to v1"* (`head-selection-failure.txt`).
+`presentationHead` now scans for the most recent `PUBLISH` to select the version, then
+takes that version's own last event to determine its state.
+
+The released example sequence is unchanged by the correction, because every step in it
+either publishes or withdraws the current head. What changes is the case the example
+did not cover: taking down superseded history no longer silently takes down the alias.
+
+`withdrawVersion` needed no change — it already operated on exact-version state alone,
+which is the second half of the correction.
 
 ## Not in 9b
 

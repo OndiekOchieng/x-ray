@@ -194,21 +194,39 @@ export async function resolveSlug(
 /**
  * The lineage's current presentation head, replayed from event order.
  *
- * The head is the version named by the **latest deliberate act**, and its state
- * is that act. It is never `MAX(version)`: that definition cannot express a
- * rollback to an earlier version, which is a legitimate publication decision.
+ * **`PUBLISH` selects the head. `WITHDRAW` only changes the presentation state
+ * of its exact target.**
+ *
+ * So the head is the version named by the most recent `PUBLISH`, and its state
+ * is that version's own current state — which a later withdrawal of *that*
+ * version turns to `WITHDRAWN`.
+ *
+ * Withdrawing some other version therefore leaves the head where it is. Taking
+ * down an old version is not a decision about what the lineage currently
+ * presents, and treating every act as head-selecting would let a takedown of
+ * superseded history silently take the alias down with it.
+ *
+ * It is never `MAX(version)` either: that cannot express a deliberate rollback
+ * to an earlier version, which is a legitimate publication decision.
  *
  * `undefined` means nothing has ever been published.
  */
 export function presentationHead(
   history: readonly PublicationEvent[],
 ): PresentationHead | undefined {
-  const last = history[history.length - 1]
-  if (last === undefined) return undefined
+  let selected: PublicationEvent | undefined
+  for (const event of history) if (event.act === 'PUBLISH') selected = event
+  if (selected === undefined) return undefined
+
+  // The act that determines the head's current state: the last thing that
+  // happened to that exact version, which may be a withdrawal of it.
+  let determining = selected
+  for (const event of history) if (event.version === selected.version) determining = event
+
   return {
-    version: last.version,
-    state: last.act === 'PUBLISH' ? 'PUBLISHED' : 'WITHDRAWN',
-    event: last,
+    version: selected.version,
+    state: determining.act === 'PUBLISH' ? 'PUBLISHED' : 'WITHDRAWN',
+    event: determining,
   }
 }
 
