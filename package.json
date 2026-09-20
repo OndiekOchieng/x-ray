@@ -33,7 +33,8 @@
     "check:investigation-service": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/investigation-service-checks.ts",
     "check:inline-execution": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/inline-execution-checks.ts",
     "check:api-routes": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/api-route-checks.ts",
-    "check:lifecycle": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/lifecycle-checks.ts"
+    "check:lifecycle": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/lifecycle-checks.ts",
+    "check:benchmark-corpus": "node scripts/check-benchmark-corpus.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
