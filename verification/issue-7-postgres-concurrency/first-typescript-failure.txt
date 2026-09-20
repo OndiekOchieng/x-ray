@@ -1,0 +1,3 @@
+$ pnpm exec tsc --noEmit
+lib/xray/persistence/postgres-concurrency-checks.ts(42,17): error TS2339: Property 'push' does not exist on type 'readonly Source[]'.
+lib/xray/persistence/postgres-concurrency-checks.ts(44,18): error TS2339: Property 'push' does not exist on type 'readonly Evidence[]'.

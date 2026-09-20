@@ -1,0 +1,20 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/postgres-concurrency-checks.ts
+PostgreSQL: PostgreSQL 17.11 (Homebrew) on aarch64-apple-darwin25.6.0, compiled by Apple clang version 21.0.0 (clang-2100.1.1.101), 64-bit
+t+187ms race: independent backend IDs A=10405, B=10406
+t+258ms race: A acquired investigation row lock
+t+280ms race: B requesting investigation row lock
+t+280ms race backend 10406 waiting: Lock/transactionid
+t+333ms race: A COMMIT complete
+t+333ms race: B acquired row lock; observed predecessor 2
+t+333ms race: B ROLLBACK complete
+t+362ms race: SQL pointer=2, versions=1+1, v2 source rows=1, loser links=NULL, waiting locks=0
+race: A commits; B VersionConflict(actual=2) PASS
+t+560ms rollback: independent backend IDs A=10411, B=10412
+t+608ms rollback: A acquired investigation row lock
+t+625ms rollback: B requesting investigation row lock
+t+630ms rollback backend 10412 waiting: Lock/transactionid
+t+670ms rollback: A ROLLBACK complete
+t+670ms rollback: B acquired row lock; observed predecessor 1
+t+716ms rollback: B COMMIT complete
+t+743ms rollback: SQL pointer=2, versions=1+1, v2 source rows=1, loser links=NULL, waiting locks=0
+rollback: rollback releases lock; B commits PASS
