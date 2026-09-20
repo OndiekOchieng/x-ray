@@ -110,8 +110,21 @@ export interface RunOptions {
 }
 
 export interface PipelineBoundary {
-  kind: 'STAGE_ATTEMPT' | 'VALIDATE' | 'REVIEW' | 'TERMINAL'
-  status: RunStatus | 'PENDING'
+  /**
+   * `CONTROL` marks a journal mutation that changes what the run will do next
+   * without executing a stage: an invalidation, a resume, or a recorded stop.
+   * They are raised immediately after the append, so a process loss cannot
+   * land between mutating the journal and making that mutation durable.
+   */
+  kind: 'CONTROL' | 'STAGE_ATTEMPT' | 'VALIDATE' | 'REVIEW' | 'TERMINAL'
+  /** `RUNNING` while the command is executing; a `RunStatus` once terminal. */
+  status: RunStatus | 'RUNNING'
+  /** Present when `kind` is `CONTROL`. Identifies the exact transition made. */
+  control?: {
+    transition: 'INVALIDATION' | 'RESUMED' | 'STOPPED'
+    /** Journal entry id the transition appended. */
+    entryId: string
+  }
   journal: RunJournal
   accumulator: GraphAccumulator
   ledger: CorrelationLedger
@@ -173,25 +186,6 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
     options.resume?.accumulator ?? new GraphAccumulator(investigation, options.seed ?? {})
 
   const byStage = new Map(options.stages.map((s) => [s.stage, s]))
-  if (options.revision) {
-    const target = RESEARCH_STAGES.indexOf(options.revision.stage)
-    const staleStages = RESEARCH_STAGES.slice(target).filter((stage) => byStage.has(stage))
-    journal.appendInvalidation({
-      id: `IR-${journal.length + 1}`,
-      investigationId,
-      requestId: options.revision.id,
-      target: options.revision.stage,
-      staleStages,
-      observedAt: clock(),
-    })
-    accumulator.setResearchStop(undefined)
-    journal.appendStop({ id: `TR-${journal.length + 1}`, investigationId, action: 'RESUMED', observedAt: clock() })
-  }
-  if (options.resume && !options.revision && journal.stopEntries().at(-1)?.action === 'STOPPED') {
-    accumulator.setResearchStop(undefined)
-    journal.appendStop({ id: `TR-${journal.length + 1}`, investigationId, action: 'RESUMED', observedAt: clock() })
-  }
-  const alreadyDone = new Set(journal.succeededStages())
   const adapters: StageAdapters = options.adapters ?? {}
   const ledger = options.resume?.ledger ?? new CorrelationLedger()
 
@@ -199,11 +193,56 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
   let failedStage: ResearchStage | undefined
   const capabilityGaps: CapabilityUnavailable[] = []
   const boundary = async (kind: PipelineBoundary['kind'], status: PipelineBoundary['status'],
-    validation?: ValidationResult, reviewHistory?: ReviewHistory) => {
+    validation?: ValidationResult, reviewHistory?: ReviewHistory,
+    control?: PipelineBoundary['control']) => {
     await options.onBoundary?.({ kind, status, journal, accumulator, ledger, artifactVersion,
       ...(validation === undefined ? {} : { validation }),
-      ...(reviewHistory === undefined ? {} : { reviewHistory }) })
+      ...(reviewHistory === undefined ? {} : { reviewHistory }),
+      ...(control === undefined ? {} : { control }) })
   }
+
+  /**
+   * Record a control transition and make it durable before anything acts on it.
+   *
+   * The stop is cleared before the journal is appended, so the state observed
+   * at the boundary is already coherent: no durable checkpoint ever shows a run
+   * that has been invalidated while still claiming to have stopped.
+   */
+  const control = async (transition: 'INVALIDATION' | 'RESUMED' | 'STOPPED', entryId: string) => {
+    await boundary('CONTROL', 'RUNNING', undefined, undefined, { transition, entryId })
+  }
+
+  // -------------------------------------------------------------------------
+  // Control transitions, before any stage is scheduled
+  // -------------------------------------------------------------------------
+
+  if (options.revision) {
+    const target = RESEARCH_STAGES.indexOf(options.revision.stage)
+    const staleStages = RESEARCH_STAGES.slice(target).filter((stage) => byStage.has(stage))
+    accumulator.setResearchStop(undefined)
+    const invalidationId = `IR-${journal.length + 1}`
+    journal.appendInvalidation({
+      id: invalidationId,
+      investigationId,
+      requestId: options.revision.id,
+      target: options.revision.stage,
+      staleStages,
+      observedAt: clock(),
+    })
+    await control('INVALIDATION', invalidationId)
+    const resumedId = `TR-${journal.length + 1}`
+    journal.appendStop({ id: resumedId, investigationId, action: 'RESUMED', observedAt: clock() })
+    await control('RESUMED', resumedId)
+  }
+  if (options.resume && !options.revision && journal.stopEntries().at(-1)?.action === 'STOPPED') {
+    accumulator.setResearchStop(undefined)
+    const resumedId = `TR-${journal.length + 1}`
+    journal.appendStop({ id: resumedId, investigationId, action: 'RESUMED', observedAt: clock() })
+    await control('RESUMED', resumedId)
+  }
+
+  // Computed after invalidation: a stage marked stale must not count as done.
+  const alreadyDone = new Set(journal.succeededStages())
 
   // -------------------------------------------------------------------------
   // Research stages
@@ -330,7 +369,7 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
       } finally {
         // Outside the stage error handler: persistence failure must never be
         // misreported as a failed research attempt.
-        await boundary('STAGE_ATTEMPT', 'PENDING')
+        await boundary('STAGE_ATTEMPT', 'RUNNING')
       }
     }
 
@@ -373,10 +412,14 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
   }
 
   const assessment = assessResearchStop(accumulator.rebuild(), options.stopEvidence)
-  if (assessment.stop && journal.activeCapabilityEntries().length === 0) accumulator.setResearchStop(assessment.stop)
-  if (assessment.stop && journal.activeCapabilityEntries().length === 0) journal.appendStop({
-    id: `TR-${journal.length + 1}`, investigationId, action: 'STOPPED', stop: assessment.stop, observedAt: clock(),
-  })
+  if (assessment.stop && journal.activeCapabilityEntries().length === 0) {
+    accumulator.setResearchStop(assessment.stop)
+    const stoppedId = `TR-${journal.length + 1}`
+    journal.appendStop({
+      id: stoppedId, investigationId, action: 'STOPPED', stop: assessment.stop, observedAt: clock(),
+    })
+    await control('STOPPED', stoppedId)
+  }
   const graph = accumulator.rebuild()
 
   const validation = validateXRayGraph(graph, { mode: 'FULL' })
@@ -399,7 +442,7 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
     },
     clock,
   })
-  await boundary('VALIDATE', 'PENDING', validation)
+  await boundary('VALIDATE', 'RUNNING', validation)
 
   // #4 D1 — the Reviewer runs only on validator-clean graphs.
   if (validateOutcome === 'BLOCKED') {
@@ -411,7 +454,7 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
       clock,
       error: 'VALIDATE gate blocked the run; the Reviewer does not run on a failing graph.',
     })
-    await boundary('REVIEW', 'PENDING', validation)
+    await boundary('REVIEW', 'RUNNING', validation)
     await boundary('TERMINAL', 'GATE_BLOCKED', validation)
 
     return {
@@ -443,7 +486,7 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
     },
     clock,
   })
-  await boundary('REVIEW', 'PENDING', validation, reviewHistory)
+  await boundary('REVIEW', 'RUNNING', validation, reviewHistory)
 
   await boundary('TERMINAL', journal.activeCapabilityEntries().length > 0 ? 'CAPABILITY_BLOCKED' : 'COMPLETED',
     validation, reviewHistory)

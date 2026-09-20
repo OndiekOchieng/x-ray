@@ -7,4 +7,16 @@ $ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/applica
 8b: STOPPED is durable at its own transition, not at the following gate PASS
 8b: completed run reopens only by revision, never by bare resume PASS
 8b: submitted URL alone creates no Source, Evidence or version row PASS
-8b: the surface Source appears only from actual INGEST output PASS
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+0 !== 1
+
+    at run (file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/application/inline-execution-checks.ts:285:12) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 0,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+[ELIFECYCLE] Command failed with exit code 1.

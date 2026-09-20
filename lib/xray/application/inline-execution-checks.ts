@@ -21,7 +21,10 @@ const key = correlationKey({ investigationId: graph.investigation.id, stage: 'PL
 let signalTrace!: () => void, releaseTrace!: () => void
 const traceEntered = new Promise<void>((resolve) => { signalTrace = resolve })
 const traceRelease = new Promise<void>((resolve) => { releaseTrace = resolve })
-let planCalls = 0, traceCalls = 0
+let signalRevised!: () => void, releaseRevised!: () => void
+const revisedEntered = new Promise<void>((resolve) => { signalRevised = resolve })
+const revisedRelease = new Promise<void>((resolve) => { releaseRevised = resolve })
+let planCalls = 0, traceCalls = 0, revisedPlanCalls = 0
 const stages = (fail: boolean): StageDefinition[] => [
   { stage: 'PLAN', run(ctx) { planCalls++; ctx.ledger.assign(key, () => 'EV-100'); return {} } },
   { stage: 'TRACE', async run(ctx) {
@@ -54,7 +57,9 @@ async function run() {
     const pending = command.startExecution(graph.investigation.id)
     await traceEntered
     const during = await read.getExecutionStatus(graph.investigation.id, 'RUN-8B')
-    assert.equal(during.status, 'PENDING')
+    // RUNNING, not PENDING: the contract is that an observer sees the exact
+    // durable state, and this run is executing rather than merely scheduled.
+    assert.equal(during.status, 'RUNNING')
     assert.deepStrictEqual(during.stageRuns.map((item) => [item.stage, item.status]), [['PLAN','SUCCEEDED']])
     const inFlight = await read.getCandidate(graph.investigation.id, 'RUN-8B')
     assert.equal(inFlight.artifactVersion, 1)
@@ -141,6 +146,153 @@ async function run() {
     assert.equal(capabilityAudit.journal.gateEntries().length, 2)
     assert.equal(capability.committedVersion, null)
     console.log('8b: unavailable adapter stays capability-blocked, not stage-failed or committed PASS')
+
+    // -- Gap 1 + 2: revision routing, and control transitions durable at the
+    // exact point they are appended rather than at the next stage boundary.
+    const revision = { id: 'RR-001', findingId: 'RF-001', stage: 'PLAN' as const,
+      action: 'Re-plan against the located evidence.', targets: [] }
+    const revisionRuntime: ExecutionRuntime = {
+      async initial() { throw new Error('unused') },
+      async resume() { return { revision, maxAttempts: 1,
+        // An explicit named reason. This calibration graph does not satisfy the
+        // structural conditions, so SATURATION is correctly never inferred
+        // (D25), and TIME/COST budgets are not representable at all (D27).
+        stopEvidence: { reason: 'MANUAL_STOP' },
+        stages: [
+          { stage: 'PLAN', async run() {
+            revisedPlanCalls++
+            signalRevised()
+            await revisedRelease
+            return {}
+          } },
+          { stage: 'TRACE', run() { traceCalls++; return {} } },
+        ] } },
+    }
+    const reviser = new InlineExecutionService(db, revisionRuntime, () => AT)
+    const revising = reviser.resumeExecution(graph.investigation.id, 'RUN-8B')
+    await revisedEntered
+
+    // The revised PLAN is blocked and no stage attempt boundary has fired yet,
+    // so anything durable here was made durable by the control boundary alone.
+    const midRevision = await readExecutionAudit(db, 'RUN-8B')
+    const invalidations = midRevision.journal.invalidationEntries()
+    assert.equal(invalidations.length, 1)
+    assert.equal(invalidations[0].target, 'PLAN')
+    assert.equal(invalidations[0].requestId, 'RR-001')
+    assert.deepStrictEqual([...invalidations[0].staleStages], ['PLAN', 'TRACE'])
+    assert.equal(midRevision.journal.stopEntries().at(-1)?.action, 'RESUMED')
+    assert.equal((await loadCandidateCheckpoint(db, 'RUN-8B')).status, 'RUNNING')
+    assert.equal((await read.getExecutionStatus(graph.investigation.id, 'RUN-8B')).status, 'RUNNING')
+    releaseRevised()
+    const revised = await revising
+    assert.equal(revised.status, 'COMPLETED')
+    // Targeted rerun: both stale stages ran again, and nothing else did.
+    assert.equal(revisedPlanCalls, 1)
+    assert.equal(traceCalls, 3)
+    assert.equal(revised.committedVersion, null)
+    const revisedAudit = await readExecutionAudit(db, 'RUN-8B')
+    assert.deepStrictEqual(revisedAudit.journal.entries.slice(0, auditAfter.journal.length),
+      auditAfter.journal.entries)
+    // The first resume recorded no stop at all: this graph does not meet the
+    // structural conditions, so saturation is not inferred from one pass.
+    assert.deepStrictEqual(auditAfter.journal.stopEntries().map((entry) => entry.action), [])
+    assert.deepStrictEqual(revisedAudit.journal.stopEntries().map((entry) => entry.action),
+      ['RESUMED', 'STOPPED'])
+    assert.equal(revisedAudit.journal.stopEntries().at(-1)?.stop?.reason, 'MANUAL_STOP')
+    assert.equal(revisedAudit.reviewHistory.rounds.length, 2)
+    console.log('8b: revision routes to its stage; INVALIDATION/RESUMED durable before any stage ran PASS')
+
+    // The STOPPED transition is durable at its own boundary, not at the gate
+    // that follows it: failing the VALIDATE boundary must not lose the stop.
+    let failValidation = false
+    const gateFailingDb: SnapshotDatabase = { query: async (sql, params) => {
+      if (failValidation && sql.includes('INSERT INTO run_validation_results'))
+        throw new Error('injected validation write failure')
+      return db.query(sql, params)
+    } }
+    const stopRuntime: ExecutionRuntime = {
+      async initial() { return { investigation: graph.investigation, seed: graph,
+        stages: [{ stage: 'PLAN', run: () => ({}) }], maxAttempts: 1,
+        stopEvidence: { reason: 'MANUAL_STOP' } } },
+      async resume() { throw new Error('unused') },
+    }
+    failValidation = true
+    await assert.rejects(
+      new InlineExecutionService(gateFailingDb, stopRuntime, () => AT, () => 'RUN-8B-STOP')
+        .startExecution(graph.investigation.id), /injected validation write failure/)
+    const stopAudit = await readExecutionAudit(db, 'RUN-8B-STOP')
+    assert.deepStrictEqual(stopAudit.journal.stopEntries().map((entry) => entry.action), ['STOPPED'])
+    assert.equal(stopAudit.validations.length, 0)
+    assert.equal(stopAudit.journal.gateEntries().length, 0)
+    assert.equal((await loadCandidateCheckpoint(db, 'RUN-8B-STOP')).journal.stopEntries().length, 1)
+    console.log('8b: STOPPED is durable at its own transition, not at the following gate PASS')
+
+    // A plain resume of a completed run is refused; only a revision reopens it.
+    await assert.rejects(
+      new InlineExecutionService(db, runtime, () => AT).resumeExecution(graph.investigation.id, 'RUN-8B'),
+      ExecutionNotRetryable)
+    console.log('8b: completed run reopens only by revision, never by bare resume PASS')
+
+    // -- Gap 3: a submitted URL fabricates no canonical Source.
+    const submitted = await new InvestigationService(db, () => AT, () => 'XRAY-FRESH')
+      .createInvestigation({ sourceUrl: 'https://example.org/illustrative-notice' })
+    const fresh = {
+      id: submitted.investigationId, protocolVersion: '0.1.0', status: 'CREATED' as const,
+      // 1-based by the validator's rule. It is a pointer, not a claim that a
+      // version exists: the assertions below prove investigation_versions is
+      // empty throughout, and execution never writes it.
+      surfaceSourceId: 'SRC-001', createdAt: AT, currentVersion: 1, stageRuns: [],
+      claimIds: [], sourceIds: [], evidenceIds: [], discrepancyIds: [],
+      disconfirmationIds: [], findingIds: [], gapIds: [],
+    }
+    const canonicalRowCount = async (table: string) => ((await db.query(
+      `SELECT count(*)::int AS n FROM ${table} WHERE investigation_id=$1`,
+      [submitted.investigationId])).rows[0] as { n: number }).n
+
+    let ingestSource = false
+    const ingestRuntime: ExecutionRuntime = {
+      async initial() { return { investigation: fresh, stages: ingestStages(), maxAttempts: 1 } },
+      async resume() { return { stages: ingestStages(), maxAttempts: 1 } },
+    }
+    function ingestStages(): StageDefinition[] {
+      return [{ stage: 'INGEST', run(ctx) {
+        if (!ingestSource) {
+          return notConfigured('research-adapter:retrieve', 'Configure a retrieval adapter.')
+        }
+        return { sources: [{ id: ctx.ids.source(), title: 'Illustrative public notice',
+          url: 'https://example.org/illustrative-notice', retrievedAt: AT, sourceType: 'OTHER',
+          evidenceClass: 'PRIMARY', originStatus: 'ORIGINATING', accessibility: 'RETRIEVED' }] }
+      } }]
+    }
+
+    const ingestCommand = new InlineExecutionService(db, ingestRuntime, () => AT, () => 'RUN-FRESH')
+    const withoutAdapter = await ingestCommand.startExecution(submitted.investigationId)
+    assert.equal(withoutAdapter.committedVersion, null)
+    const beforeIngest = await read.getCandidate(submitted.investigationId, 'RUN-FRESH')
+    // The stored URL is a request, not evidence. Nothing canonical exists yet.
+    assert.deepStrictEqual(beforeIngest.graph.sources, [])
+    assert.deepStrictEqual(beforeIngest.graph.evidence, [])
+    assert.equal(beforeIngest.graph.investigation.surfaceSourceId, 'SRC-001')
+    for (const table of ['sources', 'evidence', 'claims', 'investigation_versions'])
+      assert.equal(await canonicalRowCount(table), 0)
+    const freshAudit = await readExecutionAudit(db, 'RUN-FRESH')
+    assert.equal(freshAudit.journal.activeCapabilityEntries().length, 1)
+    assert.equal(freshAudit.journal.stageEntries()[0].status, 'PENDING')
+    console.log('8b: submitted URL alone creates no Source, Evidence or version row PASS')
+
+    // Only actual adapter output creates the surface Source.
+    ingestSource = true
+    await new InlineExecutionService(db, ingestRuntime, () => AT)
+      .resumeExecution(submitted.investigationId, 'RUN-FRESH')
+    const afterIngest = await read.getCandidate(submitted.investigationId, 'RUN-FRESH')
+    assert.equal(afterIngest.graph.sources.length, 1)
+    assert.equal(afterIngest.graph.sources[0].id, 'SRC-001')
+    assert.equal(afterIngest.graph.sources[0].url, 'https://example.org/illustrative-notice')
+    assert.equal(afterIngest.graph.investigation.sourceIds.length, 1)
+    // Execution still commits nothing: the version tables remain empty.
+    assert.equal(await canonicalRowCount('investigation_versions'), 0)
+    assert.equal(await canonicalRowCount('sources'), 0)
+    console.log('8b: the surface Source appears only from actual INGEST output PASS')
   } finally { await db.close() }
 }
 run().catch((error) => { console.error(error); process.exitCode = 1 })

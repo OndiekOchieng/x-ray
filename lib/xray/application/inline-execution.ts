@@ -9,6 +9,7 @@ import { RunJournal } from '@/lib/xray/pipeline/journal'
 import { runPipeline, type PipelineBoundary } from '@/lib/xray/pipeline/run'
 import type { StageAdapters, StageDefinition } from '@/lib/xray/pipeline/stages'
 import type { StopEvidence } from '@/lib/xray/pipeline/stop'
+import type { RevisionRequest } from '@/lib/xray/review'
 import { appendExecutionAudit, readExecutionAudit } from '@/lib/xray/persistence/execution-audit'
 import { loadCandidateCheckpoint, saveCandidateCheckpoint } from '@/lib/xray/persistence/workspace'
 import type { SnapshotDatabase } from '@/lib/xray/persistence/snapshot'
@@ -20,6 +21,14 @@ export interface ExecutionPlan {
   adapters?: StageAdapters
   stopEvidence?: StopEvidence
   maxAttempts?: number
+  /**
+   * A blocking review finding routed back to the stage that can address it.
+   *
+   * Supplying one invalidates that stage and everything positionally after it,
+   * so the resume re-runs exactly the affected span. Without it a resume only
+   * continues work that had not finished.
+   */
+  revision?: RevisionRequest
 }
 export interface InitialExecutionPlan extends ExecutionPlan {
   investigation: Investigation
@@ -31,8 +40,8 @@ export interface ExecutionRuntime {
   resume(investigationId: string, submission: SubmissionMetadata | null): Promise<ExecutionPlan>
 }
 export class ExecutionNotRetryable extends Error {
-  constructor() {
-    super('Completed or committed execution cannot be resumed')
+  constructor(message = 'Completed or committed execution cannot be resumed') {
+    super(message)
     this.name = 'ExecutionNotRetryable'
   }
 }
@@ -96,7 +105,9 @@ export class InlineExecutionService {
   async resumeExecution(investigationId: string, executionRunId: string): Promise<ExecutionStatusDto> {
     const identity = await this.read.getInvestigation(investigationId)
     const status = await this.read.getExecutionStatus(investigationId, executionRunId)
-    if (status.committedVersion !== null || status.status === 'COMPLETED') throw new ExecutionNotRetryable()
+    // A committed run is published history and is never re-entered (#7).
+    if (status.committedVersion !== null)
+      throw new ExecutionNotRetryable('Committed execution cannot be resumed')
     const workspaceExists = (await this.db.query(`SELECT 1 FROM candidate_workspaces WHERE execution_run_id=$1`,
       [executionRunId])).rows.length > 0
     if (!workspaceExists) throw new InvestigationResourceNotFound('CANDIDATE_WORKSPACE', executionRunId)
@@ -105,9 +116,14 @@ export class InlineExecutionService {
     if (!isDeepStrictEqual(prior.journal.entries, checkpoint.journal.entries))
       throw new Error('Workspace and journal audit diverge')
     const plan = await this.runtime.resume(investigationId, identity.submission)
+    // A completed run has nothing left to continue; only a revision reopens it,
+    // because a revision is a new instruction rather than unfinished work.
+    if (status.status === 'COMPLETED' && !plan.revision)
+      throw new ExecutionNotRetryable('Completed execution can only be reopened by a revision')
     await runPipeline({ investigation: checkpoint.accumulator.snapshot().investigation,
       stages: plan.stages, adapters: plan.adapters, stopEvidence: plan.stopEvidence,
-      maxAttempts: plan.maxAttempts, resume: { accumulator: checkpoint.accumulator,
+      maxAttempts: plan.maxAttempts, revision: plan.revision,
+      resume: { accumulator: checkpoint.accumulator,
         journal: checkpoint.journal, ledger: checkpoint.ledger },
       reviewHistory: prior.reviewHistory, startArtifactVersion: checkpoint.artifactVersion,
       clock: this.clock, onBoundary: (boundary) => this.checkpoint(executionRunId, checkpoint.startedAt, boundary) })
