@@ -1,0 +1,25 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/publication/version-lineage-checks.ts
+
+X-Ray public version lineage — 9f
+================================================================================
+ ok   1/2 · unknown and draft slugs answer identically with zero reads        
+ ok   3/4/18 · a committed unpublished v3 never appears and costs no read     
+ ok   5 · publishing v1 as well lists both with exact public URLs             
+ ok   6 · rows carry trigger and immutable change counts                      
+ ok   7 · no canonical ids leak through the change summary                    
+ ok   8/9 · a withdrawn historical version stays in history, alias unaffected 
+ ok   10/11 · withdrawing the head marks it, and republication restores it    
+ ok   12 · a deliberate rollback moves the current indicator, not max(version)
+ ok   13 · repeated publication does not fabricate version rows               
+ ok   14 · the exact version document links to history                        
+ ok   15 · publishing v3 does not change the rendered v2 document             
+ ok   16 · history updates on the next request with no invalidation           
+ ok   17 · membership resolves before any version read                        
+ ok   19 · an unpublished benchmark acquires no public lineage                
+ ok   20 · no stored public-history table or generated diff prose             
+================================================================================
+15/15 passed
+
+Unpublished versions caused zero version reads. The v2 document was
+byte-identical across the publication of v3.
+

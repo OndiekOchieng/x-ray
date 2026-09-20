@@ -3,6 +3,8 @@
 Against the parent acceptance list, with the evidence for each. Per section P, this is
 the closeout reconciliation, not a claim that green code closes the issue.
 
+**Updated after slice 9f**, which delivered the one scope item outstanding at 9e.
+
 | Acceptance criterion | Status | Evidence |
 |---|---|---|
 | Published version URLs are stable and immutable | **Met** | Slug minted once at first publication, immutable, never freed by withdrawal or inherited (9b proofs 1–3, 6). `/xray/{slug}/v{n}` follows that version's own history (9d proofs 5, 25). |
@@ -11,6 +13,7 @@ the closeout reconciliation, not a claim that green code closes the issue.
 | Library cards derive counts/status from projections, not stored display strings | **Met** | No discovery table and no stored display column (9e proof 24/25). All five counts equal the exact projection (9e proof 5/6). |
 | Public pages expose research cutoff/version context | **Met** | 9d proof 24: version, protocol version and research cutoff rendered; citation link is the exact version URL (proof 23). |
 | Unknown/unpublished ids do not leak draft investigations | **Met** | Four `NOT_PUBLIC` cases byte-identical with zero canonical reads (9c proofs 1–4), including the draft's real computable would-be slug. No draft reaches library or search (9e proofs 2, 22). |
+| Surface version lineage and what changed between versions | **Met** | `/xray/{slug}/history` (9f proofs 5–7, 12–13); immutability of v2 across v3 publication asserted in proof 15. |
 | Share/synthesis content cannot mutate or overwrite evidence state | **Met** | Public documents are a read-only projection layer; the library performs no write (9e proof N). Tombstone copy is bound by responsible sharing (9d proofs 11, 13). |
 
 ### Beyond the list, decided during #9
@@ -43,11 +46,19 @@ yet (ADR-0013). A deployment must supply the principal from a trusted boundary.
 administrative identifier is not an approved public display label. A future identity
 layer may supply one under a separate decision.
 
-**4 · Version lineage is not a library-card field.** The card shows the currently
-presented version and links to it; "what changed between versions" is available from
-`InvestigationVersion` and the re-evaluation audit but is not surfaced in discovery.
-The #9 scope line mentions surfacing lineage; this is the one scope item **not**
-delivered as a public surface, and it is recorded here rather than quietly dropped.
+**4 · Version lineage — DELIVERED in slice 9f.** Recorded here as undelivered after
+9e, and finished rather than downgraded.
+
+`/xray/{slug}/history` surfaces every publicly published version with its trigger,
+added-source, added-evidence and re-evaluated-claim counts, re-evaluation reason
+categories, current presentation state and exact citation URL. It is a deliberately
+separate mutable surface: folding lineage into the exact-version document would have
+broken "creating version N+1 cannot change version N", which 9f proof 15 asserts
+byte-for-byte across the publication of v3.
+
+Unpublished versions remain invisible and cost zero version reads (9f proofs 3/4/18),
+and no canonical ids reach the public surface (proof 7). Evidence:
+`verification/issue-9-9f/`.
 
 **5 · Library membership is computed per request.** Deliberate: no read model, per the
 recorded "derive first, index only on measured need" decision. If the published corpus
