@@ -75,20 +75,20 @@ async function migrate(db: PGlite) {
     await db.exec(readFileSync(new URL(`../../../db/migrations/${name}.up.sql`, import.meta.url), 'utf8'))
 }
 
-/** The benchmark corpus under the subject's own id. Storage is not the fixture. */
-function subjectV1(): XRayGraph {
+/** The benchmark corpus under a given id. Storage is not the fixture. */
+function corpusFor(id: string): XRayGraph {
   const base = createXrayKe001Graph()
   return createXRayGraph({
     ...(base as XRayGraphInput),
-    claims: base.claims.map((claim) => ({ ...claim, investigationId: SUBJECT })),
+    claims: base.claims.map((claim) => ({ ...claim, investigationId: id })),
     investigation: {
       ...base.investigation,
-      id: SUBJECT,
+      id,
       // StageRun carries its own investigation id, and the validator checks it
       // sits on the investigation that holds it.
-      stageRuns: base.investigation.stageRuns.map((run) => ({ ...run, investigationId: SUBJECT })),
+      stageRuns: base.investigation.stageRuns.map((run) => ({ ...run, investigationId: id })),
     },
-    version: { ...base.version!, investigationId: SUBJECT },
+    version: { ...base.version!, investigationId: id },
   })
 }
 
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
     await migrate(db)
     setDatabaseProvider(async () => db)
 
-    const v1 = subjectV1()
+    const v1 = corpusFor(SUBJECT)
     await writeInitialSnapshot(db, v1)
     const v1Before = await readSnapshot(db, SUBJECT, 1)
     const read = new InvestigationService(db)
@@ -159,11 +159,82 @@ async function main(): Promise<void> {
     setExecutionRuntimeProvider(async () => runtime)
 
     // =====================================================================
-    // Happy path
+    // Creation continuity — one identity, created by the route
+    // =====================================================================
+    //
+    // The successor lifecycle below starts from a seeded v1, because #7 has no
+    // path that gives a route-created identity a first committed version (C0
+    // proves why). These two checks close the gap the seeded subject leaves:
+    // the identity `POST /api/investigations` mints is the same one that
+    // executes, accumulates a candidate, and reports its own empty history.
+
+    let createdId = ''
+    await check('C1 · continuity · a POST-created identity executes and holds its own candidate', async () => {
+      const made = await call('POST /investigations', createInvestigation(
+        post(BASE, { sourceUrl: 'https://example.org/created-subject' })))
+      if (made.status !== 201) return `create status ${made.status}`
+      createdId = made.body.investigationId
+      if (made.body.latestCommittedVersion !== null) return 'a new identity claims a committed version'
+
+      const corpus = corpusFor(createdId)
+      setExecutionRuntimeProvider(async () => ({
+        async initial() {
+          return { investigation: clone(corpus.investigation), stages: lifecycleStages(corpus),
+            maxAttempts: 1, stopEvidence: { saturationObserved: true } }
+        },
+        async resume() {
+          return { stages: lifecycleStages(corpus), maxAttempts: 1,
+            stopEvidence: { saturationObserved: true } }
+        },
+      }))
+
+      const started = await call('POST /executions', startExecution(
+        post(`${BASE}/${createdId}/executions`), { params: params({ id: createdId }) }))
+      if (started.status !== 201) return `execution status ${started.status}`
+      if (started.body.investigationId !== createdId) return 'the run belongs to a different identity'
+      if (started.body.status !== 'COMPLETED') return `run ended ${started.body.status}`
+      if (started.body.committedVersion !== null) return 'execution committed a version'
+
+      const candidate = await call('GET /candidate', candidateState(
+        get(`${BASE}/${createdId}/candidate?executionRunId=${started.body.executionRunId}`),
+        { params: params({ id: createdId }) }))
+      if (candidate.status !== 200 || candidate.body.kind !== 'CANDIDATE')
+        return `candidate ${candidate.status}/${candidate.body?.kind}`
+      if (candidate.body.graph.investigation.id !== createdId)
+        return 'the candidate belongs to a different identity'
+      if (candidate.body.graph.claims.length !== corpus.claims.length)
+        return 'the candidate did not accumulate the run output'
+
+      // Research happened; nothing was published by it.
+      const history = await call('GET /versions', versionHistory(get(`${BASE}/${createdId}/versions`),
+        { params: params({ id: createdId }) }))
+      if (history.body.latestCommittedVersion !== null) return 'a pointer advanced without a commit'
+      return history.body.versions.length === 0 ? null : 'history exists without a commit'
+    })
+
+    await check('C0 · boundary · #7 has no first-version path for a route-created identity', async () => {
+      // Recorded as an executable fact, because it is the reason the successor
+      // lifecycle below begins from a seeded v1 rather than from this identity.
+      // `writeInitialSnapshot` inserts the investigation row itself, so an id
+      // that `POST` already created cannot receive a v1 through it, and
+      // `commitNextVersion` needs a predecessor of at least 1.
+      const outcome = await writeInitialSnapshot(db, corpusFor(createdId))
+        .then(() => null, (error: unknown) => error as Error)
+      if (outcome === null) return 'a route-created identity accepted an initial snapshot'
+      const pointer = (await db.query(
+        'SELECT latest_committed_version AS v FROM investigations WHERE id=$1', [createdId])).rows[0] as { v: number | null }
+      if (pointer.v !== null) return 'the rejected write still moved the pointer'
+      return /duplicate key|unique|investigations_pkey/i.test(outcome.message)
+        ? null : `rejected for the wrong reason: ${outcome.message}`
+    })
+
+    // =====================================================================
+    // Successor lifecycle — seeded v1, committed v2
     // =====================================================================
 
     let runId = ''
     await check('L1 · execute · a run traverses every stage and both gates', async () => {
+      setExecutionRuntimeProvider(async () => runtime)
       const res = await call('POST /executions', startExecution(post(`${BASE}/${SUBJECT}/executions`),
         { params: params({ id: SUBJECT }) }))
       if (res.status !== 201) return `status ${res.status}`

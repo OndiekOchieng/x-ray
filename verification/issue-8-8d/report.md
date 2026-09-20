@@ -3,29 +3,56 @@
 Verification and integration only. No publication endpoint, no ATI flow, no worker, no
 live provider, no new domain concept.
 
-## What is proved
+## What is proved, and what is not
 
-One stored investigation traverses the whole path through the boundaries 8a–8c
-established and the commit/graduation persistence #7 owns:
+Twenty-one scenarios in `pnpm check:lifecycle`, driven through exported route handlers
+with real `Request` objects wherever a route exists. The path is proved in **two
+segments**, because #7 has no route-created-first-version path and 8d does not invent
+one.
+
+**Segment 1 — creation continuity, on one route-created identity:**
 
 ```
-create → execute → inspect → candidate → revise/resume
-→ validate/review → graduate → commit → version/history → UI projection
+POST /api/investigations → POST execution → candidate → (no version)
 ```
 
-Nineteen scenarios in `pnpm check:lifecycle`, driven through exported route handlers
-with real `Request` objects wherever a route exists.
+**Segment 2 — the successor lifecycle, on a seeded-v1 identity:**
 
-### The subject
+```
+seed committed v1 → execute successor → inspect → candidate → revise/resume
+→ validate/review → graduate → commit v2 → version/history → UI projection
+```
 
-`XRAY-LIFECYCLE-001`, holding the XRAY-KE-001 corpus **under its own id** — every
-`Claim.investigationId` and `StageRun.investigationId` remapped. Storage is provably
-not the fixture: the frozen benchmark is never consulted, and the committed v2 contains
-a record the benchmark does not have.
+An earlier version of this report described the whole thing as a single
+`create → … → commit` path. That was too strong: the subject of segment 2 is
+established by `writeInitialSnapshot`, not by the route.
 
-Version 1 is seeded as prior history through `writeInitialSnapshot`, which is how #7
-creates a first version. The lifecycle claim is the **v2 commit**, which is the path
-that carries eligibility, run linkage, predecessor conflict and immutability.
+### The creation boundary, recorded as an executable fact
+
+`writeInitialSnapshot` inserts the `investigations` row itself, so an identity
+`POST /api/investigations` has already created cannot receive a first version through
+it — and `commitNextVersion` structurally requires a predecessor of at least 1. There
+is therefore no path from a brand-new submission to a first committed version.
+
+Check **C0** asserts this rather than assuming it: the write is rejected on the primary
+key and the pointer does not move. **First-version creation from a new submission is
+not integrated in this slice and is outside the proven path.** Nothing was weakened to
+make it look otherwise.
+
+### The subjects
+
+**Segment 1:** an identity minted by the route. It executes the corpus through the same
+stage ports, accumulates a candidate carrying its own id, and reports
+`latestCommittedVersion: null` with empty history — research happened, nothing was
+published by it.
+
+**Segment 2:** `XRAY-LIFECYCLE-001`, holding the XRAY-KE-001 corpus **under its own
+id** — every `Claim.investigationId` and `StageRun.investigationId` remapped. Storage
+is provably not the fixture: the frozen benchmark is never consulted, and the committed
+v2 contains a record the benchmark does not have. Version 1 is seeded as prior history
+through `writeInitialSnapshot`, which is how #7 creates a first version, and which is
+**not graduation-gated**. Graduation gating begins at v2, which is the path carrying
+eligibility, run linkage, predecessor conflict and immutability.
 
 ### The stages are deterministic, and they are the real ports
 
@@ -39,7 +66,14 @@ conditions met over this corpus and the run supplies `saturationObserved`. Nothi
 fabricated a stop, and a run that recorded none would have been refused by
 `assertCommittable`.
 
-## Happy path
+## Creation continuity
+
+| | |
+|---|---|
+| C1 | The identity `POST /api/investigations` mints is the same one that executes, holds its own candidate carrying its own id, and reports empty history with no pointer. |
+| C0 | That identity cannot be given a first version through `writeInitialSnapshot`: rejected on the primary key, pointer unmoved. |
+
+## Successor lifecycle
 
 | | |
 |---|---|
@@ -74,7 +108,7 @@ is an existing #7 function with its own rules intact.
 | F5 | A completed-but-uncommitted run reports `committedVersion: null`, does not advance the pointer, and does not reach the UI path — working state cannot masquerade as committed state. |
 | F6 | Unknown investigation, unknown run, wrong-owner run, unknown version and unknown candidate are all typed 404s. |
 | F7 | The subject resolves to itself with its v2 content; an investigation with no committed version is `null`; an unknown id is `null`. No benchmark fallback anywhere. |
-| F8 | All 20 captured responses swept for SQL, connection strings, prompts, correlation-ledger keys, ledger internals, stack traces and environment configuration: none present. |
+| F8 | All 24 captured responses swept for SQL, connection strings, prompts, correlation-ledger keys, ledger internals, stack traces and environment configuration: none present. |
 
 ## Preserved failed verification
 
@@ -105,7 +139,7 @@ statement than the one it replaced.
 
 | Gate | Result |
 |---|---|
-| `check:lifecycle` | PASS, 19 scenarios (`final-gate.txt`) |
+| `check:lifecycle` | PASS, 21 scenarios (`final-gate.txt`) |
 | `check:api-routes` | PASS |
 | `check:inline-execution` | PASS |
 | `check:investigation-service` | PASS |
