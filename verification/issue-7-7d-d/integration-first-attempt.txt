@@ -1,0 +1,75 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/durable-integration-checks.ts
+AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    atiRequests: [],
+    claims: [
+      {
+        ambiguities: [
+...
+        layer: 'OBSERVATION',
+-       measurement: undefined,
+        origin: 'DISCOVERED',
+        priority: 'HIGH',
+-       sourcePassage: undefined,
+        text: 'The illustrative colonial administration record characterized Kenyatta as a Mau Mau leader.',
+        timeScope: {
+          from: '1952-01-01'
+        },
+        type: 'ATTRIBUTION'
+...
+        knowledgeBasis: 'ADMINISTRATIVE_RECORD',
+-       locationInSource: undefined,
+-       measurement: undefined,
+        proposition: 'The illustrative administration record characterized Kenyatta as a Mau Mau leader.',
+-       quotedPassage: undefined,
+        relationship: 'SUPPORTS',
+        sourceId: 'SRC-100',
+        strength: 'DIRECT',
+        timeScope: {
+          from: '1952-01-01'
+...
+          layer: 'OBSERVATION',
+-         measurement: undefined,
+          origin: 'DISCOVERED',
+          priority: 'HIGH',
+-         sourcePassage: undefined,
+          text: 'The illustrative colonial administration record characterized Kenyatta as a Mau Mau leader.',
+          timeScope: {
+            from: '1952-01-01'
+          },
+          type: 'ATTRIBUTION'
+...
+          knowledgeBasis: 'ADMINISTRATIVE_RECORD',
+-         locationInSource: undefined,
+-         measurement: undefined,
+          proposition: 'The illustrative administration record characterized Kenyatta as a Mau Mau leader.',
+-         quotedPassage: undefined,
+          relationship: 'SUPPORTS',
+          sourceId: 'SRC-100',
+          strength: 'DIRECT',
+          timeScope: {
+            from: '1952-01-01'
+...
+            knowledgeBasis: 'ADMINISTRATIVE_RECORD',
+-           locationInSource: undefined,
+-           measurement: undefined,
+            proposition: 'The illustrative administration record characterized Kenyatta as a Mau Mau leader.',
+-           quotedPassage: undefined,
+            relationship: 'SUPPORTS',
+            sourceId: 'SRC-100',
+            strength: 'DIRECT',
+            timeScope: {
+              from: '1952-01-01'
+
+    at run (file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/durable-integration-checks.ts:112:12) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: [Object],
+  expected: [Object],
+  operator: 'deepStrictEqual',
+  diff: 'simple'
+}
+[ELIFECYCLE] Command failed with exit code 1.
