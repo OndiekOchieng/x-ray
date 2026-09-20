@@ -10,25 +10,22 @@
  */
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 
-import { createXRayGraph, type XRayGraph, type XRayGraphInput } from '@/lib/xray/selectors'
-import { createXrayKe001Graph } from '@/lib/xray/fixtures/xray-ke-001/graph'
-import { XRAY_KE_001_ACCEPTANCE } from '@/lib/xray/fixtures/xray-ke-001/acceptance'
-import { assessGraduation, type GraduationResult } from '@/lib/xray/acceptance'
+import type { GraduationResult } from '@/lib/xray/acceptance'
+import type { XRayGraph } from '@/lib/xray/selectors'
 import { fingerprintGraph } from '@/lib/xray/review'
 import { encodeValue } from './value-codec'
-import { readSnapshot, writeInitialSnapshot, type SnapshotDatabase } from './snapshot'
-import { commitNextVersion, type ReEvaluationAudit } from './version-commit'
-import { prepareAssessedRun } from './graduation-check-support'
+import { readSnapshot, type SnapshotDatabase } from './snapshot'
+import {
+  AT, corpusFor, linkVersion, migrate, seedLineage,
+} from './publication-check-support'
 import {
   PublicationRefused, deterministicSlug, exactVersionState, presentationHead, publishVersion,
   readEligibility, readPublicationHistory, readSlug, resolveExactVersionState,
   resolvePresentationHead, resolveSlug, slugBase, withdrawVersion,
 } from './publication'
 
-const AT = '2026-09-20T12:00:00Z'
 const P1 = 'principal:editor-1'
 const P2 = 'principal:editor-2'
 
@@ -39,101 +36,6 @@ async function check(name: string, fn: () => Promise<string | null>): Promise<vo
   let detail: string | null
   try { detail = await fn() } catch (err) { detail = `threw: ${(err as Error).message}` }
   results.push({ name, ok: detail === null, detail: detail ?? undefined })
-}
-
-const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
-const fixture = createXrayKe001Graph()
-
-/** The benchmark corpus under another lineage id, so ids are not shared. */
-function corpusFor(id: string): XRayGraph {
-  const base = createXrayKe001Graph()
-  return createXRayGraph({
-    ...(base as XRayGraphInput),
-    claims: base.claims.map((c) => ({ ...c, investigationId: id })),
-    investigation: {
-      ...base.investigation, id,
-      stageRuns: base.investigation.stageRuns.map((r) => ({ ...r, investigationId: id })),
-    },
-    version: { ...base.version!, investigationId: id },
-  })
-}
-
-/** A legitimate successor: one new source, one new evidence, two re-evaluated claims. */
-function candidateV2(v1: XRayGraph): XRayGraph {
-  const input: XRayGraphInput = {
-    ...clone(v1 as XRayGraphInput),
-    investigation: { ...clone(v1.investigation), currentVersion: 2 },
-    version: {
-      ...clone(v1.version!), version: 2, createdAt: AT, trigger: 'NEW_SOURCE_RECEIVED',
-      supersedesVersion: 1, addedSourceIds: ['SRC-NEW'], addedEvidenceIds: ['EV-NEW'],
-      reEvaluatedClaimIds: ['C001', 'C002'],
-    },
-    atiRequests: [],
-  }
-  input.sources = [...input.sources, { ...input.sources[1], id: 'SRC-NEW',
-    title: 'Additional received source', retrievedAt: '2026-09-13', publishedAt: '2026-09-12' }]
-  input.evidence = [...input.evidence, { ...input.evidence[0], id: 'EV-NEW', sourceId: 'SRC-NEW',
-    proposition: 'An additional source supports the main carriageway scope.',
-    claimIds: ['C001' as const] }]
-  input.findings = input.findings.map((f) => f.claimId === 'C001'
-    ? { ...f, supportingEvidenceIds: [...f.supportingEvidenceIds, 'EV-NEW'],
-        rationale: `${f.rationale} Additional receipt considered.` }
-    : f)
-  input.investigation.sourceIds = [...input.investigation.sourceIds, 'SRC-NEW']
-  input.investigation.evidenceIds = [...input.investigation.evidenceIds, 'EV-NEW']
-  return createXRayGraph(input)
-}
-
-const reAudit: ReEvaluationAudit[] = [
-  { claimId: 'C001', reason: 'NEW_EVIDENCE', causes: [{ kind: 'SOURCE', id: 'SRC-NEW' }, { kind: 'EVIDENCE', id: 'EV-NEW' }] },
-  { claimId: 'C002', reason: 'REVIEW_REVISION', detail: 'Reassessed; finding unchanged.', causes: [] },
-]
-
-async function migrate(db: PGlite) {
-  for (const n of ['0001_version_ownership', '0002_source_retrieval_precision',
-    '0003_reevaluation_audit', '0004_source_position_knowledge_basis', '0005_execution_audit',
-    '0006_graduation_audit', '0007_investigation_submissions', '0008_publication_events'])
-    await db.exec(readFileSync(new URL(`../../../db/migrations/${n}.up.sql`, import.meta.url), 'utf8'))
-  // Down/up round-trip: the migration must remain reversible.
-  await db.exec(readFileSync(new URL('../../../db/migrations/0008_publication_events.down.sql', import.meta.url), 'utf8'))
-  await db.exec(readFileSync(new URL('../../../db/migrations/0008_publication_events.up.sql', import.meta.url), 'utf8'))
-}
-
-/** Seed v1, then commit an assessed v2 so it carries real graduation linkage. */
-async function seedLineage(db: PGlite, id: string, runId: string,
-  verdictOverride?: 'PASS') {
-  const v1 = id === fixture.investigation.id ? fixture : corpusFor(id)
-  await writeInitialSnapshot(db, v1)
-  const candidate = candidateV2(v1)
-  const base = assessGraduation(candidate, { behaviors: XRAY_KE_001_ACCEPTANCE, assessedAt: AT })
-  const assessment = verdictOverride ? { ...base, verdict: verdictOverride } : base
-  // #7 refuses to let a capability-blocked run assert PASS, which is the same
-  // honesty rule #5 built BLOCKED for. A PASS lineage therefore needs a run
-  // that actually completed.
-  await prepareAssessedRun(db, runId, candidate, assessment,
-    assessment.verdict === 'PASS' ? 'COMPLETED' : 'CAPABILITY_BLOCKED')
-  await commitNextVersion(db, { expectedPredecessor: 1, graph: candidate,
-    assessment, reEvaluationAudit: reAudit, executionRunId: runId })
-  return { v1, candidate, assessment }
-}
-
-/**
- * Give an already-committed version the run and graduation linkage a
- * first-version commit path would produce.
- *
- * Test setup, not production behaviour: #7 has no route-created-v1 promotion
- * path (8d C0 proves why), so lineage B constructs the linkage directly in
- * order to exercise head replay across two publishable versions.
- */
-async function linkVersion(db: PGlite, id: string, version: number, runId: string,
-  graph: XRayGraph, assessment: GraduationResult) {
-  const matched: GraduationResult = {
-    ...assessment, investigationId: id, graphFingerprint: fingerprintGraph(graph),
-    verdict: 'PASS', reasons: [], blockers: [],
-  }
-  await prepareAssessedRun(db, runId, graph, matched, 'COMPLETED')
-  await db.query('UPDATE execution_runs SET committed_version=$1, committed_graduation_index=0 WHERE id=$2',
-    [version, runId])
 }
 
 /**
@@ -165,7 +67,7 @@ async function main(): Promise<void> {
   try {
     await migrate(db)
 
-    const A = fixture.investigation.id           // seeded v1 unlinked, v2 committed + linked
+    const A = 'XRAY-KE-001'                     // seeded v1 unlinked, v2 committed + linked
     const B = 'XRAY-LINEAGE-B'                   // v1 and v2 both linked, for head replay
     const C = 'XRAY-LINEAGE-C'                   // similar title, distinct slug
     const D = 'XRAY-LINEAGE-D'                   // FAIL / REVISE refusals
