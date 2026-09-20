@@ -18,7 +18,7 @@ import { PGlite } from '@electric-sql/pglite'
 import type { XRayGraphInput } from '@/lib/xray/selectors'
 import type { SnapshotDatabase } from '@/lib/xray/persistence/snapshot'
 import {
-  publishVersion, readSlug, withdrawVersion,
+  deterministicSlug, publishVersion, readSlug, resolveSlug, withdrawVersion,
 } from '@/lib/xray/persistence/publication'
 import {
   AT, commitFurtherVersion, linkVersion, migrate, seedLineage,
@@ -94,17 +94,25 @@ async function main(): Promise<void> {
     await publishVersion(db, { investigationId: LIVE, version: 2, principalId: P1, occurredAt: AT })
     const liveSlug = (await readSlug(db, LIVE))!
 
-    // A lineage that is committed but has never been published at all.
+    // A lineage that is committed but has never been published at all — and
+    // whose future public address is already computable, because 9b made slug
+    // minting deterministic. That is the address an adversary would probe.
     const DRAFT = 'XRAY-PUBLIC-DRAFT'
-    await seedLineage(db, DRAFT, 'RUN-DRAFT')
+    const draft = await seedLineage(db, DRAFT, 'RUN-DRAFT')
+    const surfaceTitle = (graph: { sources: readonly { id: string; title: string }[];
+      investigation: { surfaceSourceId: string } }) =>
+      graph.sources.find((s) => s.id === graph.investigation.surfaceSourceId)!.title
+    const draftWouldBeSlug = deterministicSlug(DRAFT, surfaceTitle(draft.candidate))
 
     // -- 1–4: the four NOT_PUBLIC cases, all with zero canonical reads -------
     const notPublicCases: [string, () => Promise<PublicPresentation>][] = [
       ['1 · unknown slug', () => resolver.resolveAlias('no-such-slug-0000000000')],
-      ['2 · draft lineage with no publication', async () => {
-        // It has no slug at all, so the public namespace holds nothing for it.
-        return resolver.resolveAlias('any-plausible-slug-abcdef0123')
-      }],
+      // The real draft lineage, probed at the exact address first publication
+      // would mint for it. An arbitrary unknown string proves nothing here:
+      // case 1 already covers that, and the released requirement is that a
+      // knowable future address stays unobservable until it is allocated.
+      ['2 · the draft lineage at its own computable would-be slug', () =>
+        resolver.resolveAlias(draftWouldBeSlug)],
       ['3 · committed but never published version', () =>
         resolver.resolveExactVersion(liveSlug, 3)],
       ['4 · known slug, exact version never published', () =>
@@ -122,6 +130,42 @@ async function main(): Promise<void> {
         return null
       })
     }
+
+    await check('2 · the would-be slug is real, unallocated, and allocates nothing when probed', async () => {
+      // It is genuinely the address publication would mint: same derivation,
+      // same inputs. Computing it is not the leak; answering it would be.
+      if (draftWouldBeSlug !== deterministicSlug(DRAFT, surfaceTitle(draft.candidate)))
+        return 'the would-be slug is not deterministic'
+      if (draftWouldBeSlug === 'any-plausible-slug-abcdef0123')
+        return 'the probe is still an arbitrary string'
+
+      const before = (await db.query('SELECT count(*)::int AS n FROM investigation_slugs')).rows[0] as { n: number }
+      p.reset()
+      const alias = await resolver.resolveAlias(draftWouldBeSlug)
+      const exact = await resolver.resolveExactVersion(draftWouldBeSlug, 2)
+      if (!isNotPublic(alias)) return `alias returned ${JSON.stringify(alias).slice(0, 80)}`
+      if (!isNotPublic(exact)) return `exact returned ${JSON.stringify(exact).slice(0, 80)}`
+      if (p.reads !== 0) return `${p.reads} canonical read(s)`
+
+      // Nothing was allocated by being asked about.
+      if (await resolveSlug(db, draftWouldBeSlug) !== undefined)
+        return 'the would-be slug resolved to an owner'
+      if (await readSlug(db, DRAFT) !== undefined) return 'the draft lineage acquired a slug'
+      const after = (await db.query('SELECT count(*)::int AS n FROM investigation_slugs')).rows[0] as { n: number }
+      return after.n === before.n ? null : 'probing allocated a slug row'
+    })
+
+    await check('2 · the same address becomes public only once it is allocated', async () => {
+      // The complement: the address was not special before publication, and it
+      // is exactly this address afterwards. That is what makes the earlier
+      // NOT_PUBLIC a statement about publication rather than about the slug.
+      await publishVersion(db, { investigationId: DRAFT, version: 2, principalId: P1, occurredAt: AT })
+      const allocated = await readSlug(db, DRAFT)
+      if (allocated !== draftWouldBeSlug) return `minted ${allocated}, predicted ${draftWouldBeSlug}`
+      const alias = await resolver.resolveAlias(draftWouldBeSlug)
+      return alias.kind === 'PUBLISHED' && alias.version === 2
+        ? null : `alias is ${alias.kind}`
+    })
 
     await check('1–4 · every NOT_PUBLIC outcome is byte-identical', async () => {
       const distinct = new Set(shapes)

@@ -97,7 +97,7 @@ never reads `principalId`. Attribution is absent structurally, not textually.
 
 ## Checks
 
-23 scenarios in `pnpm check:public-resolver` (`final-gate.txt`), covering every
+25 scenarios in `pnpm check:public-resolver` (`final-gate.txt`), covering every
 released proof: the four `NOT_PUBLIC` cases with zero reads and identical shape; the
 alias resolving the selected head while a newer v3 is committed; exact-version reads;
 v3 invisible while v2 serves; withdrawn head and withdrawn historical version; all
@@ -105,6 +105,46 @@ three withdrawal reasons carrying no content; deliberate rollback to v1;
 republication after withdrawal; outage propagation; #8 untouched; no fixture answering
 a public lookup; no principal in any output; `BLOCKED` linkage retained; and ordering
 on both `PUBLISHED` paths.
+
+## Remediation — the draft probe was not probing a draft
+
+Review found scenario 2 weak, and it was. It called:
+
+```ts
+resolver.resolveAlias('any-plausible-slug-abcdef0123')
+```
+
+That string has no relationship to the `DRAFT` lineage the gate had just committed, so
+cases 1 and 2 proved the same thing twice — *an unknown slug returns NOT_PUBLIC* —
+while the released requirement is stronger: **a committed draft whose future public
+address is deterministically knowable must stay unobservable until that address is
+allocated.**
+
+That requirement exists because 9b deliberately made the address computable before
+publication. `deterministicSlug(investigationId, title)` is a pure function of things
+an adversary may know, so the address is exactly what someone would probe. Computing
+it is not the leak; answering it would be.
+
+Scenario 2 now computes the real would-be slug from `DRAFT`'s own investigation id and
+its committed surface title, and asserts:
+
+- byte-identical `NOT_PUBLIC` for both the alias and the exact-version form;
+- zero canonical reads;
+- `resolveSlug` still finds no owner for that address;
+- `readSlug(DRAFT)` is still absent;
+- the `investigation_slugs` row count is unchanged — **probing allocates nothing.**
+
+A complement was added alongside it: publishing `DRAFT` v2 mints *that exact
+predicted slug*, and the same address then resolves `PUBLISHED`. Without it, the
+`NOT_PUBLIC` could have been a statement about the slug being wrong rather than about
+publication not having happened.
+
+**No runtime change was required.** That was the review's expectation and it held, but
+it was verified rather than assumed — the strengthened scenario was written and run
+against the existing resolver unchanged.
+
+The original `first-attempt.txt` evidence is untouched; this is an additional
+verification, not a rewrite.
 
 ## Regression
 

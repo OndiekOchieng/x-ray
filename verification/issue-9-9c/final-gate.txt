@@ -1,32 +1,34 @@
 $ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/public-resolver-checks.ts
 
 X-Ray public presentation resolver — 9c
-============================================================================================
- ok   1 · unknown slug → NOT_PUBLIC with zero canonical reads                             
- ok   2 · draft lineage with no publication → NOT_PUBLIC with zero canonical reads        
- ok   3 · committed but never published version → NOT_PUBLIC with zero canonical reads    
- ok   4 · known slug, exact version never published → NOT_PUBLIC with zero canonical reads
- ok   1–4 · every NOT_PUBLIC outcome is byte-identical                                    
- ok   5 · the alias resolves the selected head, not the latest committed                  
- ok   6 · an exact-version address reads that exact version                               
- ok   7 · a committed unpublished v3 stays invisible while the alias serves v2            
- ok   8 · a withdrawn head resolves WITHDRAWN with zero canonical reads                   
- ok   10 · a COMPELLED tombstone carries no canonical content                             
- ok   11 · a PRIVACY_HARM tombstone carries no canonical content                          
- ok   12 · an ERRONEOUS tombstone carries its note and no canonical content               
- ok   9 · a withdrawn historical version does not move the published alias                
- ok   13 · a deliberate rollback makes the alias resolve the earlier version              
- ok   14 · republication after withdrawal restores PUBLISHED                              
- ok   15 · a storage failure propagates and is never rewritten as NOT_PUBLIC              
- ok   16 · #8 tri-state resolver is untouched and knows nothing of publication            
- ok   17 · no fixture can answer a public lookup                                          
- ok   18 · no resolver output contains a principal identity                               
- ok   19 · an eligible BLOCKED publication keeps its authorizing linkage                  
- ok   20 · authorization is resolved before the canonical read, always                    
- ok   20 · the same holds for an exact-version address                                    
- ok   the default reader is the narrow exact-version seam                                 
-============================================================================================
-23/23 passed
+========================================================================================================
+ ok   1 · unknown slug → NOT_PUBLIC with zero canonical reads                                         
+ ok   2 · the draft lineage at its own computable would-be slug → NOT_PUBLIC with zero canonical reads
+ ok   3 · committed but never published version → NOT_PUBLIC with zero canonical reads                
+ ok   4 · known slug, exact version never published → NOT_PUBLIC with zero canonical reads            
+ ok   2 · the would-be slug is real, unallocated, and allocates nothing when probed                   
+ ok   2 · the same address becomes public only once it is allocated                                   
+ ok   1–4 · every NOT_PUBLIC outcome is byte-identical                                                
+ ok   5 · the alias resolves the selected head, not the latest committed                              
+ ok   6 · an exact-version address reads that exact version                                           
+ ok   7 · a committed unpublished v3 stays invisible while the alias serves v2                        
+ ok   8 · a withdrawn head resolves WITHDRAWN with zero canonical reads                               
+ ok   10 · a COMPELLED tombstone carries no canonical content                                         
+ ok   11 · a PRIVACY_HARM tombstone carries no canonical content                                      
+ ok   12 · an ERRONEOUS tombstone carries its note and no canonical content                           
+ ok   9 · a withdrawn historical version does not move the published alias                            
+ ok   13 · a deliberate rollback makes the alias resolve the earlier version                          
+ ok   14 · republication after withdrawal restores PUBLISHED                                          
+ ok   15 · a storage failure propagates and is never rewritten as NOT_PUBLIC                          
+ ok   16 · #8 tri-state resolver is untouched and knows nothing of publication                        
+ ok   17 · no fixture can answer a public lookup                                                      
+ ok   18 · no resolver output contains a principal identity                                           
+ ok   19 · an eligible BLOCKED publication keeps its authorizing linkage                              
+ ok   20 · authorization is resolved before the canonical read, always                                
+ ok   20 · the same holds for an exact-version address                                                
+ ok   the default reader is the narrow exact-version seam                                             
+========================================================================================================
+25/25 passed
 
 Canonical reads stayed at zero for every NOT_PUBLIC outcome and for
 COMPELLED, PRIVACY_HARM and ERRONEOUS tombstones.
