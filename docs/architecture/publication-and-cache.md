@@ -114,17 +114,121 @@ withdrawal must not become an accusation by implication.
 
 ---
 
-## Cached public X-Rays
+## Public addressing
+
+**Amended 2026-09-20 · #9 decisions D2/D3 · supersedes the v0.1 example below.**
 
 A published X-Ray is identified by a stable public slug.
 
 ```text
-/xray/ke/mamboleo-miwani-road
+/xray/{slug}          current public alias
+/xray/{slug}/v{n}     exact historical version address
 ```
 
-The latest version is served by default.
+> **The v0.1 example `/xray/ke/mamboleo-miwani-road` is withdrawn as contract.**
+> The investigation domain has no general jurisdiction field; the only
+> jurisdiction concept is ATI-specific. A permanent public address must not
+> depend on data the investigation does not own, and must never be
+> reverse-engineered from ATI state or inferred from prose. **No jurisdiction
+> segment in v1.** If a real investigation-level jurisdiction is ever
+> introduced, it may become metadata or a new routing layer.
 
-Historical versions remain addressable.
+### The slug belongs to the investigation, not to a version
+
+A slug is the stable public identity of one investigation lineage:
+
+- minted at first publication — before publication there is no public identity
+  to preserve;
+- globally unique within the public namespace;
+- immutable once minted;
+- shared by every version of that investigation;
+- unchanged by corrections to title, source wording, geography or findings;
+- not freed for reuse by withdrawal, and never inherited by another
+  investigation.
+
+The slug is an address. It is not canonical evidence and not a claim about the
+investigation. A human-readable base may be derived from publication-facing
+metadata; the minting algorithm and collision handling are implementation
+detail, and the semantic requirement is stable identity.
+
+### Exact version addresses are citation-grade
+
+`/xray/{slug}/v{n}` means *the public presentation state of this exact
+committed version*. It never means "whatever is current now". It follows the
+publication history of that exact version:
+
+| State | Response |
+| --- | --- |
+| never published | `NOT_PUBLIC` |
+| currently presented | immutable version N |
+| currently withdrawn | 410 tombstone |
+| withdrawn then republished | version N again, with event history preserved |
+
+Publishing v2 does not change the content or availability of published v1.
+
+### The alias follows publication events, never commit arithmetic
+
+`/xray/{slug}` resolves from publication event history alone. It must never
+consult `latestCommittedVersion`, and it is **not** "the numerically highest
+published version" — that definition would break deliberate rollback.
+
+The alias points at the **current presentation head**: the version selected by
+the latest deliberate publication-state act.
+
+```text
+publish v1        → alias presents v1
+commit v2         → alias still presents v1
+publish v2        → alias presents v2
+withdraw v2       → alias presents v2 tombstone
+publish v1 again  → alias presents v1
+publish v2 again  → alias presents v2
+```
+
+The last two steps are deliberate rollback and republication, not fallback.
+Withdrawing the current head never makes the resolver search backward for
+another published version; the alias stays bound to the withdrawn head until a
+principal acts again.
+
+The alias is a convenience address; the exact version URL is the citation-grade
+one. Public projections and share surfaces identify the exact version they
+represent and expose its exact-version URL even when the reader arrived through
+the alias.
+
+### Address non-leakage
+
+A slug is not publicly allocated merely because an internal investigation
+exists. Before first publication an internal id may exist, committed versions
+may exist, and a slug candidate may even be computable internally — the public
+resolver still returns `NOT_PUBLIC` and reveals nothing about draft state. See
+[ADR-0015](../adr/0015-public-retrieval-is-a-separate-trust-boundary.md).
+
+---
+
+## Public retrieval resolves publication first
+
+**Recorded 2026-09-20 · #9 decision D7 ·
+[ADR-0015](../adr/0015-public-retrieval-is-a-separate-trust-boundary.md).**
+
+#8's `getInvestigationGraph` answers an internal storage question and keeps its
+meaning. Public retrieval is a separate resolver asking a different one, and
+the ordering is an invariant:
+
+```text
+public address
+    ↓
+publication history
+    ├─ never published / unknown      → NOT_PUBLIC
+    ├─ currently withdrawn            → WITHDRAWN + tombstone
+    └─ currently published version N  → read immutable committed N → project
+```
+
+A committed graph is never reconstructed and then tested for publication.
+Reversed, the seam would have crossed the draft boundary before deciding the
+caller was not entitled to the graph.
+
+---
+
+## What a cached public X-Ray contains
 
 The cached representation contains:
 
@@ -144,14 +248,123 @@ The public page does not need to rerun research.
 
 ---
 
+## Cache boundary
+
+**Recorded 2026-09-20 · #9 decision D4 ·
+[ADR-0016](../adr/0016-cache-the-version-projection-not-the-response.md).**
+
+**The cached unit is the version projection keyed `(investigationId, version)`
+— never the public route response.**
+
+A version is immutable as canonical research state. Its *presentation state* is
+not: an exact-version address can go from serving content to serving a 410
+tombstone the moment a principal withdraws it. Caching the response would cache
+the one thing that can change.
+
+| Surface | Posture |
+| --- | --- |
+| Exact immutable projection `(investigationId, version)` | Next.js function cache, long-lived |
+| Alias `/xray/{slug}` | fresh resolution every request |
+| Published alias | **temporary** redirect to the exact version address |
+| Withdrawn alias | tombstone; no predecessor fallback |
+| Exact-version route | fresh publication-state check, then cached projection only if still publishable |
+| Library and search membership | fresh; may reuse the cached projection internally |
+
+The redirect is temporary because a permanent one is cached by clients and
+would outlive a withdrawal.
+
+Nothing that can change on withdrawal may be embedded in the cached projection.
+
+---
+
 ## The public library
 
 Published X-Rays are indexed and browsable. The library is a projection of
-cached investigations: it carries identity, surface source, protocol version,
-investigation date, and the counts of claims, receipts and open gaps.
+**published** investigations: it carries identity, surface source, protocol
+version, investigation date, and the counts of claims, receipts and open gaps.
 
 Counts shown in the library are **derived from the graph**, never stored
 alongside it. A stored count is a second source of truth that will drift.
+
+**Amended 2026-09-20 · #9 decisions D5/D6.**
+
+### The library is a projection of published versions, not a table of display fields
+
+```text
+publication history
+    ↓ selects the publicly presentable version
+immutable committed graph
+    ↓
+library projection
+```
+
+The same ordering as public retrieval applies: publication eligibility resolves
+first, and only published version graphs are read. The library never reads all
+committed investigations and filters afterwards, so a committed-but-unpublished
+investigation contributes **nothing**.
+
+No canonical library row. Title, publisher, protocol version and research
+cutoff come from the published graph projection; claim, receipt, source,
+independent-origin and open-gap counts are derived from it; version-change
+counts come from `InvestigationVersion`; presentation state comes from
+publication history. If a stored card ever disagreed with the graph, the graph
+wins — and in v1 no such stored card exists.
+
+### Projection cost — derive first, index only on measured need
+
+v1 reconstructs and projects published entries on demand. If measured cost
+later justifies a read model, it may exist only as derived infrastructure:
+
+1. rebuildable entirely from publication history plus immutable versions;
+2. never accepted as canonical evidence or publication state;
+3. carrying source publication and version identity, so staleness is detectable;
+4. deletable and regenerable without information loss;
+5. any disagreement with the canonical projection is an index bug, not a
+   competing truth.
+
+That is the status of a CDN artifact, not of a domain record.
+
+### Withdrawal and library membership
+
+A currently withdrawn version is not an ordinary browsable entry. Its history
+stays reachable through its known public URL and tombstone — the library exists
+for discovery of currently presented X-Rays, not discovery of takedowns.
+Republishing restores membership.
+
+**No automatic library transition may be triggered by re-graduation or
+capability state.** Only publication-state events move public membership.
+
+### Search scope
+
+#9 search covers library and publication projection fields only: public title,
+surface publisher or source identity, protocol version, investigation date,
+exact slug, presentation state where relevant to administration, and other
+explicit library-card metadata later accepted into the projection. Filters may
+use derived numeric counts, which do not become canonical by being filtered on.
+
+Explicitly **out of scope**: free-text search over claim text, evidence
+propositions, finding prose, gap prose, source passages or reviewer output.
+That is a research-discovery surface with different indexing, leakage and
+ranking semantics.
+
+The leakage argument is the decisive one: a search engine can reveal text even
+when the page resolver correctly answers `NOT_PUBLIC`. Keeping search at
+publication metadata is what makes ADR-0015's non-leakage enforceable end to
+end. Any future index must be built **after** publication filtering:
+
+```text
+publication resolver → discoverable publications → library projection → optional index
+```
+
+never over all committed graphs with public filtering applied afterwards.
+
+### Featured content
+
+Featured selection should eventually draw from the published library surface
+rather than the benchmark registry. How something becomes featured is not
+publication semantics; unless a curated-feature event is added later, v1 may
+omit featured selection or derive a deterministic default. Editorial ranking is
+not smuggled into the publication record.
 
 ---
 

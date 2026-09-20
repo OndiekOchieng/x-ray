@@ -27,6 +27,8 @@ present in v0.1; where scaffold reconciliation
 | [0012](./0012-source-position-and-evidentiary-reach.md) | Source Position and Evidentiary Reach Are First-Class Context | Model where the producer stood and how each Evidence proposition could be known, without trust scores. |
 | [0013](./0013-publication-is-an-attributed-event.md) | Publication Is an Attributed Event | Publishing is an append-only event naming a Principal; commit never publishes. |
 | [0014](./0014-withdrawal-is-a-presentation-event.md) | Withdrawal Is a Presentation Event, Not an Erasure | Named reasons, a 410 tombstone, no auto-withdrawal, canonical state untouched. |
+| [0015](./0015-public-retrieval-is-a-separate-trust-boundary.md) | Public Retrieval Is a Separate Trust Boundary | Publication resolves first; draft existence is never observable publicly. |
+| [0016](./0016-cache-the-version-projection-not-the-response.md) | Cache the Version Projection, Not the Public Response | Presentation state stays fresh; the immutable projection is cached. |
 
 ## Numbering
 
@@ -36,7 +38,7 @@ recorded in each file's header.
 
 ## Adding an ADR
 
-Next number is `0015`. Use the same four sections, and state Status as
+Next number is `0017`. Use the same four sections, and state Status as
 `Proposed` until accepted. An ADR that replaces an earlier one sets
 `Supersedes:` and the superseded ADR is marked `Superseded by:` rather than
 deleted — the same preservation rule the system applies to its own findings
