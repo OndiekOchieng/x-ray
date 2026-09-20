@@ -1,0 +1,5 @@
+$ pnpm check:investigation-service
+error: column "investigation_id" does not exist
+query: SELECT count(*)::int AS n FROM candidate_workspaces WHERE investigation_id IN ($1,$2)
+params: [ 'XRAY-NEW-1', 'XRAY-NEW-2' ]
+The harness queried candidate_workspaces as if it directly owned investigation_id; ownership is through execution_runs.
