@@ -9,6 +9,111 @@ that keeps the public artifact from becoming the research record.
 
 ---
 
+## Publication is an event
+
+**Recorded 2026-09-20 · #9 slice 9a semantics · see
+[ADR-0013](../adr/0013-publication-is-an-attributed-event.md) and
+[ADR-0014](../adr/0014-withdrawal-is-a-presentation-event.md).**
+
+This document previously described how a published X-Ray is *served* without
+saying what makes one published. That gap is now closed.
+
+A committed version is a candidate for publication and nothing more.
+Publication is a separate, deliberate act recorded as an append-only event
+against an exact `(investigation, version)`.
+
+```text
+research run  →  graduate  →  commit version N     (storage)
+                                    │
+                                    │  a human decides
+                                    ▼
+                              publish version N     (public)
+```
+
+Committing never publishes. Without that separation there is no moment at which
+a person takes responsibility for what goes out.
+
+### Principal
+
+Every publish, withdraw and republish event names a **`Principal`** — who
+performed the administrative act.
+
+It is not called `Actor`, because `Actor` is already a claim dimension in
+[Protocol v0.3](../protocol/v0.3/XRAY_RESEARCH_PROTOCOL_v0.3.md): part of
+proposition identity, and something the protocol works to keep straight about
+the world under investigation. Whoever pressed publish does not belong in that
+vocabulary.
+
+**Principal attribution lives in the publication event history and never in the
+evidence graph.** No canonical artifact gains a principal field. Who published
+an X-Ray is not evidence about anything the X-Ray says.
+
+#9 owns attribution only. It does not own login, accounts, sessions, roles or
+permissions. The trusted host or auth boundary supplies the principal, and an
+act with no attributable principal is invalid — there is no fallback to "the
+operator", because an unattributed publication is a public statement nobody
+made.
+
+### What may be published
+
+`PASS`, or an eligible `BLOCKED` **with its capability blockers carried onto the
+page**. Never `REVISE` or `FAIL`.
+
+`BLOCKED` is the honest normal state while no reviewer model is wired, so
+"publish only `PASS`" would either publish nothing or quietly redefine `PASS`.
+Publishing incomplete assurance while hiding what could not be checked would be
+worse than not publishing, which is why the disclosure is the condition.
+
+---
+
+## Withdrawal
+
+A published X-Ray sometimes has to come down. Withdrawal is the same kind of
+append-only event, with a different meaning: it changes what a reader is shown
+and never changes what happened. Canonical versions are insert-only and
+withdrawal does not touch them.
+
+Reasons are a closed, named set:
+
+| Reason | What X-Ray is saying |
+| --- | --- |
+| `ERRONEOUS` | The published artifact contains a material error warranting retraction. X-Ray owns it. |
+| `COMPELLED` | Removed under legal or platform compulsion. X-Ray is **not** conceding error. |
+| `PRIVACY_HARM` | Removed to prevent harm to a person. Not a statement about the evidence. |
+| `OUT_OF_SCOPE` | Should not have been published under X-Ray's own rules. |
+
+One undifferentiated "withdrawn" state would collapse claims that are not the
+same. Merging `ERRONEOUS` and `COMPELLED` would let X-Ray disown work it still
+stands behind, or concede an error it has not found.
+
+**Superseding is not withdrawal.** Publishing v2 leaves v1 historically
+addressable — that is versioning working, and marking v1 withdrawn would
+present ordinary research progress as a problem.
+
+**A withdrawn address stays resolvable:** `410 Gone` with a tombstone, never
+`404`. Published URLs get cited, and an address that stops resolving leaves the
+reader to conclude whatever they like. The tombstone says that the X-Ray was
+withdrawn, when, and the reason class; for `ERRONEOUS` it says what was wrong.
+It does not re-serve withdrawn content under `COMPELLED` or `PRIVACY_HARM`.
+
+**The alias does not fall back.** Withdrawing the latest published version sends
+the alias to the tombstone rather than to its predecessor, which may share the
+defect. Re-pointing is a separate deliberate act.
+
+**Withdrawal is reversible**, and both events remain in the history.
+
+**Withdrawal is never automatic.** No assessment, re-graduation, validation
+result or capability gap may withdraw a published version. With no reviewer
+model wired every re-assessment returns `BLOCKED`, so an automatic rule would
+let an unconfigured adapter silently retract published civic evidence.
+
+A withdrawal notice is generated prose about an investigation, and often about a
+named institution or person. It sits below the projection boundary with share
+cards and ATI drafts, and is bound by the same responsible-sharing rule: a
+withdrawal must not become an accusation by implication.
+
+---
+
 ## Cached public X-Rays
 
 A published X-Ray is identified by a stable public slug.
