@@ -73,10 +73,28 @@ function assertCommittable(graph: XRayGraph, assessment: GraduationResult) {
       assessment.behaviors.some((behavior) => behavior.status === 'VIOLATED') ||
       assessment.reasons.some((reason) => reason.verdict === 'FAIL' || reason.verdict === 'REVISE'))
     throw new Error('Candidate has a graph failure or revision reason')
-  if (assessment.verdict === 'PASS') return
-  if (assessment.verdict !== 'BLOCKED' || assessment.reasons.length > 0 || assessment.blockers.length === 0 ||
-      assessment.blockers.some((blocker) => blocker.ref === 'RESEARCH_STOP' || blocker.ref.startsWith('STALE/')))
+  if (!isEligibleAssessment(assessment))
     throw new Error('Candidate is not an eligible PASS/BLOCKED snapshot')
+}
+
+/**
+ * Whether a recorded assessment authorizes exposing the version it assessed.
+ *
+ * `PASS`, or a `BLOCKED` whose only obstacles are capability blockers: nothing
+ * is known to be wrong with the graph, only unchecked. A `BLOCKED` carrying a
+ * reason against the graph, or blocked on the research stop or on staleness,
+ * is not eligible — those are claims about the graph, not about our tooling.
+ *
+ * Exported so publication (#9) applies the rule #7 already accepted rather than
+ * restating it. One rule, two callers.
+ */
+export function isEligibleAssessment(assessment: GraduationResult): boolean {
+  if (assessment.verdict === 'PASS') return true
+  return assessment.verdict === 'BLOCKED' &&
+    assessment.reasons.length === 0 &&
+    assessment.blockers.length > 0 &&
+    !assessment.blockers.some(
+      (blocker) => blocker.ref === 'RESEARCH_STOP' || blocker.ref.startsWith('STALE/'))
 }
 
 function assertVersionDiff(previous: XRayGraph, graph: XRayGraph, audit: readonly ReEvaluationAudit[]) {

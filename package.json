@@ -34,7 +34,8 @@
     "check:inline-execution": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/inline-execution-checks.ts",
     "check:api-routes": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/api-route-checks.ts",
     "check:lifecycle": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/lifecycle-checks.ts",
-    "check:benchmark-corpus": "node scripts/check-benchmark-corpus.mjs"
+    "check:benchmark-corpus": "node scripts/check-benchmark-corpus.mjs",
+    "check:publication": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/publication-checks.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

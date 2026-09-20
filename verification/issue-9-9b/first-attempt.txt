@@ -1,0 +1,37 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/publication-checks.ts
+
+X-Ray publication event store — 9b
+===================================================================================
+ ok   1 · first eligible publish creates the permanent slug and the PUBLISH event
+ ok   2 · the slug is deterministic for the lineage and survives a title change  
+ ok   3 · two lineages with the same title still get distinct slugs              
+ ok   4 · UPDATE of a publication event is rejected by the database              
+ ok   5 · DELETE of a publication event is rejected by the database              
+ ok   6 · a slug cannot be renamed, reassigned, released or shared               
+ ok   7 · a missing or blank principal is refused with no durable effect         
+ ok   8 · a nonexistent or uncommitted version cannot be published               
+ ok   9 · a seeded v1 with no graduation linkage cannot be published             
+ ok   11 · an eligible BLOCKED publishes and keeps its blocker linkage           
+FAIL  10 · a PASS version publishes                                                -> threw: duplicate key value violates unique constraint "execution_runs_investigation_id_committed_version_key"
+FAIL  12 · FAIL and REVISE versions cannot be published                            -> threw: duplicate key value violates unique constraint "execution_runs_investigation_id_committed_version_key"
+ ok   13 · the withdrawal reason vocabulary is enforced                          
+ ok   14 · an ERRONEOUS withdrawal must record what was wrong                    
+ ok   15 · COMPELLED and PRIVACY_HARM require no confession of error             
+ ok   16 · an unpublished version cannot be withdrawn                            
+ ok   17 · duplicate publish and duplicate withdrawal write no history           
+ ok   18 · publish, withdraw and republish retain every event                    
+FAIL  19 · the presentation head replays the released example exactly              -> threw: Graduation result does not match candidate identity/fingerprint
+FAIL  20 · exact-version state stays independent across versions                   -> v1 is not published
+ ok   21 · an injected event failure rolls back the slug allocation too          
+FAIL  22 · concurrent first publication yields one slug and one event              -> 0 attempts succeeded
+ ok   23 · no publication act changed committed state or the version pointer     
+ ok   slug resolution answers which lineage owns an address                      
+ ok   presentationHead is undefined before anything is published                 
+===================================================================================
+20/25 passed
+
+Concurrency note: PGlite executes on one connection, so proof 22 establishes the
+outcome (one slug, one event, one typed refusal) but not native row-lock behaviour.
+No native PostgreSQL race proof is claimed.
+
+[ELIFECYCLE] Command failed with exit code 1.
