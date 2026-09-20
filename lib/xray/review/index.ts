@@ -30,7 +30,7 @@
 import type { XRayGraph } from '@/lib/xray/selectors'
 import { validateXRayGraph, type ValidationResult } from '@/lib/xray/validation'
 import { CHECK_ROUTING, DETERMINISTIC_CHECKS } from './deterministic'
-import { PORT_DEPENDENT_CHECKS, type ModelJudgment, type ReviewerModel } from './port'
+import { PORT_DEPENDENT_CHECKS, activePortChecks, type ModelJudgment, type ReviewerModel } from './port'
 import { isAvailable, type CapabilityResult } from '@/lib/xray/capability'
 import {
   collectModelJudgments,
@@ -63,7 +63,7 @@ export type {
   ReviewerModel,
   ReviewerModelQuery,
 } from './port'
-export { PORT_DEPENDENT_CHECKS } from './port'
+export { PORT_DEPENDENT_CHECKS, V03_PORT_DEPENDENT_CHECKS, activePortChecks } from './port'
 export {
   anyAvailable,
   collectModelJudgments,
@@ -121,6 +121,15 @@ export function fingerprintGraph(graph: XRayGraph): string {
   const parts: string[] = [graph.investigation.id, String(graph.investigation.currentVersion)]
   for (const c of graph.claims) parts.push(c.id, c.origin, c.layer, c.type, c.text)
   for (const e of graph.evidence) parts.push(e.id, e.sourceId, e.relationship, e.strength)
+  if (graph.sourcePositions.length || graph.evidence.some((e) => e.knowledgeBasis !== undefined)) {
+    for (const c of graph.claims) parts.push(c.id, c.timeScope?.from ?? '', c.timeScope?.to ?? '', ...c.entities)
+    for (const e of graph.evidence) parts.push(e.id, e.proposition, e.knowledgeBasis ?? '', e.timeScope?.from ?? '', e.timeScope?.to ?? '')
+    for (const p of graph.sourcePositions) parts.push(p.id, p.sourceId, ...p.claimIds, p.relationship,
+      p.basis, p.confidence, ...p.powerOrDependency, ...p.supportingEvidenceIds,
+      p.basisDescription ?? '', p.relationshipDescription ?? '', p.productionPurpose ?? '',
+      p.timeScope?.from ?? '', p.timeScope?.to ?? '')
+    for (const f of graph.findings) parts.push(f.id, f.rationale, ...f.wouldChangeFinding)
+  }
   for (const p of graph.evidenceProvenance)
     parts.push(p.id, p.evidenceId, p.origin.kind === 'SOURCE' ? p.origin.sourceId : 'UNIDENTIFIED')
   for (const f of graph.findings) parts.push(f.id, f.claimId, f.status, f.confidence)
@@ -143,6 +152,7 @@ export function reviewXRayGraph(graph: XRayGraph, options: ReviewOptions = {}): 
   const investigationId = graph.investigation.id
 
   const validation = options.validation ?? validateXRayGraph(graph)
+  const portChecks = activePortChecks(graph.investigation.protocolVersion)
 
   if (!validation.valid) {
     return {
@@ -155,7 +165,7 @@ export function reviewXRayGraph(graph: XRayGraph, options: ReviewOptions = {}): 
       revisionRequests: [],
       summary: {
         checksEvaluated: 0,
-        checksNotEvaluated: DETERMINISTIC_CHECKS.length + PORT_DEPENDENT_CHECKS.length,
+        checksNotEvaluated: DETERMINISTIC_CHECKS.length + portChecks.length,
         blockingFindings: 0,
         advisoryFindings: 0,
         fullCapability: false,
@@ -214,7 +224,7 @@ export function reviewXRayGraph(graph: XRayGraph, options: ReviewOptions = {}): 
   const judgments = options.judgments
   const subjects = judgments === undefined ? [] : judgmentRequests(graph)
 
-  for (const portCheck of PORT_DEPENDENT_CHECKS) {
+  for (const portCheck of portChecks) {
     const forCheck = subjects.filter((s) => s.checkId === portCheck.checkId)
     const answers = forCheck.map((s) => ({
       subject: s,

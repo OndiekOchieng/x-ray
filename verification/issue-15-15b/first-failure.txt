@@ -1,0 +1,12 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/snapshot-checks.ts
+7b: precision migration up/down/up PASS
+Error: ENOENT: no such file or directory, open '/Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/db/migrations/0003_version_commit_audit.up.sql'
+    at readFileSync (node:fs:621:20)
+    at migrationSql (file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/snapshot-checks.ts:11:40)
+    at main (file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/snapshot-checks.ts:29:17) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/db/migrations/0003_version_commit_audit.up.sql'
+}
+[ELIFECYCLE] Command failed with exit code 1.

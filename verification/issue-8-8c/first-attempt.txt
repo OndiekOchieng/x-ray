@@ -1,0 +1,26 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/api-route-checks.ts
+
+X-Ray investigation API — 8c route checks
+======================================================================================
+ ok   F1 · two submitted URLs create two distinct investigations, not the fixture   
+FAIL  F2 · starting execution returns the real run id and its durable status          -> status GATE_BLOCKED
+ ok   F3 · status exposes persisted stage progress and no internal error text       
+ ok   F4 · a bare resume continues an unfinished execution                          
+FAIL  F5 · a revision payload routes a completed run back to its stage                -> run ended STAGE_FAILED
+ ok   F5 · a revision may not route to a control gate                               
+ ok   F6 · candidate requires an explicit run id and stays labelled CANDIDATE       
+FAIL  F7 · version N is labelled COMMITTED_VERSION and reconstructs exactly           -> v0.3 source positions did not round-trip
+ ok   F8 · history is ordered and reports storage latestCommittedVersion            
+ ok   F9 · unknown and wrong-owner resources are 404, never a substitute            
+ ok   F10 · malformed body, query and version are 400                               
+FAIL  F11 · every timestamp serializes as an ISO string                               -> GET /versions/{n}.graph.sources[5].publishedAt=2020-10, GET /versions/{n}.graph.sources[16].publishedAt=2026-09
+ ok   F12 · no payload leaks SQL, prompts, secrets, internals or ledger bindings    
+ ok   F12 · an unexpected internal failure returns a fixed sentence, not its message
+ ok   F12 · an unconfigured deployment reports unavailable, not a defect            
+ ok   F13 · the UI path reads stored investigations and never falls back            
+======================================================================================
+12/16 passed
+
+28 route responses inspected for leakage.
+
+[ELIFECYCLE] Command failed with exit code 1.

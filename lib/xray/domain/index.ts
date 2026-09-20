@@ -50,6 +50,7 @@ export type {
   Priority,
   SourceDependencyId,
   SourceId,
+  SourcePositionId,
   StageRunId,
   SurfaceClaimId,
 } from './primitives'
@@ -87,7 +88,11 @@ export type {
   EvidenceProvenanceRelationship,
   EvidenceRelationship,
   EvidenceStrength,
+  KnowledgeBasis,
 } from './evidence'
+
+// Contextual source position (ADR-0012)
+export type { SourcePosition, SourcePositionBasis, SourcePositionRelationship } from './source-position'
 
 // Analysis
 export type {

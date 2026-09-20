@@ -1,0 +1,62 @@
+7c: v1 committed and deep-equal PASS
+{
+  "validation": [],
+  "reasons": [
+    {
+      "kind": "ACCEPTANCE_BEHAVIOR_VIOLATED",
+      "verdict": "FAIL",
+      "ref": "XRAY-KE-001-A06",
+      "message": "A scheduled inspection does not become an occurred one: No claim concerns a period after the research cutoff, so the case is untested."
+    }
+  ],
+  "blockers": [
+    {
+      "ref": "XR-INV-002/CLAIM_ATOMICITY",
+      "title": "Claim is genuinely atomic and independently testable",
+      "reason": "No reviewer model is configured. Atomicity is a reading of claim text. A compound assertion and an atomic one are structurally identical in the graph.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "XR-INV-003/CROSS_LAYER_INFERENCE",
+      "title": "Evidence at one epistemic layer did not silently establish another",
+      "reason": "No reviewer model is configured. Claim carries a layer; Evidence does not, so the comparison the invariant describes has no data. Evidence.layer was deliberately not introduced in #4 — a separate domain decision.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "XR-INV-005/SEMANTIC_COMPATIBILITY",
+      "title": "Contradiction over undetermined measurement compatibility is sound",
+      "reason": "No reviewer model is configured. Where one side is measured and the other is not, compatibility cannot be settled structurally. Unmeasured testimony can legitimately contradict a measured claim; deciding whether it does here is a semantic judgment.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "XR-INV-007/REVERSIBILITY_ADEQUACY",
+      "title": "Stated overturn conditions would actually overturn the finding",
+      "reason": "No reviewer model is configured. The validator checks that wouldChangeFinding is non-empty. Whether the conditions named are adequate — or merely plausible-sounding — is a reading of their content.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "FM-001/SILENT_CONVERSION_IN_RATIONALE",
+      "title": "Rationale performs no unstated conversion between measures",
+      "reason": "No reviewer model is configured. A rationale reading \"only 28% complete, so most of it cannot be surfaced\" is a silent conversion. Detecting it requires reading prose, not structure.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "FM-005/TENSE_MODALITY_DRIFT",
+      "title": "Claim text preserves the modality of its source passage",
+      "reason": "No reviewer model is configured. \"Expected to inspect\" becoming \"inspected\" is a tense change between two strings. The graph sees two strings.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    }
+  ]
+}
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'FAIL' !== 'BLOCKED'
+
+    at run (file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/version-commit-checks.ts:61:12) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'FAIL',
+  expected: 'BLOCKED',
+  operator: 'strictEqual',
+  diff: 'simple'
+}

@@ -37,6 +37,8 @@ import {
   nextGateRunId,
   nextStageRunId,
   runPipeline,
+  assessResearchStop,
+  correlationKey,
   seedFrom,
   type IdentitySeed,
   type StageContribution,
@@ -408,6 +410,42 @@ async function main(): Promise<void> {
   // -------------------------------------------------------------------------
 
   const clean = await replay({})
+
+  check('6c · a single pass does not infer saturation', () => {
+    const graph = createXRayGraph({ ...canonicalInput(), investigation: { ...clone(investigation), researchStop: undefined } })
+    return assessResearchStop(graph).stop === undefined ? null : 'invented a stop'
+  })
+
+  check('6c · artifact revision is absent from semantic correlation', () => {
+    const proposal = { subject: 'C001', proposition: 'same fact' }
+    const base = { investigationId: investigation.id, stage: 'TRACE' as const }
+    return correlationKey({ ...base, inputArtifactVersion: 1 }, proposal) ===
+      correlationKey({ ...base, inputArtifactVersion: 99 }, proposal)
+      ? null : 'revision changed the key'
+  })
+
+  check('6c · stage rerun removes omitted owned output', () => {
+    const acc = new GraphAccumulator(clone(investigation))
+    acc.merge('INGEST', { sources: clone(sources.slice(0, 2)) })
+    acc.replace('INGEST', { sources: clone(sources.slice(0, 1)) })
+    return acc.size('sources') === 1 ? null : 'surplus source remained'
+  })
+
+  await checkAsync('6c · revision routes positionally and retains review history', async () => {
+    const beforeRevision = await replay({})
+    const revised = await runPipeline({
+      investigation: clone(investigation), stages: replayStages(),
+      resume: { journal: beforeRevision.journal, accumulator: beforeRevision.accumulator },
+      startArtifactVersion: beforeRevision.artifactVersion,
+      reviewHistory: beforeRevision.reviewHistory,
+      revision: { id: 'RR-test', findingId: 'RF-test', stage: 'GRADE', action: 'regrade', targets: [] },
+      clock: () => AT,
+    })
+    const invalidation = revised.journal.invalidationEntries().at(-1)
+    if (invalidation?.staleStages.join() !== 'GRADE,GAPS') return 'wrong stale stages'
+    if (revised.journal.staleStages().length) return `cascade remained stale: ${revised.failedStage}: ${revised.journal.stageEntries().at(-1)?.error}`
+    return revised.reviewHistory?.rounds.length === 2 ? null : 'prior review round lost'
+  })
 
   await checkAsync('the full replay completes and both gates run', async () => {
     if (clean.status !== 'COMPLETED') {

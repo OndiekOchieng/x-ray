@@ -468,6 +468,23 @@ export const CHECK_ROUTING: Readonly<
     stage: 'DECOMPOSE',
     action: 'Restate the claim in the modality of its source passage.',
   },
+  'V03/SOURCE_POSITION_COLLAPSE': { stage: 'PROVENANCE', action: 'Separate source positions by claim and time.' },
+  'V03/PRIMARY_SOURCE_OVERREACH': { stage: 'GRADE', action: 'Grade only what the primary record directly establishes.' },
+  'V03/INSTITUTIONAL_CHARACTERIZATION_PROMOTION': { stage: 'GRADE', action: 'Separate the institution’s characterization from the underlying proposition.' },
+  'V03/RECORD_PRODUCING_POWER_BLINDNESS': { stage: 'TRACE', action: 'Investigate archive silence with the record-producing context visible.' },
+  'V03/RELATIONSHIP_TIME_COLLAPSE': { stage: 'PROVENANCE', action: 'Distinguish T1 and T2 relationships.' },
+  'V03/PROPOSITION_DIMENSION_DRIFT': { stage: 'DECOMPOSE', action: 'Restore actor, category, measure, scope, and time in the proposition.' },
+  'V03/CAUSAL_LINK_INHERITANCE': { stage: 'GRADE', action: 'Grade each material causal link independently.' },
+  'V03/CAUSAL_STRENGTH_PROMOTION': { stage: 'GRADE', action: 'Match causal strength to evidence for necessity, sufficiency, or primacy.' },
+  'V03/COMMON_OUTCOME_COORDINATION': { stage: 'GRADE', action: 'Treat coordination as a separate proposition requiring its own evidence.' },
+  'V03/AUTHENTIC_RECORD_SCOPE_LAUNDERING': { stage: 'GRADE', action: 'Re-grade against the record’s actual population, scope, and denominator.' },
+  'V03/AGGREGATE_COMPONENT_INHERITANCE': { stage: 'GRADE', action: 'Separate aggregate and component measurements.' },
+  'V03/CROSS_DIMENSION_RECOVERY': { stage: 'GRADE', action: 'Assess each recovery dimension independently.' },
+  'V03/UNFALSIFIABLE_SYSTEM_NARRATIVE': { stage: 'GRADE', action: 'Name an observable falsifier or mark the finding unresolved.' },
+  'V03/ACTOR_IDENTITY_LAUNDERING': { stage: 'DECOMPOSE', action: 'Resolve which actors each collective label denotes across time.' },
+  'V03/AGENCY_CHAIN_INHERITANCE': { stage: 'GRADE', action: 'Grade actor identity, coordination, intent, mechanism, planning, and effect separately.' },
+  'V03/RETROSPECTIVE_INTENT_PROJECTION': { stage: 'GRADE', action: 'Require evidence of planning at the earlier time.' },
+  'V03/INSTITUTIONAL_ACTOR_CONTINUITY': { stage: 'TRACE', action: 'Trace decision-makers, mandate, objective, and plan across the claimed interval.' },
 }
 
 export { sourceById, evidenceForClaim, gapsForClaim }

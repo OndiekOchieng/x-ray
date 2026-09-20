@@ -1,0 +1,16 @@
+{
+  "status": "STAGE_FAILED",
+  "failedStage": "INGEST",
+  "stages": [
+    {
+      "stage": "INGEST",
+      "status": "FAILED",
+      "error": "stage INGEST introduced 1 validation error(s): STRUCTURAL/ILLEGAL_ENUM_VALUE"
+    }
+  ],
+  "counts": {
+    "sources": 0,
+    "claims": 0,
+    "evidence": 0
+  }
+}

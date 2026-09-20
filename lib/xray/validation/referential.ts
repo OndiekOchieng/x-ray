@@ -19,6 +19,7 @@ export function validateReferences(
 
   const claims = new Set(graph.claims.map((c) => c.id))
   const sources = new Set(graph.sources.map((s) => s.id))
+  const positions = new Set(graph.sourcePositions.map((p) => p.id))
   const evidence = new Set(graph.evidence.map((e) => e.id))
   const discrepancies = new Set(graph.discrepancies.map((d) => d.id))
   const findings = new Set(graph.findings.map((f) => f.id))
@@ -57,6 +58,7 @@ export function validateReferences(
 
   check(inv, 'claimIds', 'Claim', graph.investigation.claimIds, claims)
   check(inv, 'sourceIds', 'Source', graph.investigation.sourceIds, sources)
+  if (graph.investigation.sourcePositionIds) check(inv, 'sourcePositionIds', 'SourcePosition', graph.investigation.sourcePositionIds, positions)
   check(inv, 'evidenceIds', 'Evidence', graph.investigation.evidenceIds, evidence)
   check(inv, 'discrepancyIds', 'Discrepancy', graph.investigation.discrepancyIds, discrepancies)
   check(inv, 'findingIds', 'Finding', graph.investigation.findingIds, findings)
@@ -86,6 +88,7 @@ export function validateReferences(
   }
   indexMismatch('claimIds', graph.investigation.claimIds, claims)
   indexMismatch('sourceIds', graph.investigation.sourceIds, sources)
+  if (positions.size > 0) indexMismatch('sourcePositionIds', graph.investigation.sourcePositionIds ?? [], positions)
   indexMismatch('evidenceIds', graph.investigation.evidenceIds, evidence)
   indexMismatch('findingIds', graph.investigation.findingIds, findings)
   indexMismatch('gapIds', graph.investigation.gapIds, gaps)
@@ -105,6 +108,13 @@ export function validateReferences(
   }
 
   // --- Evidence ------------------------------------------------------------
+  for (const p of graph.sourcePositions) {
+    const from = target('SourcePosition', p.id)
+    if (!sources.has(p.sourceId)) dangling(from, 'sourceId', 'Source', p.sourceId)
+    check(from, 'claimIds', 'Claim', p.claimIds, claims)
+    check(from, 'supportingEvidenceIds', 'Evidence', p.supportingEvidenceIds, evidence)
+  }
+
   for (const e of graph.evidence) {
     const from = target('Evidence', e.id)
     if (!sources.has(e.sourceId)) dangling(from, 'sourceId', 'Source', e.sourceId)

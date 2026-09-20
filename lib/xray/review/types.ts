@@ -11,7 +11,7 @@
 import type { ResearchStage } from '@/lib/xray/domain'
 
 /** Failure modes from `docs/calibration/failure-modes/`. */
-export type FailureModeId = 'FM-001' | 'FM-002' | 'FM-003' | 'FM-004' | 'FM-005' | 'FM-006'
+export type FailureModeId = 'FM-001' | 'FM-002' | 'FM-003' | 'FM-004' | 'FM-005' | 'FM-006' | 'FM-007' | 'FM-008' | 'FM-009' | 'FM-010'
 
 /** Calibration cases from `docs/calibration/cases/`. */
 export type CalibrationCaseId =
@@ -21,10 +21,13 @@ export type CalibrationCaseId =
   | 'CAL-004'
   | 'CAL-005'
   | 'CAL-006'
+  | 'CAL-007' | 'CAL-008' | 'CAL-009' | 'CAL-010' | 'CAL-011'
+  | 'CAL-012' | 'CAL-013' | 'CAL-014' | 'CAL-015' | 'CAL-016'
 
 export type ReviewTargetKind =
   | 'Claim'
   | 'Source'
+  | 'SourcePosition'
   | 'Evidence'
   | 'EvidenceProvenance'
   | 'Discrepancy'

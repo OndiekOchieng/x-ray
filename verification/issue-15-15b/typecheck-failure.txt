@@ -1,0 +1,5 @@
+lib/xray/persistence/snapshot-checks.ts(46,16): error TS2571: Object is of type 'unknown'.
+lib/xray/persistence/snapshot-checks.ts(47,16): error TS2571: Object is of type 'unknown'.
+lib/xray/persistence/snapshot-checks.ts(88,16): error TS2571: Object is of type 'unknown'.
+lib/xray/persistence/snapshot-checks.ts(89,16): error TS2571: Object is of type 'unknown'.
+lib/xray/persistence/snapshot-checks.ts(90,16): error TS2571: Object is of type 'unknown'.

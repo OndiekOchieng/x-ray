@@ -1,0 +1,13 @@
+7c: v1 committed and deep-equal PASS
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'FAIL' !== 'BLOCKED'
+
+    at run (file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/version-commit-checks.ts:60:12) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'FAIL',
+  expected: 'BLOCKED',
+  operator: 'strictEqual',
+  diff: 'simple'
+}

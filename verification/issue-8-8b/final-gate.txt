@@ -1,0 +1,10 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/inline-execution-checks.ts
+8b: PLAN boundary visible during blocked TRACE; failed attempt durable, no gates fabricated PASS
+8b: restart/resume preserves identity, revision, v0.3 fields, audit and real gates; no version PASS
+8b: checkpoint+audit boundary rolls back atomically on injected audit failure PASS
+8b: unavailable adapter stays capability-blocked, not stage-failed or committed PASS
+8b: revision routes to its stage; INVALIDATION/RESUMED durable before any stage ran PASS
+8b: STOPPED is durable at its own transition, not at the following gate PASS
+8b: completed run reopens only by revision, never by bare resume PASS
+8b: submitted URL alone creates no Source, Evidence or version row PASS
+8b: the surface Source appears only from actual INGEST output PASS

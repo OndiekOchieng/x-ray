@@ -1,0 +1,92 @@
+7c: v1 committed and deep-equal PASS
+{
+  "validation": [
+    {
+      "code": "EPISTEMIC/POST_CUTOFF_EVIDENCE",
+      "class": "EPISTEMIC",
+      "severity": "ERROR",
+      "targets": [
+        {
+          "kind": "Source",
+          "id": "SRC-NEW"
+        }
+      ],
+      "message": "Source SRC-NEW is published 2026-09-18, after the research cutoff 2026-09-13, and yields evidence bearing on C001. Evidence from after the cutoff cannot enter a historical investigation — it is how a scheduled event silently becomes an occurred one.",
+      "detail": {
+        "sourceId": "SRC-NEW",
+        "publishedAt": "2026-09-18",
+        "cutoff": "2026-09-13"
+      }
+    }
+  ],
+  "reasons": [
+    {
+      "kind": "VALIDATION_ERROR",
+      "verdict": "FAIL",
+      "ref": "EPISTEMIC/POST_CUTOFF_EVIDENCE",
+      "message": "Source SRC-NEW is published 2026-09-18, after the research cutoff 2026-09-13, and yields evidence bearing on C001. Evidence from after the cutoff cannot enter a historical investigation — it is how a scheduled event silently becomes an occurred one.",
+      "targets": [
+        "Source:SRC-NEW"
+      ]
+    },
+    {
+      "kind": "ACCEPTANCE_BEHAVIOR_VIOLATED",
+      "verdict": "FAIL",
+      "ref": "XRAY-KE-001-A06",
+      "message": "A scheduled inspection does not become an occurred one: 1 source(s) published after the cutoff yield evidence.",
+      "targets": [
+        "SRC-NEW"
+      ]
+    }
+  ],
+  "blockers": [
+    {
+      "ref": "XR-INV-002/CLAIM_ATOMICITY",
+      "title": "Claim is genuinely atomic and independently testable",
+      "reason": "Not reached — review was refused for an illegal graph. Independently of that, Atomicity is a reading of claim text. A compound assertion and an atomic one are structurally identical in the graph.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "XR-INV-003/CROSS_LAYER_INFERENCE",
+      "title": "Evidence at one epistemic layer did not silently establish another",
+      "reason": "Not reached — review was refused for an illegal graph. Independently of that, Claim carries a layer; Evidence does not, so the comparison the invariant describes has no data. Evidence.layer was deliberately not introduced in #4 — a separate domain decision.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "XR-INV-005/SEMANTIC_COMPATIBILITY",
+      "title": "Contradiction over undetermined measurement compatibility is sound",
+      "reason": "Not reached — review was refused for an illegal graph. Independently of that, Where one side is measured and the other is not, compatibility cannot be settled structurally. Unmeasured testimony can legitimately contradict a measured claim; deciding whether it does here is a semantic judgment.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "XR-INV-007/REVERSIBILITY_ADEQUACY",
+      "title": "Stated overturn conditions would actually overturn the finding",
+      "reason": "Not reached — review was refused for an illegal graph. Independently of that, The validator checks that wouldChangeFinding is non-empty. Whether the conditions named are adequate — or merely plausible-sounding — is a reading of their content.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "FM-001/SILENT_CONVERSION_IN_RATIONALE",
+      "title": "Rationale performs no unstated conversion between measures",
+      "reason": "Not reached — review was refused for an illegal graph. Independently of that, A rationale reading \"only 28% complete, so most of it cannot be surfaced\" is a silent conversion. Detecting it requires reading prose, not structure.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    },
+    {
+      "ref": "FM-005/TENSE_MODALITY_DRIFT",
+      "title": "Claim text preserves the modality of its source passage",
+      "reason": "Not reached — review was refused for an illegal graph. Independently of that, \"Expected to inspect\" becoming \"inspected\" is a tense change between two strings. The graph sees two strings.",
+      "resolvedBy": "a ReviewerModel implementation (#6 pipeline adapters)"
+    }
+  ]
+}
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'FAIL' !== 'BLOCKED'
+
+    at run (file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/version-commit-checks.ts:61:12) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'FAIL',
+  expected: 'BLOCKED',
+  operator: 'strictEqual',
+  diff: 'simple'
+}

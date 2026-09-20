@@ -15,7 +15,7 @@ export default async function InvestigationPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const payload = getProgressPayload(id)
+  const payload = await getProgressPayload(id)
 
   // An unknown id is not-found. It never falls back to another investigation.
   if (!payload) notFound()

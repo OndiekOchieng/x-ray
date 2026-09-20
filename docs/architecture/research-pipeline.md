@@ -245,6 +245,26 @@ interface ResearchStop {
 The `ResearchStop` type is reproduced in
 [domain-model.md](./domain-model.md#researchstop).
 
+### 6c executable mapping
+
+For v1, a material claim has `priority === HIGH`; a load-bearing claim is a
+HIGH-priority claim in the current finding set; a material gap references at
+least one HIGH-priority claim. These are operational mappings for this protocol,
+not new domain fields.
+
+Assessment occurs once after GAPS. A single pass cannot observe whether a
+further search produced new material evidence, so it never proves saturation
+by itself. `SATURATION` requires an affirmative execution observation or an
+explicit historical replay record. A new proposition-bearing Evidence item
+relevant to a material claim or gap may be material even when its source or
+origin already appeared. `unresolvedHighPriorityLeads` remains authored prose
+so unobtained records can be named.
+
+Capability absence is journalled separately from `ResearchStop`. TIME_BUDGET
+and COST_BUDGET require actual configured time and cost meters; neither is
+inferred from step or provider-call counts. On resume, the old stop becomes
+history and the current graph needs a new stop before PASS.
+
 ### Amendment — 2026-09-18 · stages, gates and lifecycle boundaries
 
 The §16 diagram draws every box the same way, and the executable model cannot.

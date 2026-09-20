@@ -15,6 +15,7 @@
  */
 
 import type { XRayGraph } from '@/lib/xray/selectors'
+import type { CapabilityUnavailable } from '@/lib/xray/capability'
 import { openGaps } from '@/lib/xray/selectors'
 import { validateXRayGraph, type ValidationResult } from '@/lib/xray/validation'
 import {
@@ -104,6 +105,10 @@ export interface GraduationOptions {
   requiredReviewChecks?: readonly string[]
   model?: ReviewerModel
   assessedAt?: string
+  /** Run-level capability gaps remain separate from ResearchStop (D23). */
+  capabilityGaps?: readonly CapabilityUnavailable[]
+  /** A stale revision cascade cannot graduate its referential scaffold. */
+  staleStages?: readonly string[]
 }
 
 export function assessGraduation(
@@ -121,6 +126,15 @@ export function assessGraduation(
   const reasons: GraduationReason[] = []
   const blockers: CapabilityBlocker[] = []
   const verdicts: GraduationVerdict[] = []
+
+  for (const gap of options.capabilityGaps ?? []) {
+    blockers.push({ ref: gap.operation, title: gap.operation, reason: gap.detail, resolvedBy: gap.resolvedBy })
+    verdicts.push('BLOCKED')
+  }
+  for (const stage of options.staleStages ?? []) {
+    blockers.push({ ref: `STALE/${stage}`, title: `${stage} needs rerun`, reason: 'Revision cascade is incomplete.', resolvedBy: `rerun ${stage}` })
+    verdicts.push('BLOCKED')
+  }
 
   // --- legality ------------------------------------------------------------
   for (const v of validation.violations) {
@@ -243,6 +257,15 @@ export function assessGraduation(
   }))
 
   const stop = graph.investigation.researchStop
+  if (stop?.reason !== 'SATURATION') {
+    blockers.push({
+      ref: 'RESEARCH_STOP',
+      title: 'Research stop prerequisite',
+      reason: stop ? `Research stopped: ${stop.reason}.` : 'No current research stop has been established.',
+      resolvedBy: 'complete research and establish affirmative saturation evidence',
+    })
+    verdicts.push('BLOCKED')
+  }
 
   return {
     verdict: worstVerdict(verdicts),

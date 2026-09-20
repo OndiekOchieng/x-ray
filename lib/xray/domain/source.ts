@@ -13,7 +13,6 @@
 import type {
   Confidence,
   IsoDateOrDateTime,
-  IsoDateTime,
   SourceDependencyId,
   SourceId,
 } from './primitives'
@@ -101,10 +100,11 @@ export interface Source {
 
   url?: string
 
-  publishedAt?: IsoDateOrDateTime
+  /** Recorded precision may be month, date, or date-time (XRAY-KE-001). */
+  publishedAt?: string
 
-  /** When X-Ray attempted retrieval. Required even when retrieval failed. */
-  retrievedAt: IsoDateTime
+  /** Retrieval observation at recorded precision: date-only in XRAY-KE-001. */
+  retrievedAt: IsoDateOrDateTime
 
   sourceType: SourceType
 

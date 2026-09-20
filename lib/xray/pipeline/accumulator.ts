@@ -28,7 +28,7 @@
  * PURITY: no clock, no randomness, no I/O, no fixture ids.
  */
 
-import type { Investigation, InvestigationVersion, ResearchStage } from '@/lib/xray/domain'
+import type { Investigation, InvestigationVersion, ResearchStage, ResearchStop } from '@/lib/xray/domain'
 import { createXRayGraph, type XRayGraph, type XRayGraphInput } from '@/lib/xray/selectors'
 import {
   ARTIFACT_COLLECTIONS,
@@ -50,12 +50,25 @@ type Mutable = { [K in ArtifactCollection]: unknown[] }
 /** Opaque restore point. Array copies, so later merges cannot reach back in. */
 export interface AccumulatorCheckpoint {
   readonly _collections: Readonly<Record<ArtifactCollection, readonly unknown[]>>
+  readonly _outputs: ReadonlyMap<ResearchStage, ReadonlyMap<ArtifactCollection, ReadonlySet<string>>>
+  readonly _stop?: ResearchStop
+}
+
+/** JSON-compatible values needed to resume stage-owned replacement exactly. */
+export interface AccumulatorState {
+  investigation: Investigation
+  version?: InvestigationVersion
+  collections: Record<ArtifactCollection, unknown[]>
+  outputs: { stage: ResearchStage; collections: { collection: ArtifactCollection; ids: string[] }[] }[]
+  activeResearchStop?: ResearchStop
 }
 
 export class GraphAccumulator {
   private readonly collections: Mutable
   private readonly investigation: Investigation
   private readonly version?: InvestigationVersion
+  private stop?: ResearchStop
+  private outputs = new Map<ResearchStage, Map<ArtifactCollection, Set<string>>>()
 
   /**
    * @param investigation Read-only throughout the run. The pipeline never
@@ -64,6 +77,7 @@ export class GraphAccumulator {
    */
   constructor(investigation: Investigation, seed: Partial<XRayGraphInput> = {}) {
     this.investigation = investigation
+    this.stop = investigation.researchStop
     this.version = seed.version
     this.collections = Object.fromEntries(
       ARTIFACT_COLLECTIONS.map((c) => [c, [...((seed[c] ?? []) as readonly unknown[])]]),
@@ -94,6 +108,10 @@ export class GraphAccumulator {
       }
 
       const target = this.collections[key] as { id: string }[]
+      const stageOutputs = this.outputs.get(stage) ?? new Map<ArtifactCollection, Set<string>>()
+      this.outputs.set(stage, stageOutputs)
+      const ids = stageOutputs.get(key) ?? new Set<string>()
+      stageOutputs.set(key, ids)
       const seen = new Set<string>()
 
       for (const item of incoming) {
@@ -106,6 +124,7 @@ export class GraphAccumulator {
           )
         }
         seen.add(item.id)
+        ids.add(item.id)
 
         const at = target.findIndex((existing) => existing.id === item.id)
         if (at === -1) target.push(item)
@@ -114,15 +133,43 @@ export class GraphAccumulator {
     }
   }
 
+  /** Replace the complete output set from a successful stage re-run (D30). */
+  replace(stage: ResearchStage, contribution: StageContribution): void {
+    const checkpoint = this.checkpoint()
+    const previous = checkpoint._outputs.get(stage)
+    try {
+      this.merge(stage, contribution)
+      for (const key of STAGE_OUTPUTS[stage]) {
+        const prior = previous?.get(key) ?? new Set<string>()
+        const incoming = new Set(((contribution[key] ?? []) as readonly { id: string }[]).map((x) => x.id))
+        this.collections[key] = (this.collections[key] as { id: string }[]).filter(
+          (item) => !prior.has(item.id) || incoming.has(item.id),
+        )
+        const outputs = this.outputs.get(stage) ?? new Map<ArtifactCollection, Set<string>>()
+        outputs.set(key, incoming)
+        this.outputs.set(stage, outputs)
+      }
+    } catch (error) {
+      this.restore(checkpoint)
+      throw error
+    }
+  }
+
+  setResearchStop(stop: ResearchStop | undefined): void {
+    this.stop = stop
+  }
+
   /** Canonical arrays as they stand. Copies: callers cannot mutate the run. */
   snapshot(): XRayGraphInput {
+    const { sourcePositions, ...collections } = this.copyCollections()
     return {
       investigation: this.investigationSnapshot(),
       ...(this.version ? { version: this.version } : {}),
-      ...(this.copyCollections() as unknown as Omit<
+      ...(collections as unknown as Omit<
         XRayGraphInput,
-        'investigation' | 'version' | 'atiRequests'
+        'investigation' | 'version' | 'atiRequests' | 'sourcePositions'
       >),
+      sourcePositions: sourcePositions as XRayGraphInput['sourcePositions'],
     }
   }
 
@@ -138,7 +185,34 @@ export class GraphAccumulator {
   }
 
   checkpoint(): AccumulatorCheckpoint {
-    return { _collections: this.copyCollections() }
+    return {
+      _collections: this.copyCollections(),
+      _outputs: new Map([...this.outputs].map(([stage, byCollection]) =>
+        [stage, new Map([...byCollection].map(([key, ids]) => [key, new Set(ids)]))])),
+      _stop: this.stop,
+    }
+  }
+
+  exportState(): AccumulatorState {
+    return {
+      investigation: structuredClone(this.investigation),
+      ...(this.version === undefined ? {} : { version: structuredClone(this.version) }),
+      collections: structuredClone(this.copyCollections()),
+      outputs: [...this.outputs].map(([stage, byCollection]) => ({
+        stage, collections: [...byCollection].map(([collection, ids]) => ({ collection, ids: [...ids] })),
+      })),
+      ...(this.stop === undefined ? {} : { activeResearchStop: structuredClone(this.stop) }),
+    }
+  }
+
+  static fromState(state: AccumulatorState): GraphAccumulator {
+    const accumulator = new GraphAccumulator(state.investigation, {
+      ...state.collections, ...(state.version === undefined ? {} : { version: state.version }),
+    } as Partial<XRayGraphInput>)
+    accumulator.outputs = new Map(state.outputs.map(({ stage, collections }) => [stage,
+      new Map(collections.map(({ collection, ids }) => [collection, new Set(ids)]))]))
+    accumulator.stop = state.activeResearchStop
+    return accumulator
   }
 
   /**
@@ -165,8 +239,11 @@ export class GraphAccumulator {
 
     return {
       ...this.investigation,
+      researchStop: this.stop,
       claimIds: ids('claims') as Investigation['claimIds'],
       sourceIds: ids('sources'),
+      ...(this.investigation.sourcePositionIds !== undefined || ids('sourcePositions').length > 0
+        ? { sourcePositionIds: ids('sourcePositions') } : {}),
       evidenceIds: ids('evidence'),
       discrepancyIds: ids('discrepancies'),
       disconfirmationIds: ids('disconfirmations'),
@@ -187,6 +264,9 @@ export class GraphAccumulator {
     for (const c of ARTIFACT_COLLECTIONS) {
       this.collections[c] = [...checkpoint._collections[c]]
     }
+    this.outputs = new Map([...checkpoint._outputs].map(([stage, byCollection]) =>
+      [stage, new Map([...byCollection].map(([key, ids]) => [key, new Set(ids)]))]))
+    this.stop = checkpoint._stop
   }
 
   /** How many artifacts a collection currently holds. For journal detail. */

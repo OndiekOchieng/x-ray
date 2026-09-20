@@ -48,6 +48,7 @@ export type TargetKind =
   | 'StageRun'
   | 'Claim'
   | 'Source'
+  | 'SourcePosition'
   | 'SourceDependency'
   | 'Evidence'
   | 'EvidenceProvenance'
@@ -77,6 +78,9 @@ export type ViolationCode =
   | 'STRUCTURAL/DUPLICATE_ID'
   | 'STRUCTURAL/DERIVED_FIELD_STORED'
   | 'STRUCTURAL/NON_ISO_TIMESTAMP'
+  | 'STRUCTURAL/MISSING_KNOWLEDGE_BASIS'
+  | 'STRUCTURAL/UNKNOWN_KNOWLEDGE_BASIS'
+  | 'STRUCTURAL/SOURCE_POSITION_BASIS_UNEXPLAINED'
   // Referential
   | 'REFERENTIAL/DANGLING_REFERENCE'
   | 'REFERENTIAL/ORPHANED_ARTIFACT'

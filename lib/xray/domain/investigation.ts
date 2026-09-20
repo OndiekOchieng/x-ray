@@ -20,6 +20,7 @@ import type {
   IsoDate,
   IsoDateTime,
   SourceId,
+  SourcePositionId,
   StageRunId,
 } from './primitives'
 
@@ -226,6 +227,8 @@ export interface Investigation {
 
   claimIds: ClaimId[]
   sourceIds: SourceId[]
+  /** Absent on historical snapshots; new graphs may index contextual SourcePositions. */
+  sourcePositionIds?: SourcePositionId[]
   evidenceIds: EvidenceId[]
   discrepancyIds: DiscrepancyId[]
   disconfirmationIds: DisconfirmationId[]

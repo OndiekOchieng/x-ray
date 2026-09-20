@@ -1,0 +1,6 @@
+$ pnpm check:persistence-ati && pnpm exec tsc --noEmit
+7d-d ATI: version-scoped eligible origin, invalid references, lifecycle isolation PASS
+lib/xray/persistence/ati-boundary-checks.ts(32,18): error TS18046: 'lifecycle' is of type 'unknown'.
+lib/xray/persistence/ati-boundary-checks.ts(33,18): error TS18046: 'lifecycle' is of type 'unknown'.
+lib/xray/persistence/ati-boundary-checks.ts(34,18): error TS18046: 'lifecycle' is of type 'unknown'.
+lib/xray/persistence/ati-boundary-checks.ts(35,28): error TS18046: 'lifecycle' is of type 'unknown'.

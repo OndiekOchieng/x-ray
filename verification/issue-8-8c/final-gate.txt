@@ -1,0 +1,32 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/api-route-checks.ts
+
+X-Ray investigation API — 8c route checks
+========================================================================================
+ ok   F1 · two submitted URLs create two distinct investigations, not the fixture     
+ ok   F2 · starting execution returns the real run id and its durable status          
+ ok   F3 · status exposes persisted stage progress and no internal error text         
+ ok   F4 · a bare resume continues an unfinished execution                            
+ ok   F5 · a revision payload routes a completed run back to its stage                
+ ok   F5 · a revision may not route to a control gate                                 
+ ok   F6 · candidate requires an explicit run id and stays labelled CANDIDATE         
+ ok   F7 · version N is labelled COMMITTED_VERSION and reconstructs exactly           
+ ok   F8 · history is ordered and reports storage latestCommittedVersion              
+ ok   F9 · unknown and wrong-owner resources are 404, never a substitute              
+ ok   F10 · malformed body, query and version are 400                                 
+ ok   F11 · every timestamp serializes as an ISO string                               
+ ok   F12 · no payload leaks SQL, prompts, secrets, internals or ledger bindings      
+ ok   F12 · an unexpected internal failure returns a fixed sentence, not its message  
+ ok   F12 · an unconfigured deployment reports unavailable, not a defect              
+ ok   F13 · the UI path reads a stored investigation by id                            
+ ok   R3 · a typed unknown in storage may resolve the benchmark by its exact id       
+ ok   R4 · an arbitrary unknown id stays null                                         
+ ok   R1 · a stored investigation with no committed version is null, not the benchmark
+ ok   R1 · a submitted investigation with no committed version is also null           
+ ok   R2 · an unexpected storage failure propagates and never reaches the benchmark   
+ ok   R2 · a committed pointer cannot dangle: storage forbids the state               
+ ok   R · the retrieval seam uses no catch-all                                        
+========================================================================================
+23/23 passed
+
+30 route responses inspected for leakage.
+

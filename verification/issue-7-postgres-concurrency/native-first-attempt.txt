@@ -1,0 +1,13 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/postgres-concurrency-checks.ts
+Error: connect EPERM 127.0.0.1:55432 - Local (0.0.0.0:0)
+    at internalConnect (node:net:1406:16)
+    at defaultTriggerAsyncIdScope (node:internal/async_hooks:474:12)
+    at node:net:1729:9
+    at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
+  errno: -1,
+  code: 'EPERM',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 55432
+}
+[ELIFECYCLE] Command failed with exit code 1.

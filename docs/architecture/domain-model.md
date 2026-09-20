@@ -61,6 +61,24 @@ interface Investigation {
 }
 ```
 
+### #7 persistence clarification — selected snapshot
+
+In a reconstructed graph for immutable version vN, `currentVersion` is **N**:
+it identifies the version represented by this `Investigation` value. It is
+not a query for the latest version stored for this investigation. Storage keeps
+`latestCommittedVersion` on the separate investigation identity row; #9 owns
+any public version pointer. The pipeline's in-run `artifactVersion` is a third,
+unrelated number and never changes either pointer.
+
+The fields needed to reconstruct this `Investigation` exactly, including its
+ordered artifact membership and `stageRuns`, belong to the immutable version
+snapshot. `stageRuns` stays embedded in the **domain aggregate** even though
+its version-snapshot entries are normalized in PostgreSQL. Those entries are
+not interchangeable with the producing run's `RunJournal`; GateRuns and
+CapabilityRuns never become embedded StageRuns. The frozen XRAY-KE-001 legacy
+StageRuns therefore remain unchanged. See
+[investigation-versioning.md](./investigation-versioning.md#persistence-contract).
+
 ---
 
 ## Claim
@@ -216,8 +234,8 @@ interface Source {
 
   url?: string;
 
-  publishedAt?: string;
-  retrievedAt: string;
+  publishedAt?: string; // ISO month, date, or date-time at recorded precision
+  retrievedAt: string; // ISO date or date-time at the precision actually recorded
 
   sourceType:
     | "LEGISLATION"
@@ -827,8 +845,9 @@ interface InvestigationVersion {
 ```
 
 The fields carry exactly the behaviour §22 describes: what was **inherited**
-versus **added**, which claims were **re-evaluated** because the new evidence
-bore on them, and the findings and gaps **as they stood** at that version.
+versus **added**, which claims were **re-evaluated** under the recorded
+trigger, and the findings and gaps **as they stood** at that version. A
+version-scoped audit gives each re-evaluated claim its specific reason.
 
 XRAY-KE-001 is **Version 1** — `trigger: "INITIAL_RESEARCH"`, no
 `supersedesVersion`, and `reEvaluatedClaimIds` empty because nothing preceded
@@ -838,9 +857,23 @@ it.
 resolution, or supersession queries. Those belong to the slice that actually
 produces a Version 2.
 
-**Still open:** whether `Investigation.stageRuns` stays embedded (as §5.1
-writes it) or becomes `stageRunIds` like every other artifact reference. That
-is a persistence question and is not resolved here.
+**#7 mapping, resolved 2026-09-19:** `Investigation.stageRuns` remains embedded
+in the reconstructed domain snapshot and is normalized as an ordered
+version-snapshot set in storage. Execution audit records remain separate.
+`InvestigationVersion` is a completed research snapshot, not a publication
+marker. `PASS` and eligible `BLOCKED` candidates may commit; `REVISE`, `FAIL`
+and incomplete runs may not. `supersedesVersion` names the predecessor;
+per-claim re-evaluation audit explains why an affected claim changed without
+adding a SQL-driven field to this canonical type. All canonical artifacts and
+the investigation fields needed for exact reconstruction are version-scoped in
+storage. See [ADR-0006](../adr/0006-immutable-investigation-versions.md) and
+[investigation-versioning.md](./investigation-versioning.md#persistence-contract).
+
+`findingIds` and `gapIds` identify records **as they stand in this snapshot**.
+An older finding with the same canonical id and earlier content remains in its
+earlier version; vN does not embed all superseded rows from prior versions.
+For initial v1, `addedSourceIds` and `addedEvidenceIds` name the initial
+receipts and `reEvaluatedClaimIds` is empty, as XRAY-KE-001 demonstrates.
 
 ---
 

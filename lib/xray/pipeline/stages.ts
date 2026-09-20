@@ -83,6 +83,7 @@ export function researchStageIndex(stage: ResearchStage): number {
 export type ArtifactCollection =
   | 'claims'
   | 'sources'
+  | 'sourcePositions'
   | 'sourceDependencies'
   | 'evidence'
   | 'evidenceProvenance'
@@ -94,6 +95,7 @@ export type ArtifactCollection =
 export const ARTIFACT_COLLECTIONS = [
   'claims',
   'sources',
+  'sourcePositions',
   'sourceDependencies',
   'evidence',
   'evidenceProvenance',
@@ -127,8 +129,8 @@ export const STAGE_OUTPUTS: Readonly<Record<ResearchStage, readonly ArtifactColl
   DECOMPOSE: ['claims'],
   CLASSIFY: ['claims'],
   PLAN: [],
-  TRACE: ['claims', 'sources', 'evidence'],
-  PROVENANCE: ['evidenceProvenance', 'sourceDependencies'],
+  TRACE: ['claims', 'sources', 'evidence', 'sourcePositions'],
+  PROVENANCE: ['evidenceProvenance', 'sourceDependencies', 'sourcePositions'],
   DISCONFIRM: ['evidence', 'disconfirmations'],
   RECONCILE: ['discrepancies'],
   GRADE: ['findings'],

@@ -1,0 +1,20 @@
+{
+  "status": "STAGE_FAILED",
+  "failedStage": "DECOMPOSE",
+  "stages": [
+    {
+      "stage": "INGEST",
+      "status": "SUCCEEDED"
+    },
+    {
+      "stage": "DECOMPOSE",
+      "status": "FAILED",
+      "error": "\"undefined\" is not valid JSON"
+    }
+  ],
+  "counts": {
+    "sources": 1,
+    "claims": 0,
+    "evidence": 0
+  }
+}

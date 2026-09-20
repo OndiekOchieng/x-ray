@@ -1,0 +1,29 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/lifecycle-checks.ts
+
+X-Ray investigation lifecycle — 8d integrated gate
+==================================================================================
+FAIL  L1 · execute · a run traverses every stage and both gates                   -> run ended STAGE_FAILED
+FAIL  L2 · inspect · status exposes the persisted stage sequence                  -> 0 stages succeeded
+FAIL  L3 · candidate · working state is retrievable and labelled CANDIDATE        -> the newly located record is not in the candidate
+FAIL  L4 · revise · a revision reopens the completed run through the route        -> run ended STAGE_FAILED
+FAIL  L5 · validate/review · the run recorded a real stop, validation and review  -> stops recorded: RESUMED
+FAIL  L6 · graduate · the promoted candidate assesses as eligible BLOCKED         -> verdict FAIL
+FAIL  L7 · commit · an eligible assessment commits v2 and links the exact run     -> threw: Inherited claim C001 is missing
+FAIL  L8 · version · v2 round-trips exactly through the route                     -> status 404
+FAIL  L9 · history · v1 is unchanged and history is ordered [1,2]                 -> pointer 1
+FAIL  L10 · projection · the UI query path serves v2 from storage                 -> the UI path did not follow the pointer
+FAIL  F1 · a committed run cannot be resumed                                      -> status 200
+FAIL  F1 · a committed run stays inspectable but is not active work               -> the run no longer reports its commit
+FAIL  F2 · a stale predecessor conflicts; there is no silent rebase               -> the pointer moved to 1
+ ok   F3 · a capability-blocked run is retrievable and not committable          
+FAIL  F4 · a stage failure is retrievable and does not commit                     -> the recorded failure lost its reason
+FAIL  F5 · a completed-but-uncommitted run does not look committed                -> status STAGE_FAILED
+ ok   F6 · unknown investigation, run, version and candidate stay typed 404s    
+FAIL  F7 · no path falls back to the benchmark for a stored id                    -> the benchmark corpus was served instead of stored v2
+ ok   F8 · no response leaks SQL, prompts, secrets, stacks or ledger internals  
+==================================================================================
+3/19 passed
+
+19 route responses inspected for leakage.
+
+[ELIFECYCLE] Command failed with exit code 1.

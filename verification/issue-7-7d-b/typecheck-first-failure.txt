@@ -1,0 +1,3 @@
+lib/xray/persistence/execution-audit-checks.ts(127,33): error TS18046: 'gateStorage' is of type 'unknown'.
+lib/xray/persistence/execution-audit-checks.ts(128,18): error TS18046: 'gateStorage' is of type 'unknown'.
+lib/xray/persistence/execution-audit-checks.ts(129,18): error TS18046: 'gateStorage' is of type 'unknown'.

@@ -101,7 +101,7 @@ export function validateXRayGraph(
   const mode = options.mode ?? 'FULL'
 
   const violations: Violation[] = [
-    ...(enabled('STRUCTURAL') ? validateStructure(graph) : []),
+    ...(enabled('STRUCTURAL') ? validateStructure(graph, mode) : []),
     ...(enabled('REFERENTIAL') ? validateReferences(graph, mode) : []),
     ...(enabled('EPISTEMIC') ? validateEpistemics(graph, mode) : []),
   ]

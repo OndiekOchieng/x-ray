@@ -10,7 +10,7 @@
  *
  * NOT HERE, DELIBERATELY:
  *   - any provider implementation, SDK, network call or prompt string
- *   - research stop assessment and revision routing (6c)
+ *   - persistence and durable version history (#7)
  *   - persistence (#7), HTTP (#8), caching (#9), ATI lifecycle (#10)
  *   - stage bodies. 6a defines the contract; nothing implements
  *     `StageDefinition` outside the check harness.
@@ -66,6 +66,8 @@ export type {
 // --- 6b: adapter boundaries ------------------------------------------------
 
 export { isProposalRef } from './proposals'
+export { canonicalizeSourcePositions } from './source-position'
+export type { SourcePositionHandles } from './source-position'
 export type {
   ClaimClassificationProposal,
   ClaimProposal,
@@ -77,6 +79,7 @@ export type {
   GapProposal,
   Proposal,
   ProposalRef,
+  SourcePositionProposal,
 } from './proposals'
 
 export {
@@ -128,3 +131,5 @@ export type {
 
 export { runPipeline } from './run'
 export type { PipelineRunResult, RunOptions, RunStatus } from './run'
+export { assessResearchStop } from './stop'
+export type { StopAssessment, StopEvidence } from './stop'

@@ -12,7 +12,7 @@
  */
 
 import type { XRayGraph } from '@/lib/xray/selectors'
-import type { Violation, ViolationTarget } from './violations'
+import type { Violation, ViolationTarget, ValidationMode } from './violations'
 
 const ISO_DATE = /^\d{4}(-\d{2})?(-\d{2})?([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/
 
@@ -24,7 +24,12 @@ const target = (kind: ViolationTarget['kind'], id: string): ViolationTarget => (
 const nonEmpty = (value: unknown): boolean =>
   typeof value === 'string' && value.trim().length > 0
 
-export function validateStructure(graph: XRayGraph): Violation[] {
+const requiresKnowledgeBasis = (version: string): boolean => {
+  const match = /^v?(\d+)\.(\d+)(?:\.|$)/.exec(version)
+  return match !== null && (Number(match[1]) > 0 || Number(match[2]) >= 3)
+}
+
+export function validateStructure(graph: XRayGraph, mode: ValidationMode = 'FULL'): Violation[] {
   const out: Violation[] = []
 
   const requireString = (
@@ -209,6 +214,37 @@ export function validateStructure(graph: XRayGraph): Violation[] {
     noDerivedFields('Source', source.id, source)
   }
 
+  for (const position of graph.sourcePositions) {
+    claimId('SourcePosition', position.id)
+    requireString('SourcePosition', position.id, 'sourceId', position.sourceId)
+    requireEnum('SourcePosition', position.id, 'relationship', position.relationship, [
+      'SUBJECT', 'PARTICIPANT', 'WITNESS', 'GOVERNING_AUTHORITY', 'REGULATOR',
+      'AUDITOR', 'INVESTIGATOR', 'DETENTION_OR_ENFORCEMENT_AUTHORITY',
+      'EMPLOYER_OR_PRINCIPAL', 'EMPLOYEE_OR_AGENT', 'CONTRACTUAL_COUNTERPARTY',
+      'BENEFICIARY', 'ADVERSARY', 'INTERMEDIARY', 'OTHER',
+    ])
+    requireEnum('SourcePosition', position.id, 'basis', position.basis, ['DOCUMENTED', 'INFERRED'])
+    requireEnum('SourcePosition', position.id, 'confidence', position.confidence, ['HIGH', 'MEDIUM', 'LOW'])
+    if (!Array.isArray(position.claimIds) || position.claimIds.length === 0) out.push({
+      code: 'REFERENTIAL/ORPHANED_ARTIFACT', class: 'REFERENTIAL', severity: 'ERROR',
+      targets: [target('SourcePosition', position.id)],
+      message: `SourcePosition ${position.id} bears on no claim.`,
+    })
+    if (!Array.isArray(position.powerOrDependency) ||
+        position.powerOrDependency.some((entry) => !nonEmpty(entry))) out.push({
+      code: 'STRUCTURAL/EMPTY_REQUIRED_STRING', class: 'STRUCTURAL', severity: 'ERROR',
+      targets: [target('SourcePosition', position.id)],
+      message: `SourcePosition ${position.id} has invalid powerOrDependency entries.`,
+      detail: { field: 'powerOrDependency' },
+    })
+    if ((!Array.isArray(position.supportingEvidenceIds) || position.supportingEvidenceIds.length === 0) && !nonEmpty(position.basisDescription)) out.push({
+      code: 'STRUCTURAL/SOURCE_POSITION_BASIS_UNEXPLAINED', class: 'STRUCTURAL', severity: 'ERROR',
+      targets: [target('SourcePosition', position.id)],
+      message: `SourcePosition ${position.id} has neither supporting evidence nor a basis description.`,
+    })
+    noDerivedFields('SourcePosition', position.id, position)
+  }
+
   // --- Evidence ------------------------------------------------------------
   for (const evidence of graph.evidence) {
     claimId('Evidence', evidence.id)
@@ -226,6 +262,23 @@ export function validateStructure(graph: XRayGraph): Violation[] {
       'CONTEXTUAL',
       'WEAK',
     ])
+    if (evidence.knowledgeBasis !== undefined) {
+      requireEnum('Evidence', evidence.id, 'knowledgeBasis', evidence.knowledgeBasis, [
+        'DIRECT_OBSERVATION', 'SELF_REPORT', 'PARTICIPANT_ACCOUNT', 'MEASUREMENT', 'ADMINISTRATIVE_RECORD',
+        'INSTITUTIONAL_CHARACTERIZATION', 'ATTRIBUTED_SOURCE',
+        'EXPERT_INTERPRETATION', 'SECONDARY_SYNTHESIS', 'INFERENCE', 'UNKNOWN',
+      ])
+      if (evidence.knowledgeBasis === 'UNKNOWN' && mode === 'FULL' &&
+          requiresKnowledgeBasis(graph.investigation.protocolVersion)) out.push({
+        code: 'STRUCTURAL/UNKNOWN_KNOWLEDGE_BASIS', class: 'STRUCTURAL', severity: 'ERROR',
+        targets: [target('Evidence', evidence.id)],
+        message: `Evidence ${evidence.id} has UNKNOWN knowledgeBasis; v0.3+ FULL requires a concrete basis.`,
+      })
+    } else if (mode === 'FULL' && requiresKnowledgeBasis(graph.investigation.protocolVersion)) out.push({
+      code: 'STRUCTURAL/MISSING_KNOWLEDGE_BASIS', class: 'STRUCTURAL', severity: 'ERROR',
+      targets: [target('Evidence', evidence.id)],
+      message: `Evidence ${evidence.id} lacks knowledgeBasis required for v0.3+ FULL validation.`,
+    })
     if (evidence.claimIds.length === 0) {
       out.push({
         code: 'REFERENTIAL/ORPHANED_ARTIFACT',

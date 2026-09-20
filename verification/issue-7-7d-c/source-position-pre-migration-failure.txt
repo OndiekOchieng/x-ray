@@ -1,0 +1,16 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/source-position-version-checks.ts
+15c: added/removed/changed SourcePosition and KnowledgeBasis claim impact PASS
+15c: opaque workspace state retains candidate collection, basis, order and identity PASS
+AssertionError [ERR_ASSERTION]: The input did not match the regular expression /injected after snapshot rows/. Input:
+
+'error: relation "run_graduations" does not exist'
+
+    at async run (file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/source-position-version-checks.ts:100:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: [N],
+  expected: /injected after snapshot rows/,
+  operator: 'rejects',
+  diff: 'simple'
+}
+[ELIFECYCLE] Command failed with exit code 1.
