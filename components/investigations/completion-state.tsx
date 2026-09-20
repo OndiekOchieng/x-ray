@@ -39,7 +39,7 @@ export function CompletionState({ investigation }: { investigation: Investigatio
       </div>
 
       <Link
-        href={`/xray/${investigation.investigationId}`}
+        href={`/investigations/${investigation.investigationId}`}
         className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
       >
         Explore the evidence

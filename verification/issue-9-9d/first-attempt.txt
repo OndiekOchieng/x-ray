@@ -1,0 +1,40 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/publication/public-route-checks.ts
+
+X-Ray public routes and projection cache — 9d
+========================================================================================
+ ok   1 · unknown alias is not-found with no draft hint                               
+ ok   2 · the draft lineage at its real would-be slug behaves identically             
+ ok   3 · a published alias temporarily redirects to the exact version                
+ ok   4 · the redirect target ignores a newer committed but unpublished version       
+ ok   5 · an exact published version renders at 200                                   
+ ok   6 · an exact never-published version is not-found                               
+ ok   19 · withdrawal shows on the very next request, with no invalidation            
+ ok   21 · the alias changes on the next request too, with no invalidation            
+ ok   20 · republication serves the same immutable projection again                   
+ ok   9 · a withdrawn historical version is 410 while the alias still redirects       
+ ok   13 · OUT_OF_SCOPE says what it means and nothing more                           
+ ok   12 · PRIVACY_HARM exposes no withdrawn graph content                            
+ ok   10 · ERRONEOUS includes the recorded correction note                            
+ ok   11 · COMPELLED does not imply an evidentiary error                              
+ ok   7/8 · a withdrawn exact version is 410 and a withdrawn head renders at the alias
+ ok   15 · an eligible BLOCKED page exposes its capability blockers                   
+ ok   16 · the disclosure comes from the persisted graduation record                  
+FAIL  17 · the cached projection contains no presentation state                         -> the projection carries a principal
+FAIL  18 · the projection is keyed by exact investigation and version                   -> two lineages project identically
+FAIL  22 · the alias redirect is temporary, never permanent                             -> a permanent status appears in the route
+ ok   23 · the canonical link points at the version URL, not the alias                
+ ok   24 · research cutoff, protocol version and version context are visible          
+ ok   25 · publishing a newer version does not alter the rendered older one           
+ ok   26 · a storage failure is a generic failure, never not-found                    
+ ok   27 · the internal explorer route is unchanged apart from its address            
+ ok   28 · no public route reaches a fixture or benchmark fallback                    
+ ok   29 · no public response declares itself permanently immutable                   
+ ok   14 · no public payload contains a raw principal id                              
+ ok   K · no public payload leaks SQL, stacks, prompts or internal ids                
+========================================================================================
+26/29 passed
+
+39 public responses inspected. The projection cache was a
+permanent memo throughout: withdrawal still took effect on the next request.
+
+[ELIFECYCLE] Command failed with exit code 1.

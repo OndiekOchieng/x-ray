@@ -43,7 +43,7 @@ export function GapDetail({ payload }: { payload: GapPayload }) {
     <AppShell>
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         <Link
-          href={`/xray/${investigationId}`}
+          href={`/investigations/${investigationId}`}
           className="mb-8 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeftIcon className="size-4" aria-hidden="true" />
@@ -311,7 +311,7 @@ export function GapDetail({ payload }: { payload: GapPayload }) {
 
             <p className="text-xs leading-5 text-muted-foreground">
               From{' '}
-              <Link href={`/xray/${investigationId}`} className="text-primary hover:underline">
+              <Link href={`/investigations/${investigationId}`} className="text-primary hover:underline">
                 {investigationTitle}
               </Link>
             </p>

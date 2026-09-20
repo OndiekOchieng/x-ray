@@ -9,6 +9,16 @@ import { ClaimsDisplay } from '@/components/investigations/claims-display'
 import { CompletionState } from '@/components/investigations/completion-state'
 import { getProgressPayload } from '@/lib/xray/investigations'
 
+/**
+ * Dynamic, exactly as before Cache Components was enabled.
+ *
+ * This route already rendered per request. `instant = false` declares that
+ * under the new prerender rules rather than changing what it does: the #9
+ * cache boundary is the immutable public version projection, not an
+ * internal page.
+ */
+export const instant = false
+
 export default async function InvestigationPage({
   params,
 }: {

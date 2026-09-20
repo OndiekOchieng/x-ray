@@ -89,7 +89,7 @@ export function InvestigationLibrary({ entries }: { entries: LibraryEntryView[] 
                       <h2 className="mt-3 text-2xl font-semibold">{item.title}</h2>
                     </div>
                     <Link
-                      href={`/xray/${item.investigationId}`}
+                      href={`/investigations/${item.investigationId}`}
                       className="inline-flex items-center gap-2 rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background"
                     >
                       Explore X-Ray
