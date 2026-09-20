@@ -38,6 +38,27 @@ export async function readLatestGraduation(db: SnapshotDatabase, executionRunId:
     result: decodeValue(rows[0].result as Encoded) as GraduationResult }
 }
 
+/**
+ * One exact assessment, by its index.
+ *
+ * Distinct from `readLatestGraduation` on purpose. Publication binds to an
+ * exact `(run, index)` pair, and assessments are append-only — so "latest" and
+ * "the one that authorized this publication" diverge the moment a further
+ * assessment is appended. A reader is entitled to the assessment that actually
+ * authorized what they are looking at.
+ */
+export async function readGraduation(
+  db: SnapshotDatabase, executionRunId: string, assessmentIndex: number,
+): Promise<GraduationAuditRecord | undefined> {
+  const rows = (await db.query(
+    `SELECT assessment_index,candidate_digest,result FROM run_graduations
+      WHERE execution_run_id=$1 AND assessment_index=$2`, [executionRunId, assessmentIndex])).rows
+  if (rows.length !== 1) return undefined
+  return { executionRunId, assessmentIndex: rows[0].assessment_index as number,
+    candidateDigest: rows[0].candidate_digest as string,
+    result: decodeValue(rows[0].result as Encoded) as GraduationResult }
+}
+
 /** Append an assessment for the current workspace graph; never replace prior assessments. */
 export async function appendGraduationAudit(
   db: SnapshotDatabase, executionRunId: string, candidate: XRayGraph, result: GraduationResult,

@@ -24,7 +24,7 @@ import {
 } from '@/lib/xray/selectors'
 import { claimSummaryViews, type ClaimSummaryView } from '@/lib/xray/projections'
 import { InvestigationService } from '@/lib/xray/application/investigation-service'
-import { readLatestGraduation } from '@/lib/xray/persistence/graduation-audit'
+import { readGraduation } from '@/lib/xray/persistence/graduation-audit'
 import { getDatabase } from '@/lib/xray/application/runtime'
 import type { XRayGraphInput } from '@/lib/xray/selectors'
 
@@ -134,13 +134,28 @@ export interface AssuranceDisclosure {
   unavailableChecks: readonly string[]
 }
 
+export class MissingAuthorizingAssessment extends Error {
+  constructor(executionRunId: string, graduationIndex: number) {
+    super(`Assessment ${graduationIndex} of ${executionRunId} is missing`)
+    this.name = 'MissingAuthorizingAssessment'
+  }
+}
+
 export async function loadAssuranceDisclosure(
   executionRunId: string,
   graduationIndex: number,
 ): Promise<AssuranceDisclosure> {
-  const record = await readLatestGraduation(await getDatabase(), executionRunId)
-  if (record === undefined || record.assessmentIndex !== graduationIndex)
-    return { verdict: 'BLOCKED', unavailableChecks: [] }
+  // The exact row, never the latest. Assessments are append-only, so a later
+  // one can exist; it did not authorize this publication and must not speak for
+  // it.
+  const record = await readGraduation(await getDatabase(), executionRunId, graduationIndex)
+
+  // An absent authorizing assessment is an integrity failure, not an absence of
+  // blockers. Returning an empty disclosure would present a version whose
+  // assurance we cannot account for as though there were nothing to report —
+  // and then cache that for as long as the cache holds.
+  if (record === undefined) throw new MissingAuthorizingAssessment(executionRunId, graduationIndex)
+
   return {
     verdict: record.result.verdict,
     unavailableChecks: record.result.blockers.map((blocker) => blocker.title),

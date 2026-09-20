@@ -19,8 +19,8 @@ X-Ray public routes and projection cache — 9d
  ok   7/8 · a withdrawn exact version is 410 and a withdrawn head renders at the alias
  ok   15 · an eligible BLOCKED page exposes its capability blockers                   
  ok   16 · the disclosure comes from the persisted graduation record                  
- ok   16 · a later appended assessment cannot displace the authorizing one            
- ok   16 · a missing authorizing assessment is a failure, not invented assurance      
+FAIL  16 · a later appended assessment cannot displace the authorizing one              -> the later assessment displaced the authorizing one (0 blockers)
+FAIL  16 · a missing authorizing assessment is a failure, not invented assurance        -> an absent assessment produced {"verdict":"BLOCKED","unavailableChecks":[]} instead of failing
  ok   17 · the cached projection contains no presentation state                       
  ok   18 · the projection is keyed by exact investigation and version                 
  ok   22 · the alias redirect is temporary, never permanent                           
@@ -34,8 +34,9 @@ X-Ray public routes and projection cache — 9d
  ok   14 · no public payload contains a raw principal id                              
  ok   K · no public payload leaks SQL, stacks, prompts or internal ids                
 ========================================================================================
-31/31 passed
+29/31 passed
 
-40 public responses inspected. The projection cache was a
+39 public responses inspected. The projection cache was a
 permanent memo throughout: withdrawal still took effect on the next request.
 
+[ELIFECYCLE] Command failed with exit code 1.

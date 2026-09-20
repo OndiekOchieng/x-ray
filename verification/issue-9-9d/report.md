@@ -108,9 +108,47 @@ misses, a repeat hits.
 Repeating the prose-versus-field-name error twice is worth recording: the fix is to
 assert over structure, not over rendered text, whenever canonical content is in scope.
 
+## Remediation — the assurance lookup was not exact
+
+Review found a real defect, and it was the worst kind: it invented assurance.
+
+`loadAssuranceDisclosure` called `readLatestGraduation(runId)` and then checked whether
+that latest row *happened* to carry the requested index. Two things follow, and both
+were reproduced before fixing (`exact-assessment-failure.txt`):
+
+```
+FAIL  a later appended assessment cannot displace the authorizing one
+        -> the later assessment displaced the authorizing one (0 blockers)
+FAIL  a missing authorizing assessment is a failure, not invented assurance
+        -> produced {"verdict":"BLOCKED","unavailableChecks":[]} instead of failing
+```
+
+Assessments are append-only, so "latest" and "the one that authorized this publication"
+diverge the moment another is appended. When the index did not match, the fallback
+returned `BLOCKED` **with an empty blocker list** — which renders as no disclosure
+section at all. A published version whose assurance could not be accounted for would
+have been shown as though there were nothing to report, and then cached under
+`cacheLife('max')`.
+
+That is the exact failure this system exists to prevent, arriving through a defensive
+default. 9b bound publication to an exact `(executionRunId, graduationIndex)` pair
+precisely so a reader gets the assessment that actually authorized what they are
+looking at.
+
+**The fix.** `readGraduation(db, runId, index)` is added beside `readLatestGraduation`
+as an exact lookup, and the disclosure uses it. A missing exact row now throws
+`MissingAuthorizingAssessment`, which the route turns into a generic 503 — an integrity
+failure, never invented assurance and never a cached empty disclosure.
+
+No schema change was needed, as the review expected.
+
+**The proof.** Assessment 0 authorizes publication and records blockers; assessment 1 is
+then appended to the same run carrying none. The page must still disclose assessment 0's
+blockers, and a request for an absent assessment must fail rather than answer.
+
 ## Checks
 
-29 scenarios in `pnpm check:public-routes` (`final-gate.txt`), covering every released
+31 scenarios in `pnpm check:public-routes` (`final-gate.txt`), covering every released
 proof: not-found with no draft hint and the real would-be draft slug behaving
 identically; temporary redirect ignoring a newer committed-but-unpublished version;
 exact published rendering; never-published and malformed segments not-found; withdrawn

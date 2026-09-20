@@ -323,6 +323,39 @@ async function main(): Promise<void> {
       return eventColumns.n === 0 ? null : 'blockers were copied into publication state'
     })
 
+    await check('16 · a later appended assessment cannot displace the authorizing one', async () => {
+      // 9b binds publication to an exact (run, index) pair. Appending a further
+      // assessment must not change what an already-published version discloses:
+      // the reader is entitled to the assessment that actually authorized it.
+      const authorizing = await loadAssuranceDisclosure('RUN-RLIVE', 0)
+      if (authorizing.unavailableChecks.length === 0) return 'assessment 0 records no blockers'
+
+      // Append assessment 1 to the same run, carrying no blockers.
+      await db.query(
+        `INSERT INTO run_graduations(execution_run_id,assessment_index,investigation_id,verdict,
+           graph_fingerprint,candidate_digest,assessed_at,result)
+         SELECT execution_run_id,1,investigation_id,'PASS',graph_fingerprint,candidate_digest,
+                assessed_at, jsonb_set(result, '{value,blockers}', '[]'::jsonb)
+           FROM run_graduations WHERE execution_run_id='RUN-RLIVE' AND assessment_index=0`)
+
+      const exactRow = await loadAssuranceDisclosure('RUN-RLIVE', 0)
+      if (exactRow.unavailableChecks.length !== authorizing.unavailableChecks.length)
+        return `the later assessment displaced the authorizing one (${exactRow.unavailableChecks.length} blockers)`
+      const res = await exact(slug, 'v2')
+      const missing = authorizing.unavailableChecks.filter((title) => !res.body.includes(title))
+      return missing.length === 0
+        ? null : `${missing.length} authorizing blocker(s) vanished from the page`
+    })
+
+    await check('16 · a missing authorizing assessment is a failure, not invented assurance', async () => {
+      const outcome = await loadAssuranceDisclosure('RUN-RLIVE', 99)
+        .then((r) => ({ r }), (e: unknown) => ({ e }))
+      if ('r' in outcome)
+        return `an absent assessment produced ${JSON.stringify(outcome.r)} instead of failing`
+      return /RUN-RLIVE|assessment/i.test((outcome.e as Error).message)
+        ? null : `failed with ${(outcome.e as Error).message}`
+    })
+
     // -- 17/18: cache contents and key ---------------------------------------------------
     await check('17 · the cached projection contains no presentation state', async () => {
       const view = await loadPublicVersionProjection(LIVE, 2)
