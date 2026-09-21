@@ -62,7 +62,6 @@ export function candidateNext(v1: XRayGraph, version: number): XRayGraph {
       addedSourceIds: [`SRC-NEW-${version}`], addedEvidenceIds: [`EV-NEW-${version}`],
       reEvaluatedClaimIds: ['C001', 'C002'],
     },
-    atiRequests: [],
   }
   input.sources = [...input.sources, { ...input.sources[1], id: `SRC-NEW-${version}`,
     title: `Additional received source v${version}`, retrievedAt: '2026-09-13', publishedAt: '2026-09-12' }]

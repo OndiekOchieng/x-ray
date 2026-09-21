@@ -476,20 +476,10 @@ export function validateStructure(graph: XRayGraph, mode: ValidationMode = 'FULL
     requireIso('StageRun', run.id, 'completedAt', run.completedAt, false)
   }
 
-  for (const request of graph.atiRequests) {
-    claimId('ATIRequest', request.id)
-    requireString('ATIRequest', request.id, 'gapId', request.gapId)
-    requireString('ATIRequest', request.id, 'holdingInstitution', request.holdingInstitution)
-    requireEnum('ATIRequest', request.id, 'status', request.status, [
-      'DRAFT',
-      'EXPORTED',
-      'SUBMITTED',
-      'ACKNOWLEDGED',
-      'RESPONDED',
-      'CLOSED',
-    ])
-    requireIso('ATIRequest', request.id, 'draftedAt', request.draftedAt, true)
-  }
+  // No ATI request shape checks: the graph no longer carries requests, and the
+  // shape of a stored one is the database's (`ati_request_revisions` requires a
+  // non-blank institution, an enumerated custody basis and a stated rationale
+  // for confirmed custody) with the sequences checked at the command boundary.
 
   return out
 }

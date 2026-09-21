@@ -37,7 +37,7 @@ function candidate(tag: string): XRayGraph {
     claims: clone(base.claims), sources: clone(base.sources), evidence: clone(base.evidence),
     sourceDependencies: clone(base.sourceDependencies), evidenceProvenance: clone(base.evidenceProvenance),
     discrepancies: clone(base.discrepancies), disconfirmations: clone(base.disconfirmations),
-    findings: clone(base.findings), gaps: clone(base.gaps), atiRequests: [],
+    findings: clone(base.findings), gaps: clone(base.gaps),
   }
   input.sources = [...input.sources, { ...input.sources[1], id: 'SRC-NATIVE', title: `Independent native candidate ${tag}`,
     retrievedAt: '2026-09-13', publishedAt: '2026-09-12' }]

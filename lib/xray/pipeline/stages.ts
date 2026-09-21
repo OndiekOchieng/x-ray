@@ -71,9 +71,11 @@ export function researchStageIndex(stage: ResearchStage): number {
 /**
  * Canonical collections a stage may write.
  *
- * `atiRequests` is deliberately absent. ATI requests are produced by the
- * resolution adapter (ADR-0008) over an already-graduated graph, not by
- * research. Their lifecycle is #10.
+ * ATI requests are absent, and no longer absent by omission: the graph does
+ * not carry them at all (#10 C1/C2/C7). A request is an action taken about a
+ * graduated version, and its own state keeps moving after that version is
+ * frozen, so no stage could own it. Their lifecycle is #10's command boundary
+ * and its append-only history.
  *
  * `investigation` and `version` are absent for a different reason: the
  * pipeline never writes them. `currentVersion` is published history owned by

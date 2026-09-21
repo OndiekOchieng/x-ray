@@ -23,7 +23,7 @@ function candidateV2() {
     evidence: clone(fixture.evidence), sourceDependencies: clone(fixture.sourceDependencies),
     evidenceProvenance: clone(fixture.evidenceProvenance),
     discrepancies: clone(fixture.discrepancies), disconfirmations: clone(fixture.disconfirmations),
-    findings: clone(fixture.findings), gaps: clone(fixture.gaps), atiRequests: [],
+    findings: clone(fixture.findings), gaps: clone(fixture.gaps),
   }
   const newSource = { ...input.sources[1], id: 'SRC-NEW', title: 'Additional received source',
     retrievedAt: '2026-09-13', publishedAt: '2026-09-12' }

@@ -43,9 +43,61 @@ the exact version that gap belongs to — the composite foreign key on
 the `origin_ati_eligible` column is constrained `true` so an ineligible gap
 cannot be reached through it.
 
-A request may request only records the gap names. `XR-INV-009` makes this a
-validator `ERROR`: *"A request may not invent the name of a record the gap
-ledger has not established."*
+A request may request only records the gap names: *"A request may not invent
+the name of a record the gap ledger has not established."*
+
+---
+
+## Where eligibility is enforced
+
+**Recorded 2026-09-21 · #10 slice 10b.** The request half of `XR-INV-009` is
+enforced at the **action command boundary** (`application/ati-service.ts`), not
+in graph validation. `ATIRequest` is not part of `XRayGraph` (#10 C1/C2/C7), so
+there was no collection left for a graph validator to inspect.
+
+Every create and every revision loads the **exact immutable origin snapshot**
+and resolves the exact gap:
+
+```text
+(investigationId, originVersion)  →  readSnapshot  →  gapId
+```
+
+and refuses the request when:
+
+| Condition | Rejection |
+| --- | --- |
+| investigation or committed version absent | `ATI/ORIGIN_SNAPSHOT_NOT_FOUND` |
+| gap absent from that exact snapshot | `ATI/ORIGIN_GAP_NOT_FOUND` |
+| gap is not `PUBLIC_RECORD_REQUEST` / `atiEligible` | `XR-INV-009/ATI_REQUEST_ON_INELIGIBLE_GAP` |
+| a requested record the gap does not name | `XR-INV-009/ATI_REQUESTED_RECORD_NOT_IN_GAP` |
+| no record requested at all | `ATI/NO_RECORDS_REQUESTED` |
+| no holder context, and none supplied | `ATI/HOLDER_CONTEXT_MISSING` |
+| human `CONFIRMED` custody with no stated basis | `ATI/CUSTODY_BASIS_RATIONALE_REQUIRED` |
+
+The two `XR-INV-009/...` codes are the ones graph validation used for the same
+two conditions. The invariant moved; it did not lapse.
+
+**Anchored, not current.** Validation is against the request's own origin
+version, never the latest committed state:
+
+```text
+request anchored to v2
+v3 names one further resolving record
+revise the old request to ask for it   → rejected
+new request anchored to v3 asking for it → accepted
+```
+
+A later version cannot retroactively enlarge what an older request was allowed
+to ask for (#10 C4). Membership is exact string membership in
+`Gap.resolvingEvidence` — no normalization, no semantic matching. A human may
+reword the prose around a request freely; the records it names are the gap
+ledger's words.
+
+**Holder context is derived, never invented.** A normal generated draft copies
+institution, office and custody basis from `gap.likelyHolder`. Where the gap
+names no holder the command refuses rather than addressing a plausible
+ministry; explicit human-supplied context is the way forward, and a
+human-supplied `CONFIRMED` basis must say on what basis custody was confirmed.
 
 ---
 
@@ -69,6 +121,38 @@ draft as a filed request.
 
 An export freezes an exact revision, so editing after export produces a new
 revision rather than changing what was already sent.
+
+### Sequences the command boundary refuses
+
+**Recorded 2026-09-21 · #10 slice 10b.** Append-only means no mutation; it does
+not mean no sequel, so the database would happily record an acknowledgement of
+a request nobody filed. That is the command layer's job:
+
+- an `EXPORT` must name a revision that exists;
+- a `SUBMIT` must name an event that was actually an `EXPORT`, and is never
+  inferred from one — it takes an explicit human assertion;
+- an `ACKNOWLEDGE` requires at least one `SUBMIT`;
+- `CLOSE` is available only from a post-draft state, requires a stated reason,
+  and nothing may follow it. Reopening is not designed, so a post-close
+  revision, export, submission, acknowledgement or second close is refused.
+
+Sequence is authoritative for ordering. Beyond that, only relationships the
+system can prove are checked: an event may not be stamped before a predecessor
+it names — a submission before its export, an export before the revision it
+freezes, an acknowledgement before the submission it presupposes. No attempt is
+made at global wall-clock truth.
+
+### Ordinals and sequences are allocated by the service
+
+Requests are `UNIQUE (investigation_id, ordinal)` and every revision, event and
+response sequence is `MAX(...) + 1`, which two concurrent callers can read
+identically. So the caller never chooses one: a create allocates under a row
+lock on the investigation, an append under a row lock on the request.
+
+**Honest limitation.** PGlite runs a single connection. The gates prove the
+lock is taken and the outcome deterministic; native concurrent row-lock
+behaviour needs a real PostgreSQL gate, which remains unrun — the same
+limitation #7 and #9 record.
 
 ---
 

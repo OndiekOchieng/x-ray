@@ -189,12 +189,10 @@ export function validateReferences(
     }
   }
 
-  // --- ATI requests --------------------------------------------------------
-  for (const r of graph.atiRequests) {
-    const from = target('ATIRequest', r.id)
-    if (!gaps.has(r.gapId)) dangling(from, 'gapId', 'Gap', r.gapId)
-    check(from, 'receivedSourceIds', 'Source', r.receivedSourceIds, sources)
-  }
+  // ATI requests are not graph artifacts (#10 C1/C2/C7), so there is nothing
+  // here to dereference. Their origin gap is a composite foreign key in
+  // `ati_requests`, and their accepted source ids are checked against a
+  // committed version by the acceptance trigger 10a added.
 
   // --- Stage runs / version ------------------------------------------------
   for (const run of graph.investigation.stageRuns) {

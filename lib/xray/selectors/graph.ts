@@ -43,7 +43,6 @@
  */
 
 import type {
-  ATIRequest,
   Claim,
   ClaimId,
   Disconfirmation,
@@ -75,7 +74,6 @@ export interface XRayGraphInput {
   disconfirmations: readonly Disconfirmation[]
   findings: readonly Finding[]
   gaps: readonly Gap[]
-  atiRequests?: readonly ATIRequest[]
 }
 
 /** Lookup indexes. Built from the arrays; never a separate source of truth. */
@@ -107,7 +105,6 @@ interface GraphIndex {
 export interface XRayGraph extends XRayGraphInput {
   readonly sourcePositions: readonly SourcePosition[]
   readonly evidenceProvenance: readonly EvidenceProvenance[]
-  readonly atiRequests: readonly ATIRequest[]
   readonly index: GraphIndex
 }
 
@@ -170,7 +167,6 @@ export function createXRayGraph(input: XRayGraphInput): XRayGraph {
     ...input,
     sourcePositions,
     evidenceProvenance: input.evidenceProvenance ?? [],
-    atiRequests: input.atiRequests ?? [],
     index: {
       claim: new Map(input.claims.map((c) => [c.id, c])),
       source: new Map(input.sources.map((s) => [s.id, s])),

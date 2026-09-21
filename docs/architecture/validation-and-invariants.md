@@ -158,6 +158,47 @@ PUBLIC_RECORD_REQUEST
 
 makes the gap eligible for ATI generation.
 
+> ### Amendment — the invariant is enforced in two places
+>
+> **Recorded:** 2026-09-21 · #10 slice 10b
+>
+> XR-INV-009 has two halves and they are no longer enforced by the same layer.
+>
+> **The gap half** — `atiEligible` holds exactly when `resolutionPath` is
+> `PUBLIC_RECORD_REQUEST` — stays in graph validation
+> (`validation/epistemic.ts`, `XR-INV-009/ATI_ELIGIBILITY_MISMATCH`).
+> Eligibility is a property of a gap, and gaps are version-scoped research
+> state. The domain also binds the two fields in a discriminated union, so a
+> mismatched gap does not typecheck.
+>
+> **The request half** — a request may only target an eligible gap, and may
+> only ask for records that gap names — moved to the ATI action command
+> boundary (`application/ati-service.ts`), where it is checked against the
+> exact frozen origin snapshot `(investigationId, originVersion)`:
+>
+> ```text
+> XR-INV-009/ATI_REQUEST_ON_INELIGIBLE_GAP
+> XR-INV-009/ATI_REQUESTED_RECORD_NOT_IN_GAP
+> ```
+>
+> The codes are deliberately unchanged, so the invariant reads as relocated
+> rather than lapsed.
+>
+> It moved because the graph stopped carrying requests at all (#10 C1/C2/C7,
+> ADR-0017). A request is an action taken *about* a frozen version and its own
+> state keeps changing after that version is frozen, so it was never
+> version-scoped research state — and a validator over a collection nothing
+> populates enforces nothing.
+>
+> Membership is **exact string membership** in `Gap.resolvingEvidence`. No
+> normalization and no semantic matching: a reworded record name is a record
+> the gap ledger has not established.
+>
+> Validation is anchored, not current. A request anchored to v2 is validated
+> against v2 even after v3 exists, so a later version cannot retroactively
+> enlarge what an older request was allowed to ask for. Asking for a record v3
+> introduced requires a new request anchored to v3.
+
 ---
 
 ## XR-INV-010 — Historical Preservation

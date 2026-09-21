@@ -30,12 +30,12 @@ export {
   INVESTIGATION_ID,
 } from './investigation'
 
-/**
- * No ATIRequest objects exist in this fixture.
+/*
+ * There is no ATIRequest collection here, and there is nowhere for one to go.
  *
  * Neither benchmark run executed the action stage — both stopped after stage 9
  * — so there is no frozen evidence for a drafted request. GAP-001, GAP-002,
- * GAP-004, GAP-005 and GAP-006 are ATI-eligible; GAP-003 is not. Eligibility is
- * not a reason to manufacture a request.
+ * GAP-004, GAP-005 and GAP-006 are ATI-eligible; GAP-003 is not. Eligibility
+ * was never a reason to manufacture a request, and since #10 removed requests
+ * from the evidence graph a fixture could not carry one anyway.
  */
-export const atiRequests: readonly [] = []

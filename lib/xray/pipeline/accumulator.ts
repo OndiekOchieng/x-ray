@@ -167,7 +167,7 @@ export class GraphAccumulator {
       ...(this.version ? { version: this.version } : {}),
       ...(collections as unknown as Omit<
         XRayGraphInput,
-        'investigation' | 'version' | 'atiRequests' | 'sourcePositions'
+        'investigation' | 'version' | 'sourcePositions'
       >),
       sourcePositions: sourcePositions as XRayGraphInput['sourcePositions'],
     }

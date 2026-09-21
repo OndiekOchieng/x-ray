@@ -109,9 +109,11 @@ export const INVARIANT_COVERAGE: readonly InvariantCoverage[] = [
   {
     id: 'XR-INV-009',
     name: 'Action Eligibility',
-    level: 'DETERMINISTIC',
+    level: 'PARTIAL',
     enforced:
-      'atiEligible holds exactly when resolutionPath is PUBLIC_RECORD_REQUEST; an ATIRequest may only target an eligible gap and may only request records that gap names.',
+      'atiEligible holds exactly when resolutionPath is PUBLIC_RECORD_REQUEST. This is a property of a gap, and gaps are version-scoped research state.',
+    notEnforced:
+      'The request half — that a request targets an eligible gap and asks only for records that gap names — is enforced at the ATI command boundary (application/ati-service.ts) against the exact frozen origin snapshot, emitting the same two violation codes. It is not enforceable here because the graph does not carry requests: an action taken about a frozen version keeps changing after that version is frozen (#10 C1/C2/C7).',
   },
   {
     id: 'XR-INV-010',

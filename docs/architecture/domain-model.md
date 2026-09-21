@@ -743,6 +743,28 @@ resolutionPath === PUBLIC_RECORD_REQUEST
 
 ## ATIRequest
 
+> ### Amendment — ATIRequest is a read model, not graph state
+>
+> **Recorded:** 2026-09-21 · #10 slice 10b
+>
+> `ATIRequest` is no longer a collection on `XRayGraph`. The immutable graph
+> holds version-scoped research state only; a request is an action taken about
+> a version, its status changes with no new version, and a frozen snapshot
+> cannot hold a fact that keeps moving (#10 C1/C2/C7, ADR-0017).
+>
+> The interface below survives as a **derived read model**. Its canonical
+> record is the append-only action history in `ati_requests`,
+> `ati_request_revisions`, `ati_request_events`, `ati_responses`,
+> `ati_response_intakes` and `ati_intake_source_acceptances`;
+> `application/ati-read-model.ts` projects that history into this shape on
+> demand. `status`, `draftedAt`, `submittedAt`, `respondedAt` and
+> `receivedSourceIds` are all computed, never stored as authoritative facts.
+>
+> Two things the shape below cannot carry, and which the projection therefore
+> adds rather than dropping: the **origin version** a request is anchored to,
+> and the **custody basis** of its addressee. A request whose addressee was
+> inferred must stay visibly inferred (#10 C5).
+
 ```ts
 interface ATIRequest {
   id: string;

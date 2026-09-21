@@ -28,7 +28,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { createXRayGraph, type XRayGraph, type XRayGraphInput } from '@/lib/xray/selectors'
 import { assessGraduation } from '@/lib/xray/acceptance'
 import { XRAY_KE_001_ACCEPTANCE } from '@/lib/xray/fixtures/xray-ke-001/acceptance'
-import type { ViolationCode } from '@/lib/xray/validation'
+import { validateXRayGraph, type ViolationCode } from '@/lib/xray/validation'
 import { readSnapshot, writeInitialSnapshot } from '@/lib/xray/persistence/snapshot'
 import { commitNextVersion } from '@/lib/xray/persistence/version-commit'
 import { prepareAssessedRun } from '@/lib/xray/persistence/graduation-check-support'
@@ -523,6 +523,48 @@ async function main(): Promise<void> {
         'SELECT count(*)::int AS n FROM gaps WHERE investigation_id=$1', [INV])).rows
       return canonical[0].n === gapRows.length * 3
         ? null : `${canonical[0].n} gap rows across three versions`
+    })
+
+    // -- 24 ------------------------------------------------------------------
+    await check('24 · XRayGraph no longer carries ATI requests', async () => {
+      // A committed snapshot read back through the normal path.
+      const graph = await readSnapshot(db, INV, 2) as unknown as Record<string, unknown>
+      if ('atiRequests' in graph) return 'a read snapshot still carries an atiRequests collection'
+      const built = createXRayGraph(seeded.candidate as XRayGraphInput) as unknown as Record<string, unknown>
+      if ('atiRequests' in built) return 'createXRayGraph still normalizes an atiRequests collection'
+      if ('atiRequests' in (built.index as Record<string, unknown>))
+        return 'the graph index still holds an ATI request lookup'
+      // And the aggregate's own declaration no longer offers the field.
+      const source = stripComments(readFileSync(
+        new URL('../selectors/graph.ts', import.meta.url), 'utf8'))
+      return /\batiRequests\b/.test(source)
+        ? 'selectors/graph.ts still names an atiRequests collection' : null
+    })
+
+    // -- 25 ------------------------------------------------------------------
+    await check('25 · referential and epistemic validation no longer inspect ATI requests', async () => {
+      for (const file of ['referential.ts', 'epistemic.ts', 'structural.ts']) {
+        const source = stripComments(readFileSync(
+          new URL(`../validation/${file}`, import.meta.url), 'utf8'))
+        if (/\batiRequests\b/.test(source))
+          return `validation/${file} still reads a request collection`
+        for (const code of ['ATI_REQUEST_ON_INELIGIBLE_GAP', 'ATI_REQUESTED_RECORD_NOT_IN_GAP'])
+          if (source.includes(code)) return `validation/${file} still emits ${code}`
+      }
+      // The gap half of XR-INV-009 must still fire, and only that half. A gap
+      // whose eligibility contradicts its resolution path is still rejected.
+      const graph = await readSnapshot(db, INV, 2)
+      const mismatched = createXRayGraph({
+        ...(graph as XRayGraphInput),
+        gaps: graph.gaps.map((gap) => gap.atiEligible
+          ? gap
+          : ({ ...gap, atiEligible: true } as unknown as typeof gap)),
+      })
+      const codes = validateXRayGraph(mismatched, { mode: 'FULL' })
+        .violations.filter((violation) => violation.invariant === 'XR-INV-009')
+        .map((violation) => violation.code)
+      return codes.length > 0 && codes.every((code) => code === 'XR-INV-009/ATI_ELIGIBILITY_MISMATCH')
+        ? null : `XR-INV-009 emitted ${JSON.stringify([...new Set(codes)])}`
     })
 
     // -- 26 ------------------------------------------------------------------

@@ -171,6 +171,17 @@ request; `EXPORTED` never reports as `SUBMITTED`; submission without an export
 is refused; closure changes no gap; unsupplied metadata stays absent rather than
 being defaulted.
 
+**Delivered 2026-09-21** — `application/ati-service.ts`,
+`application/ati-read-model.ts`, `pnpm check:ati-commands` 30/30.
+
+As released, 10b took on a second, coupled responsibility: removing ATI
+lifecycle state from `XRayGraph` once equivalent command-level XR-INV-009
+enforcement was proven. Both are done, ordered so enforcement never lapsed
+(`feat(ati): add action command boundary` then `refactor(graph): remove ATI
+lifecycle from evidence graph`); this closes **C1**, **C2**, **C4**, **C5** and
+**C7**. `recordResponse` stayed a persistence primitive — the response-intake
+command and API semantics are 10c's.
+
 ---
 
 ## 10c — Response intake

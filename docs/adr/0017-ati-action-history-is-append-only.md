@@ -107,3 +107,45 @@ XR-INV-006 exists to prevent.
 
 This ADR fixes the lifecycle model. It authorises no schema, command, route or
 runtime change.
+
+---
+
+## Amendment — the command boundary, and requests leave the evidence graph
+
+**Recorded:** 2026-09-21 · #10 slice 10b
+
+Two open items above are now closed, and the model is implemented.
+
+**`ATIRequest` is not part of `XRayGraph`.** The normalized `atiRequests`
+collection is gone from `XRayGraphInput`, from `XRayGraph`, and from the
+referential, epistemic and structural validators; the snapshot writer's guards
+against graph-carried requests are gone with it, because there is no longer a
+field for one to arrive in. The immutable graph contains version-scoped
+research state only (#10 C1/C2/C7).
+
+The domain type survives as a **derived read model**. It keeps its three
+timestamps, and they are computed from history rather than stored: `draftedAt`
+from the first revision, `submittedAt` from a `SUBMIT` event and from nothing
+else, `respondedAt` from the first response. An exported request that nobody
+filed has no `submittedAt` at all. The projection
+(`application/ati-read-model.ts`) also carries the origin version and the
+custody basis, which the graph shape could not hold — so holder office and
+`CustodyBasis` live on each immutable revision, copied in rather than
+referenced, and an export can always answer what addressee and basis it
+presented at the time.
+
+**XR-INV-009's request half moved with it**, to the action command boundary
+(`application/ati-service.ts`), validated against the exact frozen origin
+snapshot and emitting the same two violation codes graph validation used. The
+gap half — eligibility agreeing with resolution path — stays in graph
+validation, because it is a property of a gap.
+
+The handoff was ordered so that enforcement never lapsed: command-level
+enforcement was proven passing in one commit, and only the commit after it
+removed the graph-level checks. Evidence in `verification/issue-10-10b/`.
+
+**The command layer also owns what the database cannot say.** Append-only means
+no mutation, not no sequel, so semantically impossible sequences — a submission
+inferred from an export, an acknowledgement of an unfiled request, anything
+after a close — are refused there. And it allocates every ordinal and sequence
+under a row lock, so no caller can collide on one.

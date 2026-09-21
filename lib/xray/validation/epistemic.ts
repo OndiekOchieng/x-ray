@@ -682,36 +682,20 @@ export function validateEpistemics(
     })
   }
 
-  const gapById = new Map(graph.gaps.map((g) => [g.id, g]))
-  for (const request of graph.atiRequests) {
-    const gap = gapById.get(request.gapId)
-    if (!gap) continue
-    if (!gap.atiEligible) {
-      out.push({
-        code: 'XR-INV-009/ATI_REQUEST_ON_INELIGIBLE_GAP',
-        invariant: 'XR-INV-009',
-        class: 'EPISTEMIC',
-        severity: 'ERROR',
-        targets: [target('ATIRequest', request.id), target('Gap', gap.id)],
-        message: `ATIRequest ${request.id} targets gap ${gap.id}, which is not eligible for an information request (${gap.resolutionPath}).`,
-        detail: { requestId: request.id, gapId: gap.id, resolutionPath: gap.resolutionPath },
-      })
-    }
-    const invented = request.requestedRecords.filter(
-      (record) => !gap.resolvingEvidence.includes(record),
-    )
-    if (invented.length > 0) {
-      out.push({
-        code: 'XR-INV-009/ATI_REQUESTED_RECORD_NOT_IN_GAP',
-        invariant: 'XR-INV-009',
-        class: 'EPISTEMIC',
-        severity: 'ERROR',
-        targets: [target('ATIRequest', request.id), target('Gap', gap.id)],
-        message: `ATIRequest ${request.id} requests ${invented.length} record(s) the gap does not name. A request may not invent the name of a record the gap ledger has not established.`,
-        detail: { requestId: request.id, gapId: gap.id, invented },
-      })
-    }
-  }
+  /*
+   * The request half of XR-INV-009 is NOT here any more.
+   *
+   * "A request may only target an eligible gap" and "a request may only ask
+   * for records that gap names" are enforced at the ATI command boundary
+   * (`application/ati-service.ts`), against the exact frozen origin snapshot,
+   * emitting these same two violation codes. They left because the graph
+   * stopped carrying requests at all: an action taken about a frozen version
+   * keeps changing after that version is frozen, so it was never version-scoped
+   * research state (ADR-0017, #10 C1/C2/C7).
+   *
+   * The gap half above stays, because eligibility is a property of a gap and
+   * gaps remain version-scoped.
+   */
 
   // =========================================================================
   // XR-INV-010 — Historical Preservation (numbering coherence only)

@@ -56,6 +56,11 @@ export type TargetKind =
   | 'Disconfirmation'
   | 'Finding'
   | 'Gap'
+  /**
+   * Named by the ATI command boundary, not by graph validation — requests are
+   * not graph artifacts (#10 C1/C2/C7). The kind stays in the shared
+   * vocabulary so a rejected action and a graph violation read the same way.
+   */
   | 'ATIRequest'
 
 export interface ViolationTarget {
@@ -116,7 +121,11 @@ export type ViolationCode =
   // XR-INV-008
   | 'XR-INV-008/UNRESOLVED_FINDING_WITHOUT_GAP'
   | 'XR-INV-008/GAP_NOT_REACHABLE_FROM_FINDING'
-  // XR-INV-009
+  // XR-INV-009. The first is emitted by epistemic validation over gaps. The
+  // other two are emitted by the ATI command boundary, which is where the
+  // request half of the invariant moved when requests left the graph — the
+  // codes are deliberately unchanged, so the invariant reads as relocated
+  // rather than lapsed (#10 slice 10b).
   | 'XR-INV-009/ATI_ELIGIBILITY_MISMATCH'
   | 'XR-INV-009/ATI_REQUEST_ON_INELIGIBLE_GAP'
   | 'XR-INV-009/ATI_REQUESTED_RECORD_NOT_IN_GAP'

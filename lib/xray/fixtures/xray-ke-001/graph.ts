@@ -22,7 +22,6 @@ import { disconfirmations } from './disconfirmation'
 import { findings } from './findings'
 import { gaps } from './gaps'
 import { investigation, investigationVersion } from './investigation'
-import { atiRequests } from './index'
 
 /** Build the query aggregate for XRAY-KE-001. */
 export function createXrayKe001Graph(): XRayGraph {
@@ -38,7 +37,6 @@ export function createXrayKe001Graph(): XRayGraph {
     disconfirmations,
     findings,
     gaps,
-    atiRequests,
   })
 }
 

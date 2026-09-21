@@ -102,7 +102,6 @@ export async function insertSnapshotRows(db: SnapshotDatabase, graph: XRayGraph)
   const version = graph.version
   if (!version || version.investigationId !== investigation.id || investigation.currentVersion !== version.version)
     throw new Error('Snapshot identity/version mismatch')
-  if (graph.atiRequests.length > 0) throw new Error('ATI lifecycle records are outside immutable snapshots')
     await insert(db, 'investigation_versions', {
       investigation_id: investigation.id, version_number: version.version, created_at: version.createdAt,
       trigger: version.trigger, supersedes_version: optional(version.supersedesVersion),
@@ -157,7 +156,6 @@ export async function writeInitialSnapshot(db: SnapshotDatabase, graph: XRayGrap
   if (!version || investigation.currentVersion !== 1 || version.version !== 1 || version.investigationId !== investigation.id) {
     throw new Error('writeInitialSnapshot requires a coherent initial v1 graph')
   }
-  if (graph.atiRequests.length > 0) throw new Error('ATI lifecycle records are outside immutable snapshots')
   await db.query('BEGIN')
   try {
     await insert(db, 'investigations', { id: investigation.id })
