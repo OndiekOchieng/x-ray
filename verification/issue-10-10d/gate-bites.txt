@@ -1,0 +1,52 @@
+Adversarial runs — evidence that the 10d gate is load-bearing.
+Each variant breaks one released 10d constraint and re-runs the gate.
+
+########################################################################
+# A · carry the predecessor's completion state into the new run (against §C)
+########################################################################
+FAIL  11 · the predecessor's completion state is not carried into the new run — status RESEARCH_COMPLETE
+27/28 ATI research checks passed
+
+########################################################################
+# B · use the origin gap's claim ids as the re-evaluation set (against §K)
+########################################################################
+FAIL  happy path · one intake yields one committed successor version — threw: Every re-evaluated claim requires exactly one reason record
+FAIL  7 · the run carries a durable cause naming the exact intake and response — the run has no recorded cause
+FAIL  12/13 · material enters at the retrieval boundary and cannot be a Source — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  14 · every research stage and both control gates ran — threw: No execution run RUN-ATI-D-NONE
+FAIL  15 · added Source ids come from stage allocation, never from the intake — 0 added source(s)
+FAIL  16/18/19 · the audit set is evidence-driven, not the origin gap's claims — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  20/21/22 · an ATI_RESPONSE cause is written, read back exactly, and is a real key — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  23 · the committed version carries the ATI trigger and its exact predecessor — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  26/27 · graduation is required before commit, on #7's existing rules — threw: Expected predecessor v4, found v2
+FAIL  28/38 · the predecessor stays byte-identical and its findings addressable — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  31 · one added Source maps exactly one acceptance — 0 acceptance(s)
+FAIL  32 · several added Sources map all and only those Sources — threw: Every re-evaluated claim requires exactly one reason record
+FAIL  33 · an inherited Source can never be accepted — refused as: No graduation assessment has been recorded for this run
+FAIL  35 · an intake already accepted is not researched a second time — threw Error: Every re-evaluated claim requires exactly one reason record
+FAIL  36 · an uncommitted prior run leaves the intake processable — threw: Every re-evaluated claim requires exactly one reason record
+FAIL  37 · the run's execution audit stays restart and resume compatible — threw: No execution run RUN-ATI-D-NONE
+FAIL  B3 · BLOCKED: so the evidence-driven audit set is provably empty, not merely absent — re-evaluated ["?"]
+11/28 ATI research checks passed
+
+########################################################################
+# C · write the acceptance before the committed pointer advances (against §S)
+########################################################################
+FAIL  happy path · one intake yields one committed successor version — threw: version 3 of XRAY-ATI-RESEARCH is not committed yet; acceptance requires a committed version
+FAIL  7 · the run carries a durable cause naming the exact intake and response — the run has no recorded cause
+FAIL  12/13 · material enters at the retrieval boundary and cannot be a Source — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  14 · every research stage and both control gates ran — threw: No execution run RUN-ATI-D-NONE
+FAIL  15 · added Source ids come from stage allocation, never from the intake — 0 added source(s)
+FAIL  16/18/19 · the audit set is evidence-driven, not the origin gap's claims — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  20/21/22 · an ATI_RESPONSE cause is written, read back exactly, and is a real key — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  23 · the committed version carries the ATI trigger and its exact predecessor — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  26/27 · graduation is required before commit, on #7's existing rules — threw: Expected predecessor v4, found v2
+FAIL  28/38 · the predecessor stays byte-identical and its findings addressable — threw: No committed snapshot XRAY-ATI-RESEARCH v3
+FAIL  31 · one added Source maps exactly one acceptance — 0 acceptance(s)
+FAIL  32 · several added Sources map all and only those Sources — threw: version 4 of XRAY-ATI-RESEARCH is not committed yet; acceptance requires a committed version
+FAIL  33 · an inherited Source can never be accepted — refused as: No graduation assessment has been recorded for this run
+FAIL  35 · an intake already accepted is not researched a second time — threw error: version 4 of XRAY-ATI-RESEARCH is not committed yet; acceptance requires a committed version
+FAIL  36 · an uncommitted prior run leaves the intake processable — threw: version 4 of XRAY-ATI-RESEARCH is not committed yet; acceptance requires a committed version
+FAIL  37 · the run's execution audit stays restart and resume compatible — threw: No execution run RUN-ATI-D-NONE
+FAIL  B3 · BLOCKED: so the evidence-driven audit set is provably empty, not merely absent — re-evaluated ["?"]
+11/28 ATI research checks passed
