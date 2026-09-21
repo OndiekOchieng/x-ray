@@ -9,7 +9,7 @@ const STAGE_COPY: Record<string, { name: string; description: string }> = {
   CLASSIFY: { name: 'Classifying claims', description: 'Recording type, layer and ambiguity' },
   PLAN: { name: 'Planning evidence search', description: 'Naming the records that would settle each claim' },
   TRACE: { name: 'Tracing receipts', description: 'Locating records and extracting propositions' },
-  PROVENANCE: { name: 'Mapping provenance', description: 'Testing which records are independent' },
+  PROVENANCE: { name: 'Mapping evidence origin', description: 'Testing which records are independent' },
   DISCONFIRM: { name: 'Searching counterevidence', description: 'Trying to break the emerging findings' },
   RECONCILE: { name: 'Reconciling discrepancies', description: 'Testing scope and definition before contradiction' },
   GRADE: { name: 'Grading evidence', description: 'Recording what the evidence establishes' },

@@ -45,11 +45,33 @@ export function GapPreview({ gaps }: { gaps: GapView[] }) {
               </div>
             </div>
 
+            {/*
+              XR-INV-006 on screen: the extent of the search is what makes an
+              absence informative, and it is never a claim that the record does
+              not exist.
+            */}
+            <p className="mt-4 text-xs leading-5 text-muted-foreground">{gap.searchNote}</p>
+
+            {/*
+              What happens now, which is not the same answer for every gap.
+              A records request is offered only where a public body should
+              already hold the record; a gap awaiting a record that may not
+              exist yet says so instead (#11 slice 11c §G).
+            */}
+            <div className="mt-4">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                What happens now
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-foreground">{gap.nextStep}</p>
+            </div>
+
             <Link
               href={`/gap/${gap.gapId}`}
               className="mt-4 inline-block text-sm font-semibold text-primary hover:underline"
             >
-              See how to resolve {gap.gapId} →
+              {gap.offersRecordsRequest
+                ? 'Draft records request →'
+                : 'See what would settle this →'}
             </Link>
           </div>
         ))}

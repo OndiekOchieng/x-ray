@@ -168,10 +168,14 @@ ${view.focus ? `<p class="lead">${escapeHtml(view.focus)}</p>` : ''}
 ${disclosure}
 <dl class="facts">
 <div><dt>Claims</dt><dd>${view.counts.claims}</dd></div>
-<div><dt>Sources</dt><dd>${view.counts.sources}</dd></div>
+<div><dt>Records traced</dt><dd>${view.counts.sources}</dd></div>
+<div><dt>Independent origins</dt><dd>${view.independentOrigins}</dd></div>
 <div><dt>Evidence</dt><dd>${view.counts.evidence}</dd></div>
 <div><dt>Open gaps</dt><dd>${view.counts.openGaps}</dd></div>
 </dl>
+<p class="note">Records traced counts the publications read. Independent origins counts how many
+times an assertion was observed independently — repetition is not corroboration, so the second
+number is the one that says how well a claim is supported.</p>
 <section><h2>Claims examined</h2><ul class="claims">${claims}</ul></section>
 <footer>
 <p>This is version <strong>${view.version}</strong>, researched under protocol

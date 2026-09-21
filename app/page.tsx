@@ -30,7 +30,7 @@ export default async function Page() {
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mb-8">
             Paste a public article or source. X-Ray traces the claims, receipts,
-            provenance, contradictions and missing evidence underneath it.
+            origin, contradictions and missing evidence underneath it.
           </p>
 
           {/* Process visualization */}
@@ -40,7 +40,7 @@ export default async function Page() {
             <span className="text-muted-foreground/50">→</span>
             <span>Receipts</span>
             <span className="text-muted-foreground/50">→</span>
-            <span>Provenance</span>
+            <span>Origin</span>
             <span className="text-muted-foreground/50">→</span>
             <span>Gaps</span>
             <span className="text-muted-foreground/50">→</span>

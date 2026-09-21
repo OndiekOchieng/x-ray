@@ -64,6 +64,15 @@ function EvidenceGroup({
                   {receipt.strengthLabel}
                   {!receipt.wasObtained && ' · record not obtained'}
                 </p>
+                {/*
+                  An institution's name is not evidentiary strength. A figure
+                  attributed to an official record nobody obtained is weaker
+                  than the same figure read out of it, and a reader cannot see
+                  that from a publisher (#11 slice 11c §C).
+                */}
+                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                  {receipt.reachNote}
+                </p>
               </button>
             </li>
           ))}
@@ -76,10 +85,15 @@ function EvidenceGroup({
 export function FindingPanel({
   finding,
   isDiscovered,
+  layerLabel,
+  layerNote,
   onInspectReceipt,
 }: {
   finding: FindingView
   isDiscovered: boolean
+  /** `Observation` / `Interpretation` / `Meaning`. Optional so callers may omit it. */
+  layerLabel?: string
+  layerNote?: string
   onInspectReceipt: (evidenceId: string) => void
 }) {
   return (
@@ -88,14 +102,23 @@ export function FindingPanel({
         <div>
           <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             {isDiscovered ? 'Discovered claim' : 'Surface claim'} · {finding.claimId}
+            {layerLabel ? ` · ${layerLabel}` : ''}
           </p>
-          <h1 className="max-w-3xl text-2xl font-semibold leading-tight text-foreground md:text-3xl">
+          {/*
+            h2, not h1. The page-level h1 is the article title in the explorer
+            header; the selected claim is subordinate content within it, and two
+            h1 elements on one page leave a reader no page-level heading at all
+            (#11 slice 11c §E).
+          */}
+          <h2 className="max-w-3xl text-2xl font-semibold leading-tight text-foreground md:text-3xl">
             {finding.claimText}
-          </h1>
+          </h2>
         </div>
 
         <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-right">
-          <p className="font-mono text-[10px] uppercase tracking-wider text-primary">Finding</p>
+          <p className="font-mono text-[10px] uppercase tracking-wider text-primary">
+            Where the evidence stands
+          </p>
           <p className="mt-1 text-sm font-semibold text-foreground">{finding.statusLabel}</p>
           {/* Ordinal band. Never a percentage. */}
           <p className="font-mono text-[10px] text-muted-foreground">
@@ -103,6 +126,28 @@ export function FindingPanel({
           </p>
         </div>
       </div>
+
+      {/*
+        The status is a dated statement about what the evidence supported, not
+        a verdict X-Ray reached. Unframed, a status beside a confidence band
+        reads as a score — which is the opposite of a reversible finding
+        (#11 slice 11c §F).
+      */}
+      <p className="mt-4 text-xs leading-5 text-muted-foreground">
+        {finding.reversibilityNote}
+      </p>
+
+      {/*
+        Which of the three layers this claim is. An interpretation resting on
+        an observation is not the same thing as the observation, and a reader
+        cannot weigh what a claim is standing on without knowing which it is
+        (XR-INV-002/003).
+      */}
+      {layerNote && (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">{layerLabel}.</span> {layerNote}
+        </p>
+      )}
 
       <div className="mt-7">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

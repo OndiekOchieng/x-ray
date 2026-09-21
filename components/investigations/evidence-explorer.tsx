@@ -6,6 +6,7 @@ import { ArrowLeftIcon, ExternalLinkIcon } from 'lucide-react'
 
 import { AppShell } from '@/components/layout/app-shell'
 import type { ExplorerPayload } from '@/lib/xray/investigations'
+import { claimLayerLabel, claimLayerNote } from '@/lib/xray/projections'
 import { ClaimNavigator } from './claim-navigator'
 import { FindingPanel } from './finding-panel'
 import { EvidenceGraph } from './evidence-graph'
@@ -113,6 +114,8 @@ export function EvidenceExplorer({ payload }: { payload: ExplorerPayload }) {
               <FindingPanel
                 finding={selected.finding}
                 isDiscovered={selected.isDiscovered}
+                layerLabel={claimLayerLabel[selected.layer]}
+                layerNote={claimLayerNote[selected.layer]}
                 onInspectReceipt={setReceiptId}
               />
             )}

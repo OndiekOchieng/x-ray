@@ -1,7 +1,14 @@
 import type { ProvenanceView } from '@/lib/xray/projections'
 
 /**
- * Provenance — where an assertion actually came from.
+ * Evidence origin — where an assertion actually came from.
+ *
+ * USER-FACING NAME
+ * ================
+ * "Origin" on screen; `provenance` in the domain, the schema and the
+ * invariants. The projection type is still `ProvenanceView` and
+ * `EvidenceProvenance` is untouched — this is a wording rule for readers, not
+ * a rename (#11 slice 11c §A).
  *
  * Driven entirely by dependency edges. The v0 scaffold rendered this panel
  * behind `selected.id === 'claim-2'`, so it existed for one hardcoded claim;
@@ -20,7 +27,7 @@ export function ProvenanceClusterView({ provenance }: { provenance: ProvenanceVi
   return (
     <section className="rounded-2xl border border-border bg-card p-5 md:p-7">
       <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-        Provenance
+        Evidence origin
       </p>
       <h2 className="mt-2 text-lg font-semibold text-foreground">
         Repetition is not corroboration
@@ -81,15 +88,25 @@ export function ProvenanceClusterView({ provenance }: { provenance: ProvenanceVi
         settled. Where any origin is unresolved or was never identified, the
         panel says so rather than printing a falsely precise number.
       */}
+      {/*
+        TWO AXES, NAMED.
+        ================
+        11a found these two sentences adjacent and unlabelled, so a reader met
+        two numbers about one claim that looked like a contradiction — C001
+        reads "8 records traced · 3 repeat another record" above "8 independent
+        originating observations". Both are right about different questions:
+        the first counts documents reproducing each other, the second counts
+        propositions whose own origin resolved. Naming the axis is the fix;
+        neither count changes.
+      */}
       <div className="mt-6 border-t border-border pt-4">
         <p className="font-mono text-[11px] text-muted-foreground">
-          Across this claim: {provenance.sourceCount} records traced ·{' '}
-          {provenance.publicationCount} of them repeat another record
+          {provenance.lineageLabel}
         </p>
 
         {provenance.independence.isResolved ? (
           <p className="mt-2 font-mono text-[11px] text-foreground">
-            {provenance.independence.summaryLabel} behind this claim
+            {provenance.independence.originLabel}
           </p>
         ) : (
           <p className="mt-2 font-mono text-[11px] text-muted-foreground">
