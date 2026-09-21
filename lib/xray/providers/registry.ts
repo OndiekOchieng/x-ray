@@ -52,6 +52,10 @@ import type { ResearchAdapter } from '@/lib/xray/pipeline/retrieval-port'
 import type { ResearchModel } from '@/lib/xray/pipeline/model-port'
 import type { ReviewerModel } from '@/lib/xray/review'
 import {
+  ANTHROPIC_OPTIONAL, ANTHROPIC_REQUIRES,
+  createAnthropicResearchModel, createAnthropicReviewerModel,
+} from './anthropic'
+import {
   hostEnvironment, narrowEnvironment, readProviderSelections,
   type Environment, type ModelProviderConfig, type ModelSelection, type ModelSlot,
   type ProviderSelections, type ProviderSlot,
@@ -103,25 +107,39 @@ export interface ProviderRegistry {
 }
 
 /**
- * The entries 20a reserves.
+ * The entries the registry holds.
  *
- * All three Anthropic entries are recognised and **not implemented**: 20a is
- * composition only and may make no network call, so there is no adapter to
- * return. 20b and 20c add `create` to these same rows, and a configuration
- * that resolves `NOT_IMPLEMENTED` today resolves `AVAILABLE` then, with no
- * change to anything that consumes the registry.
+ * 20b implements the two Anthropic **model** rows, and only those. The
+ * prediction 20a made holds exactly: a configuration that resolved
+ * `NOT_IMPLEMENTED` before now resolves `AVAILABLE`, and nothing that consumes
+ * the registry changed to make that happen.
  *
- * `openai` and `custom` are reserved the same way, for the same reason: a
- * recognised name that is honest about having no implementation is useful, and
- * one that pretends otherwise is worse than an unknown name.
+ * Anthropic **retrieval** is still reserved without a factory: 20b implements
+ * the model port only, and search is 20c's. So a deployment selecting
+ * retrieval still gets `NOT_IMPLEMENTED` — the honest answer, and the reason
+ * the live journey cannot be half-claimed.
+ *
+ * `openai` is reserved the same way, for the same reason: a recognised name
+ * that is honest about having no implementation is useful, and one that
+ * pretends otherwise is worse than an unknown name.
  */
 export const DEFAULT_REGISTRY: ProviderRegistry = {
   researchModels: [
-    { provider: 'anthropic', requires: ['ANTHROPIC_API_KEY'] },
+    {
+      provider: 'anthropic',
+      requires: ANTHROPIC_REQUIRES,
+      optional: ANTHROPIC_OPTIONAL,
+      create: createAnthropicResearchModel,
+    },
     { provider: 'openai', requires: ['OPENAI_API_KEY'] },
   ],
   reviewerModels: [
-    { provider: 'anthropic', requires: ['ANTHROPIC_API_KEY'] },
+    {
+      provider: 'anthropic',
+      requires: ANTHROPIC_REQUIRES,
+      optional: ANTHROPIC_OPTIONAL,
+      create: createAnthropicReviewerModel,
+    },
     { provider: 'openai', requires: ['OPENAI_API_KEY'] },
   ],
   retrieval: [

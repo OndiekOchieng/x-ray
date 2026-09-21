@@ -252,9 +252,12 @@ async function main(): Promise<void> {
       ['no secret', {
         [PROVIDER_ENV.researchModel]: 'anthropic', [PROVIDER_ENV.researchModelId]: 'x',
       }, 'CONFIGURATION_INCOMPLETE'],
+      // `openai` is registered and reserved without a factory, so it is the
+      // row that still exercises NOT_IMPLEMENTED now that 20b implements
+      // Anthropic. Using Anthropic here would have made this case vacuous.
       ['not implemented', {
-        ...ANTHROPIC_CONFIGURED,
-        [PROVIDER_ENV.researchModel]: 'anthropic', [PROVIDER_ENV.researchModelId]: 'x',
+        OPENAI_API_KEY: SECRET,
+        [PROVIDER_ENV.researchModel]: 'openai', [PROVIDER_ENV.researchModelId]: 'x',
       }, 'NOT_IMPLEMENTED'],
     ]
     for (const [label, env, expected] of cases) {
@@ -265,7 +268,7 @@ async function main(): Promise<void> {
       // — never a substitute.
       const resolution = composed.research as { provider?: string; requested?: string }
       const named = resolution.provider ?? resolution.requested
-      if (named !== undefined && named !== 'anthropic' && named !== 'mystery')
+      if (named !== undefined && !['anthropic', 'openai', 'mystery'].includes(named))
         return `${label}: resolved to "${named}"`
       if (fullyAvailable(composed)) return `${label}: reported as fully available`
     }
@@ -309,14 +312,28 @@ async function main(): Promise<void> {
     if (composed.research.modelId !== 'x') return `research model id ${String(composed.research.modelId)}`
     if (composed.reviewer.status !== 'AVAILABLE' || composed.reviewer.modelId !== 'y')
       return 'reviewer did not carry its own model id'
-    // The default registry implements none of them, so 20a can construct
-    // nothing by accident.
-    const implemented = [
-      ...DEFAULT_REGISTRY.researchModels, ...DEFAULT_REGISTRY.reviewerModels,
-      ...DEFAULT_REGISTRY.retrieval,
-    ].filter((entry) => entry.create !== undefined)
-    return implemented.length === 0
-      ? null : `${implemented.length} default entr(ies) can already construct a provider`
+    /*
+     * Which default rows are implemented, stated exactly. 20a implemented
+     * none; 20b implements the two Anthropic *model* rows and nothing else.
+     * Asserting the whole table rather than a count means a row that quietly
+     * gains a factory — retrieval especially, which is 20c's — fails here.
+     */
+    const implemented = (entries: readonly { provider: string; create?: unknown }[]) =>
+      entries.filter((entry) => entry.create !== undefined)
+        .map((entry) => entry.provider).sort()
+    const expected = {
+      researchModels: ['anthropic'],
+      reviewerModels: ['anthropic'],
+      retrieval: [] as string[],
+    }
+    for (const slot of ['researchModels', 'reviewerModels', 'retrieval'] as const) {
+      const actual = implemented(DEFAULT_REGISTRY[slot])
+      if (JSON.stringify(actual) !== JSON.stringify(expected[slot])) {
+        return `${slot} implements ${JSON.stringify(actual)},`
+          + ` expected ${JSON.stringify(expected[slot])}`
+      }
+    }
+    return null
   })
 
   check('12b · every resolution names its exact slot, absence included', () => {
@@ -612,36 +629,94 @@ async function main(): Promise<void> {
     return fixtureDiff === '' ? null : `the fixture is modified:\n${fixtureDiff}`
   })
 
-  check('stop line · no provider HTTP, SDK, prompt or model call exists yet', () => {
-    // The gate itself is excluded: it names the forbidden tokens in order to
-    // forbid them, which is the opposite of containing a provider call.
-    for (const file of sources('lib/xray/providers')) {
-      if (file.endsWith('composition-checks.ts')) continue
+  check('stop line · exactly one file reaches the network, and retrieval has none', () => {
+    /*
+     * 20a asserted that nothing in the layer could perform a provider call.
+     * 20b makes that false on purpose, so the assertion is re-aimed rather
+     * than removed: the network may be reached from exactly one file, and the
+     * things 20b still must not do must still be undone.
+     */
+    const implementation = sources('lib/xray/providers')
+      .filter((file) => !/-checks\.ts$/.test(file))
+
+    const httpFiles = implementation.filter((file) => {
       const source = stripComments(readFileSync(file, 'utf8'))
-      const relative = file.slice(file.indexOf('lib/xray'))
-      for (const forbidden of [/\bfetch\s*\(/, /XMLHttpRequest/, /https?:\/\/api\./,
-        /@anthropic-ai/, /\bopenai\b.*from/, /messages\.create/, /system\s*:/,
-        /\bprompt\b\s*[:=]/]) {
-        if (forbidden.test(source)) return `${relative} contains ${String(forbidden)}`
-      }
-    }
-    // The exclusion above is narrow, not a hole: no file in the layer — the
-    // gate included — may even import a transport.
-    for (const file of sources('lib/xray/providers')) {
-      const imports = stripComments(readFileSync(file, 'utf8'))
-        .match(/from '([^']+)'/g) ?? []
+      return /\bfetch\s*\(/.test(source) || /XMLHttpRequest/.test(source)
+        || /https?:\/\/api\./.test(source)
+    }).map((file) => file.slice(file.indexOf('lib/xray')))
+    if (JSON.stringify(httpFiles) !== JSON.stringify(['lib/xray/providers/anthropic/transport.ts']))
+      return `files reaching the network: ${JSON.stringify(httpFiles)}`
+
+    // A transport may only be imported by a check harness; the implementation
+    // uses global fetch and nothing lower.
+    for (const file of implementation) {
+      const imports = stripComments(readFileSync(file, 'utf8')).match(/from '([^']+)'/g) ?? []
       const transport = imports.find((line) => /node:(http|https|net|tls|dns)/.test(line))
       if (transport !== undefined)
-        return `${file.slice(file.indexOf('lib/xray'))} imports a transport: ${transport}`
+        return `${file.slice(file.indexOf('lib/xray'))} imports ${transport}`
     }
 
-    // And no provider SDK was added as a dependency.
+    // No provider SDK was added as a dependency. 20b uses the Messages API
+    // over global fetch, so there is nothing to keep up to date and nothing
+    // that can pull in a transitive transport.
     const manifest = JSON.parse(read('package.json')) as {
       dependencies?: Record<string, string>; devDependencies?: Record<string, string>
     }
     const installed = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies })
     const sdk = installed.filter((name) => /anthropic|openai|langchain|ai-sdk/i.test(name))
-    return sdk.length === 0 ? null : `a provider SDK is installed: ${sdk.join(', ')}`
+    if (sdk.length > 0) return `a provider SDK is installed: ${sdk.join(', ')}`
+
+    // Retrieval is 20c's. No web search, no URL fetching for INGEST, and no
+    // factory on any retrieval row — so a deployment selecting retrieval still
+    // gets NOT_IMPLEMENTED rather than a half-built search.
+    for (const file of implementation) {
+      const source = stripComments(readFileSync(file, 'utf8'))
+      const relative = file.slice(file.indexOf('lib/xray'))
+      if (/web_search|server_tool_use|\bsearch\s*\(/.test(source))
+        return `${relative} performs retrieval, which is 20c`
+      if (/implements ResearchAdapter/.test(source))
+        return `${relative} implements the retrieval port`
+    }
+    return null
+  })
+
+  check('stop line · prompts stay inside the prompt module', () => {
+    /*
+     * #20 boundary 7: prompts never enter canonical graph state. The provable
+     * form is reachability — only the two adapters import the prompt module,
+     * and the modules that build proposals and judgments do not import it at
+     * all, so no instruction text has a path into a proposal.
+     */
+    const importers = sources('lib/xray/providers')
+      .filter((file) => !/-checks\.ts$/.test(file))
+      .filter((file) => /from '\.\/prompts'|from '\.\.\/prompts'/
+        .test(stripComments(readFileSync(file, 'utf8'))))
+      .map((file) => file.slice(file.indexOf('lib/xray/providers/')))
+      .sort()
+    const allowed = [
+      'lib/xray/providers/anthropic/research-model.ts',
+      'lib/xray/providers/anthropic/reviewer-model.ts',
+    ]
+    if (JSON.stringify(importers) !== JSON.stringify(allowed))
+      return `prompt importers: ${JSON.stringify(importers)}`
+
+    // The validator and the presenter are where provider output becomes
+    // proposals. Neither may know what was asked.
+    for (const file of ['decode.ts', 'present.ts', 'transport.ts']) {
+      const source = stripComments(read(`lib/xray/providers/anthropic/${file}`))
+      if (/prompts/.test(source)) return `${file} reaches the prompt module`
+    }
+
+    // And nothing outside the provider layer can reach it at all.
+    const repository = root('').replace(/\/$/, '')
+    const tracked = execFileSync('git', ['ls-files', '*.ts', '*.tsx'],
+      { cwd: repository, encoding: 'utf8' }).split('\n').filter(Boolean)
+    for (const file of tracked) {
+      if (file.startsWith('lib/xray/providers/')) continue
+      if (/providers\/anthropic/.test(stripComments(readFileSync(join(repository, file), 'utf8'))))
+        return `${file} imports the Anthropic provider`
+    }
+    return null
   })
 
   for (const { name, run } of checks) {
