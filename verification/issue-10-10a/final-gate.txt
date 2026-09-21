@@ -1,0 +1,33 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/ati-lifecycle-checks.ts
+
+X-Ray ATI action lifecycle — 10a
+======================================================================================
+ ok   1 · a request binds an exact eligible origin gap                              
+ ok   1 · an ineligible gap, wrong version or unknown gap cannot originate          
+ ok   2 · several requests may target the same gap (C3)                             
+ ok   3 · a revision freezes holder institution, office and custody basis           
+ ok   3 · a human may not silently upgrade INFERRED to CONFIRMED                    
+ ok   3 · a later revision does not rewrite an earlier one                          
+ ok   4 · an export names an exact revision; EXPORTED is not SUBMITTED              
+ ok   4 · an export cannot name a revision that does not exist                      
+ ok   4 · a submission must reference an act that was an export                     
+ ok   4 · submission records only supplied facts, and invents none                  
+ ok   4 · filing metadata cannot ride on a non-submission act                       
+ ok   5 · a response may carry no records at all                                    
+ ok   5 · one response may carry several records, and there may be several responses
+ ok   6 · an intake table has no column that could hold a source id                 
+ ok   7 · acceptance of a nonexistent source is refused                             
+ ok   7 · acceptance succeeds against an exact committed source                     
+ ok   7 · one intake may be accepted as several sources                             
+ ok   8 · every history table rejects UPDATE and DELETE                             
+ ok   8 · closure is administrative and changes no gap                              
+ ok   8 · all ATI activity left the immutable snapshots byte-identical              
+ ok   status is derived from history, never read from a column                      
+ ok   deriveStatus follows the released progression                                 
+ ok   10a wrote nothing into the evidence-graph aggregate                           
+======================================================================================
+23/23 passed
+
+Status, draftedAt, submittedAt, respondedAt and receivedSourceIds are all
+derived; the superseded columns were never written.
+
