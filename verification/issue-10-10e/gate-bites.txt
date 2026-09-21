@@ -1,0 +1,22 @@
+Adversarial runs — evidence that the 10e wording and boundary checks bite.
+
+### W1 · copy that turns non-response into refusal (against §L)
+FAIL  33/35/36/37 · the rendered copy carries none of the forbidden implications — "refused" implies the institution refused — in: available":true}],"gapStatusNote":"The institution refused to release the remaining records.
+17/18 ATI surface checks passed
+
+### W2 · copy that turns a response into an established claim (against §L)
+FAIL  33/35/36/37 · the rendered copy carries none of the forbidden implications — "confirms the claim" implies the claim is established — in: headline":"The released record confirms the claim
+17/18 ATI surface checks passed
+
+### W3 · drop the not-filed notice (against §E)
+FAIL  3/4/6 · a created draft names its exact origin and states it is not filed — the draft does not state that X-Ray does not file it
+FAIL  33/35/36/37 · the rendered copy carries none of the forbidden implications — no surface states that X-Ray does not file requests
+16/18 ATI surface checks passed
+
+### W4 · an export reports a filing (against §E)
+FAIL  7 · an export names the exact revision and does not report a filing — an export produced a filing note
+17/18 ATI surface checks passed
+
+### W5 · the public immutable version route reaches for ATI state (against §A)
+FAIL  32 · no public immutable version payload carries ATI lifecycle state — the public version route references ATI state
+17/18 ATI surface checks passed
