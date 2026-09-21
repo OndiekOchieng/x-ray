@@ -91,6 +91,8 @@ export interface ClaimIndependenceView {
    * The caller shows `unresolvedLabel` instead.
    */
   summaryLabel?: string
+  /** The same sentence with its axis named (#11 slice 11c). */
+  originLabel?: string
   /** Shown when independence cannot be stated exactly. */
   unresolvedLabel?: string
 }
@@ -111,6 +113,25 @@ export interface ProvenanceView {
   hasRepetition: boolean
   /** Claim-level independence from evidence provenance. */
   independence: ClaimIndependenceView
+  /**
+   * The document-lineage axis, named (#11 slice 11c).
+   *
+   * 11a found this sentence sitting directly above the independence sentence
+   * with no label on either, so a reader met two numbers about one claim that
+   * looked like a contradiction — C001 reads "8 records traced · 3 repeat
+   * another record" above "8 independent originating observations".
+   *
+   * Both are right and they answer different questions. Repetition here is
+   * about *documents*: which publications reproduce which record. Independence
+   * below is about *propositions*: whether each evidence point's own origin
+   * resolved. A publication that reproduces another record can still carry a
+   * proposition whose origin resolves independently, which is exactly why the
+   * two counts can differ — or coincide, as they do at C001.
+   *
+   * Naming the axis is the whole fix. Neither count changes.
+   */
+  lineageLabel: string
+
   /** e.g. "7 records traced · 5 of them repeat another record". */
   summaryLabel: string
 }
@@ -203,6 +224,14 @@ export function provenanceViewForClaim(graph: XRayGraph, claimId: ClaimIdLike): 
             'independent originating observations',
           )
         : undefined,
+      // The same sentence with its axis named. See `lineageLabel`.
+      originLabel: independence.isIndependenceResolved
+        ? `Evidence origin — ${plural(
+            independence.independentOriginCount,
+            'independent originating observation',
+            'independent originating observations',
+          )} for this claim`
+        : undefined,
       unresolvedLabel: independence.isIndependenceResolved
         ? undefined
         : independence.unidentifiedOriginCount > 0 &&
@@ -222,6 +251,9 @@ export function provenanceViewForClaim(graph: XRayGraph, claimId: ClaimIdLike): 
     summaryLabel: `${plural(summary.sourceCount, 'record', 'records')} traced · ${
       summary.publicationCount
     } of them repeat another record`,
+    lineageLabel: `Document lineage — ${
+      plural(summary.sourceCount, 'record', 'records')
+    } traced · ${summary.publicationCount} of them repeat another record`,
   }
 }
 

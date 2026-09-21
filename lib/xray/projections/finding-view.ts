@@ -40,6 +40,17 @@ export interface FindingView {
   wouldChangeFinding: string[]
   gradedAt: string
 
+  /**
+   * What the status is and is not (#11 slice 11c).
+   *
+   * A finding is what the evidence supported at a research cutoff. Rendered as
+   * a bare status beside a confidence band it reads as a verdict — a score
+   * X-Ray has awarded — which is the opposite of what it is. This sentence
+   * travels with it so the status cannot be read as a decision about what a
+   * reader should believe.
+   */
+  reversibilityNote: string
+
   /** Receipts whose relationship to the claim is `SUPPORTS`. */
   supporting: ReceiptView[]
   /** `CHALLENGES` and `CONTRADICTS`, as the canonical finding groups them. */
@@ -85,6 +96,9 @@ export function findingView(graph: XRayGraph, finding: Finding): FindingView {
     rationale: finding.rationale,
     wouldChangeFinding: [...finding.wouldChangeFinding],
     gradedAt: finding.gradedAt,
+    reversibilityNote: finding.wouldChangeFinding.length > 0
+      ? 'This is what the evidence supported when the research stopped, not a verdict. It names below what would change it.'
+      : 'This is what the evidence supported when the research stopped, not a verdict.',
 
     supporting: supportingEvidenceForFinding(graph, finding).map((e) => receiptView(graph, e)),
     challenging,

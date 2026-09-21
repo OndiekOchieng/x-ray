@@ -53,6 +53,16 @@ export interface ReceiptView {
   /** False when the record was never obtained; the proposition is then second-hand. */
   wasObtained: boolean
 
+  /**
+   * What this record can and cannot carry (#11 slice 11c).
+   *
+   * Institutional authority is not evidentiary strength. A figure attributed to
+   * an official record nobody obtained is weaker than the same figure read out
+   * of the record, and a reader cannot see that from a publisher's name. This
+   * says which case they are looking at, in a sentence.
+   */
+  reachNote: string
+
   // What it says about this claim
   proposition: string
   relationship: Evidence['relationship']
@@ -86,6 +96,7 @@ function build(source: Source, evidence: Evidence): ReceiptView {
     accessibility: source.accessibility,
     accessibilityLabel: accessibilityLabel[source.accessibility],
     wasObtained: source.accessibility === 'RETRIEVED' || source.accessibility === 'PARTIAL',
+    reachNote: reachNote(source),
 
     proposition: evidence.proposition,
     relationship: evidence.relationship,
@@ -119,4 +130,30 @@ export function receiptViewsForClaim(graph: XRayGraph, claimId: ClaimIdLike): Re
 /** Receipts drawn from one record — usually several. */
 export function receiptViewsForSource(graph: XRayGraph, sourceId: string): ReceiptView[] {
   return graph.evidence.filter((e) => e.sourceId === sourceId).map((e) => receiptView(graph, e))
+}
+
+/**
+ * How far this record was actually reached, in a sentence.
+ *
+ * Reads canonical `accessibility` and `evidenceClass` and nothing else. The
+ * order matters: whether the record was obtained outranks what class it would
+ * be if it had been, because a record nobody held cannot carry a proposition
+ * however authoritative its author.
+ */
+function reachNote(source: Source): string {
+  if (source.accessibility === 'NOT_LOCATED')
+    return 'X-Ray did not locate this record. Its absence is not evidence about what it would say.'
+  if (source.accessibility === 'NOT_RETRIEVED')
+    return 'This record was identified but never obtained, so nothing is read out of it here — only that it was named.'
+  if (source.accessibility === 'DEAD_LINK')
+    return 'The address for this record no longer resolves, so its contents could not be checked.'
+  if (source.evidenceClass === 'ATTRIBUTED_ORIGIN_NOT_RETRIEVED')
+    return 'The figure here is attributed to a record X-Ray did not obtain, so it carries the weight of the attribution and not of the record.'
+  if (source.evidenceClass === 'SECONDARY')
+    return 'A publication reporting on a record rather than the record itself.'
+  if (source.evidenceClass === 'PRIMARY_ADJACENT')
+    return 'Close to the originating record without being it.'
+  if (source.accessibility === 'PARTIAL')
+    return 'Only part of this record was obtained, so a passage from it is a passage from part of it.'
+  return 'The originating record itself, obtained and read.'
 }

@@ -12,6 +12,7 @@
  */
 
 import type {
+  ClaimLayer,
   Confidence,
   CustodyBasis,
   EvidenceClass,
@@ -127,4 +128,27 @@ export const gapStatusLabel: Record<GapStatus, string> = {
 export const custodyBasisLabel: Record<CustodyBasis, string> = {
   CONFIRMED: 'Confirmed custodian',
   INFERRED: 'Likely custodian (inferred, not confirmed)',
+}
+
+/**
+ * What kind of assertion a claim is, for a reader (#11 slice 11c).
+ *
+ * XR-INV-002/003 keep these three apart because an interpretation resting on an
+ * observation is not the same thing as the observation, and a meaning built on
+ * an interpretation is a third thing again. A reader cannot judge what a claim
+ * is standing on without knowing which of the three it is.
+ */
+export const claimLayerLabel: Record<ClaimLayer, string> = {
+  OBSERVATION: 'Observation',
+  INTERPRETATION: 'Interpretation',
+  MEANING: 'Meaning',
+}
+
+export const claimLayerNote: Record<ClaimLayer, string> = {
+  OBSERVATION:
+    'A statement about something that can be checked against a record — not a reading of what it means.',
+  INTERPRETATION:
+    'A reading of what observations amount to. It rests on them and is judged separately from them.',
+  MEANING:
+    'A statement about significance. It rests on an interpretation, which rests on observations.',
 }
