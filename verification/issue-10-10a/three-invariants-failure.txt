@@ -19,18 +19,19 @@ X-Ray ATI action lifecycle — 10a
  ok   7 · acceptance of a nonexistent source is refused                             
  ok   7 · acceptance succeeds against an exact committed source                     
  ok   7 · one intake may be accepted as several sources                             
- ok   R1 · request identity and origin are immutable once history exists            
- ok   R2 · an intake cannot be accepted against another investigation's source      
- ok   R3 · acceptance requires the version to be committed, not merely present      
+FAIL  R1 · request identity and origin are immutable once history exists              -> investigation: insert or update on table "ati_requests" violates foreign key constraint "ati_requests_investigation_id_origin_version_gap_id_origin_fkey"
+FAIL  R2 · an intake cannot be accepted against another investigation's source        -> another investigation's source was accepted into this request
+FAIL  R3 · acceptance requires the version to be committed, not merely present        -> a source in an uncommitted version was accepted
  ok   8 · every history table rejects UPDATE and DELETE                             
  ok   8 · closure is administrative and changes no gap                              
- ok   8 · ATI activity moves no canonical state                                     
+ ok   8 · all ATI activity left the immutable snapshots byte-identical              
  ok   status is derived from history, never read from a column                      
  ok   deriveStatus follows the released progression                                 
  ok   10a wrote nothing into the evidence-graph aggregate                           
 ======================================================================================
-26/26 passed
+23/26 passed
 
 Status, draftedAt, submittedAt, respondedAt and receivedSourceIds are all
 derived; the superseded columns were never written.
 
+[ELIFECYCLE] Command failed with exit code 1.

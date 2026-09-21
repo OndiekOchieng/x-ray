@@ -16,7 +16,7 @@ import { PGlite } from '@electric-sql/pglite'
 
 import { readSnapshot } from './snapshot'
 import {
-  AT, MIGRATIONS, seedLineage,
+  AT, MIGRATIONS, commitFurtherVersion, seedLineage,
 } from './publication-check-support'
 import {
   acceptIntakeSource, closeRequest, confirmSubmission, createRequest, deriveStatus,
@@ -34,11 +34,14 @@ async function check(name: string, fn: () => Promise<string | null>): Promise<vo
 }
 
 async function migrate(db: PGlite) {
-  for (const n of [...MIGRATIONS, '0009_ati_lifecycle'])
+  const ati = ['0009_ati_lifecycle', '0010_ati_origin_and_acceptance']
+  for (const n of [...MIGRATIONS, ...ati])
     await db.exec(readFileSync(new URL(`../../../db/migrations/${n}.up.sql`, import.meta.url), 'utf8'))
-  // The migration must remain reversible.
-  await db.exec(readFileSync(new URL('../../../db/migrations/0009_ati_lifecycle.down.sql', import.meta.url), 'utf8'))
-  await db.exec(readFileSync(new URL('../../../db/migrations/0009_ati_lifecycle.up.sql', import.meta.url), 'utf8'))
+  // Both ATI migrations must remain reversible, newest first.
+  for (const n of [...ati].reverse())
+    await db.exec(readFileSync(new URL(`../../../db/migrations/${n}.down.sql`, import.meta.url), 'utf8'))
+  for (const n of ati)
+    await db.exec(readFileSync(new URL(`../../../db/migrations/${n}.up.sql`, import.meta.url), 'utf8'))
 }
 
 const INV = 'XRAY-ATI-001'
@@ -285,6 +288,97 @@ async function main(): Promise<void> {
         ? null : `${lifecycle.receivedSourceIds.length} derived source ids`
     })
 
+    // -- R1/R2/R3: the three remediation invariants -----------------------------------------
+
+    await check('R1 · request identity and origin are immutable once history exists', async () => {
+      const otherEligible = gaps.find((g) => g.ati_eligible && g.id !== eligible.id)
+      // These three moved freely before remediation: the composite gap foreign
+      // key is satisfied by any eligible gap at any version, so a request could
+      // be re-pointed at a different version's gap while its history claimed
+      // to originate from the old one.
+      const holes: [string, string][] = [
+        ['origin version', `UPDATE ati_requests SET origin_version=1 WHERE id='ATI-1'`],
+        ['gap', `UPDATE ati_requests SET gap_id='${otherEligible?.id ?? eligible.id}' WHERE id='ATI-1'`],
+        ['ordinal', `UPDATE ati_requests SET ordinal=42 WHERE id='ATI-1'`],
+      ]
+      for (const [what, sql] of holes) {
+        const outcome = await db.query(sql).then(() => null, (e: unknown) => e as Error)
+        if (outcome === null) return `${what} was changed after history existed`
+        if (!/immutable/i.test(outcome.message))
+          return `${what} was rejected, but not as immutable: ${outcome.message}`
+      }
+      // The rest are rejected too, whether by the new trigger or by an existing
+      // foreign key — either way the origin cannot move.
+      // Real changes, not no-ops: setting a column to the value it already
+      // holds is not a change, and asserting it were would prove nothing.
+      for (const [what, sql] of [
+        ['investigation', `UPDATE ati_requests SET investigation_id='XRAY-ATI-B' WHERE id='ATI-1'`],
+        ['eligibility flag', `UPDATE ati_requests SET origin_ati_eligible=false WHERE id='ATI-1'`],
+        ['jurisdiction', `UPDATE ati_requests SET jurisdiction='TZ' WHERE id='ATI-1'`],
+        ['id', `UPDATE ati_requests SET id='ATI-MOVED' WHERE id='ATI-1'`],
+      ] as const) {
+        const outcome = await db.query(sql).then(() => null, (e: unknown) => e as Error)
+        if (outcome === null) return `${what} was changed after history existed`
+      }
+      // The superseded lifecycle columns #7's gate still writes stay writable.
+      // Probed on ATI-2 so ATI-1's superseded columns remain untouched for the
+      // derived-state check below, which asserts this slice never writes them.
+      const legacy = await db.query(
+        `UPDATE ati_requests SET status='CLOSED', submitted_at=$1, responded_at=$1,
+           received_source_ids='["SRC-LEGACY"]' WHERE id='ATI-2'`, [AT])
+        .then(() => null, (e: unknown) => e as Error)
+      return legacy === null ? null : `a legacy column became unwritable: ${legacy.message}`
+    })
+
+    await check('R2 · an intake cannot be accepted against another investigation\'s source', async () => {
+      await seedLineage(db, 'XRAY-ATI-B', 'RUN-ATI-B')
+      const foreign = (await db.query(
+        `SELECT id FROM sources WHERE investigation_id='XRAY-ATI-B' AND version_number=2
+          ORDER BY id LIMIT 1`)).rows[0] as { id: string }
+      const outcome = await acceptIntakeSource(db, 'INTAKE-1', {
+        investigationId: 'XRAY-ATI-B', committedVersion: 2, sourceId: foreign.id, acceptedAt: AT,
+      }).then(() => null, (e: unknown) => e as Error)
+      if (outcome === null)
+        return "another investigation's source was accepted into this request"
+      return /same investigation|investigation/i.test(outcome.message)
+        ? null : `rejected as: ${outcome.message}`
+    })
+
+    await check('R3 · acceptance requires the version to be committed, not merely present', async () => {
+      // A Source row is visible inside the transaction that is still building
+      // the next version, before the committed pointer advances. A
+      // non-deferrable foreign key sees that row and is satisfied by it — so
+      // the FK alone never proved the commit had happened.
+      await db.query('BEGIN')
+      let accepted: Error | null = null
+      try {
+        await db.query(
+          `INSERT INTO sources(investigation_id, version_number, id, title, retrieved_at,
+             source_type, evidence_class, origin_status, accessibility)
+           VALUES ($1, 3, 'SRC-UNCOMMITTED', 'A record arriving with version 3', $2,
+             'PROCUREMENT_RECORD', 'PRIMARY', 'ORIGINATING', 'RETRIEVED')`, [INV, AT])
+        accepted = await acceptIntakeSource(db, 'INTAKE-1', {
+          investigationId: INV, committedVersion: 3, sourceId: 'SRC-UNCOMMITTED', acceptedAt: AT,
+        }).then(() => null, (e: unknown) => e as Error)
+      } finally {
+        await db.query('ROLLBACK')
+      }
+      if (accepted === null) return 'a source in an uncommitted version was accepted'
+      if (!/not committed|committed/i.test(accepted.message))
+        return `rejected as: ${accepted.message}`
+      // And the same shape of acceptance succeeds once a version is committed.
+      const committed = await commitFurtherVersion(db, INV, 'RUN-ATI-V3', seeded.candidate, 3)
+      const newSource = (await db.query(
+        `SELECT id FROM sources WHERE investigation_id=$1 AND version_number=3
+          ORDER BY id LIMIT 1`, [INV])).rows[0] as { id: string }
+      void committed
+      await acceptIntakeSource(db, 'INTAKE-2',
+        { investigationId: INV, committedVersion: 3, sourceId: newSource.id, acceptedAt: AT })
+      const lifecycle = (await readRequestLifecycle(db, 'ATI-1'))!
+      return lifecycle.receivedSourceIds.includes(newSource.id)
+        ? null : 'the committed acceptance was not recorded'
+    })
+
     // -- 8: append-only, and research untouched -------------------------------------------
     await check('8 · every history table rejects UPDATE and DELETE', async () => {
       const cases: [string, string][] = [
@@ -321,14 +415,27 @@ async function main(): Promise<void> {
         ? null : 'closing the request changed the gap'
     })
 
-    await check('8 · all ATI activity left the immutable snapshots byte-identical', async () => {
+    await check('8 · ATI activity moves no canonical state', async () => {
       const strip = (g: unknown) => JSON.stringify(g, (k, v) => k === 'index' ? undefined : v)
+      // Committed versions are byte-identical after every ATI act above.
       if (strip(await readSnapshot(db, INV, 1)) !== strip(snapshotV1Before)) return 'v1 changed'
       if (strip(await readSnapshot(db, INV, 2)) !== strip(snapshotV2Before)) return 'v2 changed'
-      const pointer = (await db.query(
-        'SELECT latest_committed_version AS v FROM investigations WHERE id=$1', [INV])).rows[0] as { v: number }
-      if (pointer.v !== 2) return `the version pointer moved to ${pointer.v}`
-      return seeded.candidate.investigation.currentVersion === 2 ? null : 'seed drifted'
+
+      // The pointer is at 3 because R3 committed a version through #7's own
+      // machinery — research moving it is correct. What must hold is that no
+      // ATI write moves it, so one more ATI act is performed and compared.
+      const pointerOf = async () => ((await db.query(
+        'SELECT latest_committed_version AS v FROM investigations WHERE id=$1',
+        [INV])).rows[0] as { v: number }).v
+      const before = await pointerOf()
+      await recordAcknowledgement(db, 'ATI-2', AT, 'A further acknowledgement.')
+      await recordResponse(db, 'ATI-2', { receivedAt: AT, completeness: 'UNSTATED' })
+      if (await pointerOf() !== before) return 'an ATI write moved the version pointer'
+
+      const v3 = strip(await readSnapshot(db, INV, 3))
+      await recordAcknowledgement(db, 'ATI-2', AT)
+      return strip(await readSnapshot(db, INV, 3)) === v3
+        ? null : 'an ATI write changed a committed version'
     })
 
     // -- derived state ------------------------------------------------------------------------

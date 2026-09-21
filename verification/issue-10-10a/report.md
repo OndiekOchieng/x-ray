@@ -14,7 +14,8 @@ name of a record the gap ledger has not established". Enforcement never lapses.
 
 ## Migration 0009
 
-Six concerns, kept apart.
+Six concerns, kept apart, with migration 0010 adding the three invariants review
+found missing.
 
 | Table | Holds |
 |---|---|
@@ -56,8 +57,15 @@ upgraded.
 Source, imaginary or otherwise.
 
 `ati_intake_source_acceptances`'s foreign key to the version-scoped `sources` row is
-**not deferrable**. The commit that created the Source must already have happened. That
-is what "no imaginary SourceIds" means in storage rather than in a comment.
+**not deferrable**, so the row must be visible at statement time — a bare invented id
+has nothing to point at.
+
+> **Corrected after review.** This report originally claimed the non-deferrable key
+> meant "the commit that created the Source must already have happened". It does not.
+> A non-deferrable key only requires the row to be *visible*, and #7 inserts
+> version-scoped artifact rows before advancing the committed pointer — so a row inside
+> the still-open commit transaction satisfies it. Migration 0010 adds the check that
+> actually establishes commitment.
 
 Five triggers reject `UPDATE` and `DELETE` across every history table. Migration
 up/down/up round-trips inside the gate.
@@ -76,10 +84,56 @@ with closure winning over everything, because the thread ends whatever else happ
 `receivedSourceIds` returns canonical source ids from accepted intake mappings only —
 never intake identifiers.
 
+## Remediation — three invariants that were stated but not enforced
+
+Review blocked 10a on three storage gaps. All three were reproduced before being fixed
+(`three-invariants-failure.txt`, 23/26) and are closed by migration 0010.
+
+### 1 · Origin was not actually immutable
+
+0009 protected the history tables and left `ati_requests` freely updatable. The
+composite gap foreign key blocks a move to another investigation, but probing showed
+**`origin_version`, `gap_id` and `ordinal` all moved without complaint** — so one
+`UPDATE` could re-point a request at a different version's gap while its whole history
+still claimed to originate from the old one.
+
+`immutable_ati_origin` now rejects any change to `id`, `investigation_id`,
+`origin_version`, `gap_id`, `ordinal`, `origin_ati_eligible` or `jurisdiction`. The
+superseded lifecycle columns stay writable, because #7's accepted boundary gate writes
+them and 10a is not the slice that removes them.
+
+### 2 · Acceptance could cross investigations
+
+The foreign key proved a `Source` existed at `(investigation, version, id)` but tied
+that investigation to nothing. A response to investigation A's gap could be accepted
+against a perfectly valid committed Source in investigation B, and the read model would
+then report B's source under A's request.
+
+`check_ati_acceptance` resolves the owning investigation through
+intake → response → request and rejects a mismatch.
+
+### 3 · "Existing" was not "committed"
+
+**This was a false claim in my own report, not only a missing check.** I wrote that the
+non-deferrable foreign key meant the commit had already happened. It does not: the key
+requires only that the row be visible at statement time, and #7 deliberately inserts
+version-scoped rows before advancing `investigations.latest_committed_version`.
+
+The proof constructs exactly that state — a `sources` row for version 3 inside an open
+transaction while the pointer still reads 2 — and before remediation the acceptance
+succeeded.
+
+`check_ati_acceptance` now also requires
+`investigations.latest_committed_version >= committed_version`, which makes the column
+name true rather than aspirational. The same acceptance is then proved to succeed once
+version 3 is genuinely committed.
+
 ## Checks
 
-23 scenarios in `pnpm check:ati-lifecycle` (`final-gate.txt`), green on the first run;
-`first-attempt.txt` records that run. It covers all eight released proofs:
+26 scenarios in `pnpm check:ati-lifecycle` (`final-gate.txt`). `first-attempt.txt`
+records the original 23-scenario run; `three-invariants-failure.txt` records the three
+remediation proofs failing before the fix. The gate covers all eight released proofs
+plus the three remediation invariants:
 
 - exact eligible origin, and four rejected origins (ineligible gap, wrong version,
   unknown gap, wrong investigation);
@@ -98,7 +152,16 @@ never intake identifiers.
   sources;
 - every history table rejecting `UPDATE` and `DELETE`; closure changing no gap; both
   snapshots byte-identical and the version pointer unmoved after all ATI activity;
-- the module touching no canonical table and no graph aggregate.
+- the module touching no canonical table and no graph aggregate;
+- **R1** — `origin_version`, `gap_id` and `ordinal` rejected as immutable once history
+  exists, with `investigation_id`, the eligibility flag, `jurisdiction` and `id` rejected
+  too, and the superseded lifecycle columns still writable;
+- **R2** — a valid committed Source from another investigation refused for this
+  request's intake;
+- **R3** — a Source visible inside an open commit transaction refused because its
+  version is not yet committed, then accepted once it is;
+- ATI writes moving neither the version pointer nor any committed snapshot, asserted by
+  performing further ATI acts and re-reading.
 
 ## Regression
 
