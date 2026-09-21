@@ -31,6 +31,7 @@ import type { AcceptanceBehavior } from '@/lib/xray/acceptance'
 import type { GraduationAuditRecord } from '@/lib/xray/persistence/graduation-audit'
 import type { AssessOptions, GraduationService } from './graduation-service'
 import { GraduationNotEligible } from './graduation-service'
+import { CandidateNotEligible } from '@/lib/xray/persistence/version-commit'
 import { getReviewerModel } from './runtime'
 
 /**
@@ -110,21 +111,30 @@ export async function graduateRun(
     return { result: 'COMMITTED', version }
   } catch (error) {
     /*
-     * `commitNextVersion` is the authority on eligibility and it throws rather
-     * than returning. A refusal is a normal outcome for a first light run —
-     * PROVENANCE alone can make a candidate ineligible — so it is reported
-     * with the assessment's own reasons instead of surfacing as a crash.
+     * Only a **deliberate eligibility refusal** becomes `NOT_ELIGIBLE`.
+     *
+     * An earlier version of this caught `error instanceof Error`, which is
+     * every error there is. A `VersionConflict` — someone else committed
+     * first — would have been reported as "not eligible yet", and so would a
+     * driver fault or an invariant bug. A concurrency conflict reported as
+     * ineligibility is a conflict nobody investigates, and a persistence fault
+     * reported that way is a fault nobody fixes.
+     *
+     * `CandidateNotEligible` is thrown by `assertCommittable`, the authority
+     * that makes that decision. `GraduationNotEligible` is this layer's
+     * equivalent. Everything else propagates to the existing HTTP error
+     * semantics, unchanged.
      */
-    if (error instanceof GraduationNotEligible || error instanceof Error) {
+    if (error instanceof CandidateNotEligible || error instanceof GraduationNotEligible) {
       return {
         result: 'NOT_ELIGIBLE',
         verdict: audit.result.verdict,
         reasons: [
           ...audit.result.reasons.map((reason) => `${reason.ref}: ${reason.message}`),
-          ...(audit.result.verdict === 'PASS' ? [] : [`commit refused: ${error.message}`]),
+          `commit refused: ${error.message}`,
         ],
         blockers: audit.result.blockers.map((blocker) =>
-          `${blocker.ref}: ${blocker.reason}`),
+          `${blocker.ref}: ${blocker.reason} — ${blocker.resolvedBy}`),
       }
     }
     throw error

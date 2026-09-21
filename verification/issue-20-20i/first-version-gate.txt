@@ -1,0 +1,43 @@
+=== typecheck ===
+tsc: clean
+
+=== pnpm check:first-version ===
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/first-version-checks.ts
+ok    1 · the configured reviewer is asked during the initial REVIEW gate
+ok    2 · the review survives a durable checkpoint and readback
+ok    3 · graduation reuses that review without a second reviewer call
+ok    4 · a mutated candidate forces a fresh review
+ok    5 · the first candidate becomes an immutable version 1
+ok    6 · no reviewer yields BLOCKED, never PASS
+ok    7 · a refusing reviewer keeps the asked checks unevaluated
+ok    8 · a reviewer outage leaves no eligible graduation and no review
+ok    9 · the reviewer never reaches a research stage
+ok    10 · the first-version rule accepts the canonical v1 and rejects a successor shape
+ok    11 · the first-version rule refuses every incoherent v1
+ok    12 · a capability-blocked run assesses BLOCKED, never PASS
+ok    13 · graduateRun reports that blocker and commits nothing
+ok    14 · a stale stage reaches the assessment as a blocker
+ok    15 · a VersionConflict is not reported as ineligibility
+ok    16 · an injected persistence fault is not reported as ineligibility
+
+16/16 first-version checks passed
+
+=== negative controls (patch, run, revert) ===
+
+CA · graduation-service stops passing capability gaps / stale stages
+FAIL  12 · a capability-blocked run assesses BLOCKED, never PASS — no blocker refs provenance:lineage (RESEARCH_STOP)
+FAIL  13 · graduateRun reports that blocker and commits nothing — the blockers do not name it: ["RESEARCH_STOP: ..."]
+FAIL  14 · a stale stage reaches the assessment as a blocker — a candidate with a stale stage was assessed as PASS
+13/16 first-version checks passed
+
+CB · graduateRun restores `error instanceof GraduationNotEligible || error instanceof Error`
+FAIL  15 · a VersionConflict is not reported as ineligibility — a stale predecessor expectation was reported as NOT_ELIGIBLE
+FAIL  16 · an injected persistence fault is not reported as ineligibility — a persistence fault was reported as NOT_ELIGIBLE
+14/16 first-version checks passed
+
+=== run state probe (control for check 12's premise) ===
+PROBE status=CAPABILITY_BLOCKED errors=0 rounds=1 stops=0
+      verdict=BLOCKED blockers=provenance:lineage|RESEARCH_STOP
+A provenance-blocked run is valid (0 validation errors) and reviewed (1 round),
+but cannot be saturated: the run ends before the stop transition, so no research
+stop is ever established. Reported, not patched around.

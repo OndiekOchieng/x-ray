@@ -27,17 +27,21 @@ import type { CapabilityResult } from '@/lib/xray/capability'
 import type { Claim, InvestigationVersion } from '@/lib/xray/domain'
 import { createXRayGraph, type XRayGraph } from '@/lib/xray/selectors'
 import { xrayKe001Graph } from '@/lib/xray/fixtures/xray-ke-001/graph'
-import { fingerprintGraph, type ModelJudgment, type ReviewerModel, type ReviewerModelQuery,
-  activePortChecks } from '@/lib/xray/review'
+import { emptyReviewHistory, fingerprintGraph, type ModelJudgment, type ReviewerModel,
+  type ReviewerModelQuery, activePortChecks } from '@/lib/xray/review'
 import { unavailable } from '@/lib/xray/capability'
 import type { StageDefinition } from '@/lib/xray/pipeline/stages'
-import { readExecutionAudit } from '@/lib/xray/persistence/execution-audit'
+import {
+  appendExecutionAudit, readExecutionAudit,
+} from '@/lib/xray/persistence/execution-audit'
 import {
   loadCandidateCheckpoint, saveCandidateCheckpoint,
 } from '@/lib/xray/persistence/workspace'
 import { GraphAccumulator } from '@/lib/xray/pipeline/accumulator'
 import { readSnapshot } from '@/lib/xray/persistence/snapshot'
-import { assertFirstVersion } from '@/lib/xray/persistence/version-commit'
+import {
+  assertFirstVersion, CandidateNotEligible, VersionConflict,
+} from '@/lib/xray/persistence/version-commit'
 import { InvestigationService } from './investigation-service'
 import { InlineExecutionService, type ExecutionRuntime } from './inline-execution'
 import { GraduationService } from './graduation-service'
@@ -92,7 +96,9 @@ ReviewerModel & { asked: ReviewerModelQuery['kind'][] } {
 }
 
 /** Stages that contribute the whole canonical graph, then stop on saturation. */
-function contributingStages(source: XRayGraph): readonly StageDefinition[] {
+function contributingStages(
+  source: XRayGraph, provenanceBlocked = false,
+): readonly StageDefinition[] {
   const contributed = {
     sources: [...source.sources], claims: [...source.claims],
     sourcePositions: [...source.sourcePositions],
@@ -115,10 +121,12 @@ function contributingStages(source: XRayGraph): readonly StageDefinition[] {
     { stage: 'TRACE', run: () => ({ evidence: contributed.evidence }) },
     {
       stage: 'PROVENANCE',
-      run: () => ({
-        sourceDependencies: contributed.sourceDependencies,
-        evidenceProvenance: contributed.evidenceProvenance,
-      }),
+      run: () => provenanceBlocked
+        ? PROVENANCE_GAP
+        : {
+          sourceDependencies: contributed.sourceDependencies,
+          evidenceProvenance: contributed.evidenceProvenance,
+        },
     },
     { stage: 'DISCONFIRM', run: () => ({ disconfirmations: contributed.disconfirmations }) },
     { stage: 'RECONCILE', run: () => ({ discrepancies: contributed.discrepancies }) },
@@ -130,16 +138,40 @@ function contributingStages(source: XRayGraph): readonly StageDefinition[] {
   ]
 }
 
+/**
+ * A stage that reports the first-light PROVENANCE gap and nothing else.
+ *
+ * Deliberately the real shape: `provenance:lineage`, `NOT_SUPPORTED`, with the
+ * detail and `resolvedBy` a live run produces. Everything else succeeds, so
+ * the graph is valid, reviewed and saturated — the case where an assessment is
+ * most tempted to say PASS.
+ */
+const PROVENANCE_GAP = {
+  kind: 'CAPABILITY_UNAVAILABLE' as const,
+  operation: 'provenance:lineage',
+  reason: 'NOT_SUPPORTED' as const,
+  detail: 'No record in this run reports what it is attributed to, so origin and'
+    + ' independence cannot be decided. Nothing was assumed.',
+  resolvedBy: 'Configure a retrieval adapter that reports printed attribution'
+    + ' (observed.attributedTo), or supply attribution for these records.',
+}
+
 interface Harness {
   readonly db: PGlite
   readonly investigationId: string
   readonly executionRunId: string
   readonly reviewer: ReturnType<typeof countingReviewer>
+  /** The same service, so a check can start a second concurrent run. */
+  readonly execution: InlineExecutionService
 }
 
 /** Submit and run one initial investigation through the real services. */
 async function runInitial(
-  behaviour: { readonly reviewer?: 'ok' | 'refuse' | 'broken' | 'absent' } = {},
+  behaviour: {
+    readonly reviewer?: 'ok' | 'refuse' | 'broken' | 'absent'
+    /** PROVENANCE reports the live capability gap instead of contributing. */
+    readonly provenanceBlocked?: boolean
+  } = {},
 ): Promise<Harness> {
   const db = new PGlite()
   await migrate(db)
@@ -160,13 +192,16 @@ async function runInitial(
     async initial() {
       return {
         investigation: submittedInvestigation(investigationId, AT),
-        stages: contributingStages(canonical),
+        stages: contributingStages(canonical, behaviour.provenanceBlocked === true),
         stopEvidence: { saturationObserved: true },
         maxAttempts: 1,
       }
     },
     async resume() {
-      return { stages: contributingStages(canonical), maxAttempts: 1 }
+      return {
+        stages: contributingStages(canonical, behaviour.provenanceBlocked === true),
+        maxAttempts: 1,
+      }
     },
   }
 
@@ -174,7 +209,7 @@ async function runInitial(
   const execution = new InlineExecutionService(
     db, runtime, () => AT, () => `RUN-FV-${++runCounter}`)
   const status = await execution.startExecution(investigationId)
-  return { db, investigationId, executionRunId: status.executionRunId, reviewer }
+  return { db, investigationId, executionRunId: status.executionRunId, reviewer, execution }
 }
 
 const modelAssisted = (graph: XRayGraph, review: { checks: readonly {
@@ -514,6 +549,216 @@ check('11 · the first-version rule refuses every incoherent v1', () => {
     if (!threw) return `${label} was accepted`
   }
   return null
+})
+
+check('12 · a capability-blocked run assesses BLOCKED, never PASS', async () => {
+  /*
+   * First light's PROVENANCE case, end to end.
+   *
+   * `assessGraduation` has always accepted `capabilityGaps`; the service never
+   * passed them. So an otherwise valid, reviewed, saturated candidate whose
+   * run ended CAPABILITY_BLOCKED could be *assessed* as PASS, with only
+   * `commitNextVersion` refusing it later. A recorded assessment saying PASS
+   * about a capability-blocked run is a false record, because the assessment
+   * is what is persisted and read back.
+   */
+  const { db, investigationId, executionRunId } = await runInitial({
+    provenanceBlocked: true,
+  })
+  try {
+    // The run really is capability-blocked, and the gap really is durable.
+    const audit = await readExecutionAudit(db, executionRunId)
+    const gaps = (audit?.journal.activeCapabilityEntries() ?? [])
+      .map((entry) => entry.unavailable)
+    if (gaps.length !== 1) return `${gaps.length} active capability gap(s) recorded`
+    if (gaps[0]!.operation !== 'provenance:lineage')
+      return `the gap is ${gaps[0]!.operation}`
+
+    // Everything else is in order, so PASS is the tempting answer.
+    const graduation = new GraduationService(db, () => AT)
+    await graduation.promote(investigationId, executionRunId, {
+      expectedPredecessor: null, trigger: 'INITIAL_RESEARCH', createdAt: AT,
+    })
+    const assessed = await assessCandidate(graduation, investigationId, executionRunId, {
+      behaviors: [],
+    })
+    /*
+     * "Otherwise valid and reviewed": the candidate carries no validation
+     * error and REVIEW really ran, so the capability gap is doing the work
+     * here rather than covering for a broken graph.
+     *
+     * It is not also *saturated*, and cannot be: the run ends
+     * CAPABILITY_BLOCKED before the stop transition, so no research stop is
+     * ever established and RESEARCH_STOP blocks alongside the gap. That is
+     * the architecture being honest — a run that could not finish has not
+     * established saturation — and not something to patch around, so the
+     * assertions below name the provenance blocker specifically instead of
+     * settling for "not PASS".
+     */
+    if (assessed.result.validation.errorCount !== 0)
+      return `the candidate has ${assessed.result.validation.errorCount} validation error(s)`
+    if (audit.reviewHistory.rounds.length !== 1)
+      return `${audit.reviewHistory.rounds.length} review round(s) recorded`
+
+    if (assessed.result.verdict === 'PASS')
+      return 'a capability-blocked run was assessed as PASS'
+    if (assessed.result.verdict !== 'BLOCKED')
+      return `verdict ${assessed.result.verdict}`
+
+    // The blocker carries the original operation, detail and remedy.
+    const blocker = assessed.result.blockers.find((entry) =>
+      entry.ref === 'provenance:lineage')
+    if (blocker === undefined)
+      return `no blocker refs provenance:lineage (${
+        assessed.result.blockers.map((entry) => entry.ref).join(', ')})`
+    if (blocker.reason !== PROVENANCE_GAP.detail)
+      return `the blocker reason was rewritten: "${blocker.reason.slice(0, 80)}"`
+    if (blocker.resolvedBy !== PROVENANCE_GAP.resolvedBy)
+      return `the blocker remedy was rewritten: "${blocker.resolvedBy.slice(0, 80)}"`
+
+    // And the recorded assessment says so, read back from storage.
+    const persisted = await graduation.latestAssessment(executionRunId)
+    return persisted?.verdict === 'BLOCKED'
+      ? null : `the persisted assessment says ${String(persisted?.verdict)}`
+  } finally { await db.close(); setReviewerModelProvider(null) }
+})
+
+check('13 · graduateRun reports that blocker and commits nothing', async () => {
+  const { db, investigationId, executionRunId } = await runInitial({
+    provenanceBlocked: true,
+  })
+  try {
+    const graduation = new GraduationService(db, () => AT)
+    const outcome = await graduateRun(graduation, investigationId, executionRunId,
+      { expectedPredecessor: null, createdAt: AT })
+
+    if (outcome.result !== 'NOT_ELIGIBLE')
+      return `a capability-blocked run committed v${outcome.version}`
+    if (outcome.verdict !== 'BLOCKED') return `verdict ${outcome.verdict}`
+    if (!outcome.blockers.some((entry) => entry.includes('provenance:lineage')))
+      return `the blockers do not name it: ${JSON.stringify(outcome.blockers)}`
+    // The remedy survives into what a caller is told.
+    if (!outcome.blockers.some((entry) => entry.includes('observed.attributedTo')))
+      return 'the blocker lost its remedy on the way out'
+
+    // Nothing was committed.
+    const versions = (await db.query(
+      'SELECT count(*)::int AS n FROM investigation_versions WHERE investigation_id=$1',
+      [investigationId])).rows as Record<string, unknown>[]
+    return versions[0]?.['n'] === 0
+      ? null : `${String(versions[0]?.['n'])} version(s) committed`
+  } finally { await db.close(); setReviewerModelProvider(null) }
+})
+
+check('14 · a stale stage reaches the assessment as a blocker', async () => {
+  /*
+   * The other half of what the assessment boundary was dropping. A revision
+   * cascade that has not been re-run leaves stale stages in the journal, and
+   * an assessment that did not see them would describe scaffolding that no
+   * longer holds as assessed.
+   */
+  const { db, investigationId, executionRunId } = await runInitial()
+  try {
+    // Invalidate a stage on the durable audit, exactly as a routed revision does.
+    const audit = await readExecutionAudit(db, executionRunId)
+    audit.journal.appendInvalidation({
+      id: 'INVAL-001',
+      investigationId,
+      requestId: 'RF-STALE-001',
+      target: 'GRADE',
+      staleStages: ['GRADE'],
+      observedAt: AT,
+    })
+    if (audit.journal.staleStages().length === 0)
+      return 'the invalidation recorded no stale stage'
+    await appendExecutionAudit(db, executionRunId, audit)
+
+    const graduation = new GraduationService(db, () => AT)
+    await graduation.promote(investigationId, executionRunId, {
+      expectedPredecessor: null, trigger: 'INITIAL_RESEARCH', createdAt: AT,
+    })
+    const assessed = await assessCandidate(graduation, investigationId, executionRunId, {
+      behaviors: [],
+    })
+    if (assessed.result.verdict === 'PASS')
+      return 'a candidate with a stale stage was assessed as PASS'
+    return assessed.result.blockers.some((entry) => entry.ref === 'STALE/GRADE')
+      ? null : `no STALE blocker (${assessed.result.blockers.map((e) => e.ref).join(', ')})`
+  } finally { await db.close(); setReviewerModelProvider(null) }
+})
+
+check('15 · a VersionConflict is not reported as ineligibility', async () => {
+  /*
+   * Blocker B. `graduateRun` caught `error instanceof Error`, which is every
+   * error there is — so a pointer that moved under the caller would have been
+   * reported as "not eligible yet", and a conflict reported as ineligibility
+   * is a conflict nobody retries.
+   *
+   * The pointer cannot be forced by hand: 0001's advance trigger only allows
+   * exactly-one-step moves. So the conflict is produced the way it actually
+   * happens — two runs of the same investigation both hold a candidate for
+   * version 1, and the second graduates after the first has committed.
+   */
+  const { db, investigationId, executionRunId, execution } = await runInitial()
+  try {
+    const second = await execution.startExecution(investigationId)
+    if (second.executionRunId === executionRunId) return 'the second execution reused the run'
+
+    const graduation = new GraduationService(db, () => AT)
+    const first = await graduateRun(graduation, investigationId, executionRunId,
+      { expectedPredecessor: null, createdAt: AT })
+    if (first.result !== 'COMMITTED') return `the first graduation said ${first.result}`
+
+    let caught: Error | undefined
+    let outcome: Awaited<ReturnType<typeof graduateRun>> | undefined
+    try {
+      outcome = await graduateRun(graduation, investigationId, second.executionRunId,
+        { expectedPredecessor: null, createdAt: AT })
+    } catch (error) { caught = error as Error }
+
+    if (outcome !== undefined)
+      return `a stale predecessor expectation was reported as ${outcome.result}`
+    if (caught === undefined) return 'nothing was raised'
+    if (caught instanceof CandidateNotEligible)
+      return 'a version conflict was typed as an eligibility refusal'
+    return caught instanceof VersionConflict
+      ? null : `raised ${caught.name}: ${caught.message.slice(0, 120)}`
+  } finally { await db.close(); setReviewerModelProvider(null) }
+})
+
+check('16 · an injected persistence fault is not reported as ineligibility', async () => {
+  const { db, investigationId, executionRunId } = await runInitial()
+  try {
+    /*
+     * A driver-level fault, raised from the database itself. It is not an
+     * eligibility decision and must not be dressed as one — a persistence
+     * fault reported that way is a fault nobody fixes.
+     */
+    const faulty = {
+      async query(sql: string, params?: unknown[]) {
+        if (/INSERT INTO investigation_versions/i.test(sql)) {
+          throw new Error('synthetic persistence fault')
+        }
+        const result = await db.query(sql, params as never[])
+        return { rows: result.rows as Record<string, unknown>[] }
+      },
+    }
+    const graduation = new GraduationService(faulty, () => AT)
+
+    let caught: Error | undefined
+    let outcome: Awaited<ReturnType<typeof graduateRun>> | undefined
+    try {
+      outcome = await graduateRun(graduation, investigationId, executionRunId,
+        { expectedPredecessor: null, createdAt: AT })
+    } catch (error) { caught = error as Error }
+
+    if (outcome !== undefined) return `a persistence fault was reported as ${outcome.result}`
+    if (caught === undefined) return 'nothing was raised'
+    if (caught instanceof CandidateNotEligible)
+      return 'a persistence fault was typed as an eligibility refusal'
+    return /synthetic persistence fault/.test(caught.message)
+      ? null : `raised ${caught.name}: ${caught.message.slice(0, 90)}`
+  } finally { await db.close(); setReviewerModelProvider(null) }
 })
 
 // ---------------------------------------------------------------------------

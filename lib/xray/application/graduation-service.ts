@@ -185,6 +185,27 @@ export class GraduationService {
       .map((round) => round.result)
       .findLast((review) => review.graphFingerprint === fingerprint)
 
+    /*
+     * The run's own capability state, from the durable audit.
+     *
+     * `assessGraduation` has always accepted `capabilityGaps` and
+     * `staleStages` and turned them into blockers; this method simply never
+     * passed them. So a run that ended `CAPABILITY_BLOCKED` — first light's
+     * `provenance:lineage` being the case in point — could be *assessed* as
+     * PASS, and only `commitNextVersion` would refuse it. A recorded
+     * assessment saying PASS about a capability-blocked run is a false record
+     * even when the commit later refuses, because the assessment is what gets
+     * persisted and read back.
+     *
+     * Read from the journal, never reconstructed from graph state. A gap is a
+     * fact about what the run could not do; the graph only shows what it did,
+     * and "no source positions" cannot tell you whether the stage was blocked
+     * or simply found none.
+     */
+    const capabilityGaps = (recorded?.journal.activeCapabilityEntries() ?? [])
+      .map((entry) => entry.unavailable)
+    const staleStages = recorded?.journal.staleStages() ?? []
+
     const judgments = reusable !== undefined || options.model === undefined
       ? undefined
       : await collectModelJudgments(candidate, options.model)
@@ -195,6 +216,8 @@ export class GraduationService {
       ...(options.model ? { model: options.model } : {}),
       ...(reusable === undefined ? {} : { review: reusable }),
       ...(judgments === undefined ? {} : { judgments }),
+      ...(capabilityGaps.length === 0 ? {} : { capabilityGaps }),
+      ...(staleStages.length === 0 ? {} : { staleStages: [...staleStages] }),
       assessedAt: this.clock(),
     })
     return appendGraduationAudit(this.db, executionRunId, candidate, result)

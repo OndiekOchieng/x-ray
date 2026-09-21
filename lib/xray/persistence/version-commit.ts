@@ -15,6 +15,26 @@ export interface ReEvaluationAudit {
   detail?: string
   causes?: readonly CausalReference[]
 }
+/**
+ * The candidate is not eligible to become a version.
+ *
+ * A deliberate refusal, distinct from a fault: research that has not finished,
+ * an assessment that does not match, a graph failure, a capability-blocked run
+ * asserting PASS. Callers may report these to a user as a normal outcome.
+ *
+ * Typed because the alternative is message-matching, and because a caller that
+ * treats *every* `Error` as an eligibility refusal will report a
+ * `VersionConflict`, a driver fault or an invariant bug as "not eligible yet"
+ * — which is what `graduateRun` did before this. A concurrency conflict
+ * reported as ineligibility is a conflict nobody investigates.
+ */
+export class CandidateNotEligible extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CandidateNotEligible'
+  }
+}
+
 export class VersionConflict extends Error {
   /** `null` when the caller expected no committed version yet. */
   readonly expected: number | null
@@ -69,15 +89,15 @@ export function changedClaimIds(previous: XRayGraph, candidate: XRayGraph): Set<
 function assertCommittable(graph: XRayGraph, assessment: GraduationResult) {
   if (graph.investigation.status !== 'RESEARCH_COMPLETE' || !graph.investigation.completedAt ||
       !graph.investigation.researchStop || graph.investigation.researchStop.reason !== 'SATURATION')
-    throw new Error('Candidate research is incomplete')
+    throw new CandidateNotEligible('Candidate research is incomplete')
   if (assessment.investigationId !== graph.investigation.id || assessment.graphFingerprint !== fingerprintGraph(graph))
-    throw new Error('Graduation assessment does not match candidate graph identity')
+    throw new CandidateNotEligible('Graduation assessment does not match candidate graph identity')
   if (!assessment.validation.valid || assessment.validation.errorCount > 0 ||
       assessment.behaviors.some((behavior) => behavior.status === 'VIOLATED') ||
       assessment.reasons.some((reason) => reason.verdict === 'FAIL' || reason.verdict === 'REVISE'))
-    throw new Error('Candidate has a graph failure or revision reason')
+    throw new CandidateNotEligible('Candidate has a graph failure or revision reason')
   if (!isEligibleAssessment(assessment))
-    throw new Error('Candidate is not an eligible PASS/BLOCKED snapshot')
+    throw new CandidateNotEligible('Candidate is not an eligible PASS/BLOCKED snapshot')
 }
 
 /**
@@ -273,7 +293,7 @@ export async function commitNextVersion(db: SnapshotDatabase, options: CommitVer
       [executionRunId, graph.investigation.id])).rows
     if (run.length !== 1) throw new Error('Producing execution run is missing or incomplete')
     if (run[0].status === 'CAPABILITY_BLOCKED' && assessment.verdict !== 'BLOCKED')
-      throw new Error('Capability-blocked execution cannot assert PASS')
+      throw new CandidateNotEligible('Capability-blocked execution cannot assert PASS')
     const graduation = await readLatestGraduation(db, executionRunId)
     if (!graduation || !isDeepStrictEqual(graduation.result, assessment) ||
         graduation.result.graphFingerprint !== fingerprintGraph(graph) ||

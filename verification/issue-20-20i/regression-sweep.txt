@@ -1,0 +1,61 @@
+check:demo-host                          15/15 demo host checks passed
+check:legibility                         20/20 legibility checks passed
+check:rendered                           FAILED
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/host/rendered-checks.ts
+No server at http://localhost:3160. See the header of this file for how to start one.
+[ELIFECYCLE] Command failed with exit code 1.
+check:providers                          22/22 provider composition checks passed
+check:anthropic-adapters                 32/32 Anthropic adapter checks passed
+check:anthropic-retrieval                29/29 Anthropic retrieval checks passed
+check:live-runtime                       35/35 live runtime checks passed
+check:fixtures                           6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:replay                             6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:persistence-schema                 
+check:source-position-schema             15a schema: 29/29 checks passed
+check:persistence-roundtrip              
+check:persistence-versioning             
+check:source-position-versioning         
+check:persistence-workspace              
+check:persistence-audit                  
+check:source-position                    
+check:source-position-pipeline           
+check:source-position-review             
+check:query                              56/56 passed
+check:validation                         52/52 passed
+check:review                             32/32 passed
+check:pipeline                           58/58 passed
+check:adapters                           45/45 passed
+check:acceptance                         32/32 passed
+check:persistence-ati                    
+check:persistence-durable-integration    
+check:persistence-graduation             
+check:persistence-postgres-concurrency   FAILED
+file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/postgres-concurrency-checks.ts:19
+if (!url) throw new Error('Set XRAY_POSTGRES_URL to a native PostgreSQL test database')
+                ^
+
+Error: Set XRAY_POSTGRES_URL to a native PostgreSQL test database
+    at file:///Users/oochieng/Documents/docs/projects/x-ray/x-ray-web-application-scaffold/lib/xray/persistence/postgres-concurrency-checks.ts:19:17
+    at ModuleJob.run (node:internal/modules/esm/module_job:569:25)
+    at async node:internal/modules/esm/loader:650:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v26.8.2
+[ELIFECYCLE] Command failed with exit code 1.
+check:investigation-service              
+check:inline-execution                   
+check:first-version                      16/16 first-version checks passed
+check:api-routes                         23/23 passed
+check:lifecycle                          21/21 passed
+check:benchmark-corpus                   
+check:publication                        26/26 passed
+check:public-resolver                    25/25 passed
+check:public-routes                      permanent memo throughout: withdrawal still took effect on the next request.
+check:public-library                     25/25 passed
+check:version-lineage                    15/15 passed
+check:ati-lifecycle                      28/28 passed
+check:ati-commands                       32/32 ATI command checks passed
+check:ati-responses                      25/25 ATI response checks passed
+check:ati-research                       35/35 ATI research checks passed
+check:ati-surface                        18/18 ATI surface checks passed
+failed: 2
