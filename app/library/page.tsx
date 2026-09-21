@@ -1,7 +1,7 @@
 import { connection } from 'next/server'
 
 import { InvestigationLibrary } from '@/components/investigations/investigation-library'
-import { publishedLibrary } from '@/lib/xray/publication/public-library'
+import { publishedLibraryAvailability } from '@/lib/xray/publication/public-library'
 
 /**
  * Membership is never cached. A withdrawal removes a lineage from discovery on
@@ -15,7 +15,30 @@ import { publishedLibrary } from '@/lib/xray/publication/public-library'
  */
 export const instant = false
 
+/**
+ * 11a found this page flushing a 200 shell and then throwing when no database
+ * was configured. Storage being unreachable is now rendered as itself, and is
+ * never shown as "no published investigations" — an outage is not an empty
+ * corpus, and saying so would be a lie about the work.
+ */
 export default async function LibraryPage() {
   await connection()
-  return <InvestigationLibrary entries={await publishedLibrary()} />
+  const library = await publishedLibraryAvailability()
+
+  if (library.status === 'UNAVAILABLE') {
+    return (
+      <main className="mx-auto w-full max-w-5xl px-6 py-16">
+        <h1 className="text-2xl font-semibold text-foreground">Published X-Rays</h1>
+        <p
+          role="status"
+          className="mt-4 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground"
+        >
+          The library is temporarily unavailable. X-Ray could not reach its storage, so the
+          published list cannot be shown — this is not a statement that nothing is published.
+        </p>
+      </main>
+    )
+  }
+
+  return <InvestigationLibrary entries={library.entries} />
 }

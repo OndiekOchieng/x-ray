@@ -13,6 +13,17 @@ import { getGapPayload } from '@/lib/xray/investigations'
  */
 export const instant = false
 
+/**
+ * Existence is decided here, not in the body — see the note on the explorer
+ * route. `notFound()` from the component yields HTTP 200 under Partial
+ * Prerendering, because the shell has already been flushed.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  if (!getGapPayload(id)) notFound()
+  return {}
+}
+
 export default async function GapPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const payload = getGapPayload(id)

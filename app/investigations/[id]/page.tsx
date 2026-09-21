@@ -18,6 +18,25 @@ import { getAtiActionSurfaces, getExplorerPayload } from '@/lib/xray/investigati
  */
 export const instant = false
 
+/**
+ * Existence is decided here, not in the body.
+ *
+ * 11a found that `notFound()` inside the component produced HTTP **200**: with
+ * Partial Prerendering the shell is already flushed by the time the loader
+ * answers, so the 404 arrived only inside the streamed payload. `generateMetadata`
+ * runs before the response is committed, so a `notFound()` from here is a real
+ * 404 on the status line.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  if (!(await getExplorerPayload(id))) notFound()
+  return {}
+}
+
 export default async function EvidenceExplorerRoute({
   params,
 }: {

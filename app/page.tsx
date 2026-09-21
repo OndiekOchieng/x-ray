@@ -3,13 +3,22 @@ import { SourceInput } from '@/components/investigations/source-input'
 import { CachedXRayCard } from '@/components/investigations/cached-xray-card'
 import { connection } from 'next/server'
 
-import { featuredPublication } from '@/lib/xray/publication/public-library'
+import { featuredPublicationAvailability } from '@/lib/xray/publication/public-library'
 
 export const instant = false
 
+/**
+ * The judge's entry point.
+ *
+ * 11a found this page rendering a 200 shell and then throwing, because
+ * `featuredPublication()` reached for a database no host had configured. The
+ * hero is unconditional now, and the featured slot states which of three
+ * things is true rather than collapsing them into an empty page:
+ * storage unreachable, nothing published yet, or here it is.
+ */
 export default async function Page() {
   await connection()
-  const featured = await featuredPublication()
+  const featured = await featuredPublicationAvailability()
 
   return (
     <AppShell>
@@ -45,14 +54,29 @@ export default async function Page() {
         </div>
 
         {/* Featured Investigation */}
-        {featured && (
-          <div>
-            <h2 className="text-sm font-semibold text-muted-foreground mb-4 uppercase tracking-wide">
-              Featured Investigation
-            </h2>
-            <CachedXRayCard entry={featured} />
-          </div>
-        )}
+        <div>
+          <h2 className="text-sm font-semibold text-muted-foreground mb-4 uppercase tracking-wide">
+            Featured Investigation
+          </h2>
+
+          {featured.status === 'UNAVAILABLE' ? (
+            <p
+              role="status"
+              className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground"
+            >
+              The demo investigation is temporarily unavailable. X-Ray could not reach its
+              storage, so nothing published can be shown right now — this is not a statement
+              that no investigations exist.
+            </p>
+          ) : featured.featured === null ? (
+            <p className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+              No investigation has been published yet. Completed research becomes public only
+              when someone publishes a specific version.
+            </p>
+          ) : (
+            <CachedXRayCard entry={featured.featured} />
+          )}
+        </div>
       </div>
     </AppShell>
   )

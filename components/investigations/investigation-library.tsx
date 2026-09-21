@@ -16,7 +16,7 @@ import type { LibraryCard } from '@/lib/xray/publication/library-card'
  * Version history lists real `InvestigationVersion` records. XRAY-KE-001 is
  * version 1, so there is one entry; no version 2 is fabricated.
  */
-export function InvestigationLibrary({ entries }: { entries: LibraryCard[] }) {
+export function InvestigationLibrary({ entries }: { entries: readonly LibraryCard[] }) {
   const [query, setQuery] = useState('')
   const [openHistoryFor, setOpenHistoryFor] = useState<string | null>(null)
 

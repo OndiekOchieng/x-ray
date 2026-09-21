@@ -168,3 +168,70 @@ export async function publishedLibrary(query: LibraryQuery = {}): Promise<Librar
 export async function featuredPublication(): Promise<LibraryCard | null> {
   return (await publishedLibrary())[0] ?? null
 }
+
+// ---------------------------------------------------------------------------
+// Availability
+// ---------------------------------------------------------------------------
+
+/**
+ * The library, or a statement that storage could not be reached (#11 11b).
+ *
+ * WHY THIS EXISTS SEPARATELY
+ * ==========================
+ * `publishedLibrary` propagates a storage failure on purpose: an outage is not
+ * an absence of published work. But a *page* has to render something, and 11a
+ * found what happens when it does not — `/` and `/library` flushed a 200 shell
+ * and then threw, which is worse than a 503, because an empty page is
+ * indistinguishable from a working page with nothing in it.
+ *
+ * So the pages ask this instead, and it keeps the two apart:
+ *
+ *   UNAVAILABLE  storage could not be reached — say so
+ *   AVAILABLE    this is the library, and it may legitimately be empty
+ *
+ * Only a **typed host failure** is converted. Anything else still propagates:
+ * a projection bug or a corrupt row must not be reported to a reader as
+ * "temporarily unavailable" when the truth is that something is wrong.
+ */
+export type LibraryAvailability =
+  | { status: 'UNAVAILABLE' }
+  | { status: 'AVAILABLE'; entries: readonly LibraryCard[] }
+
+export async function publishedLibraryAvailability(
+  query: LibraryQuery = {},
+): Promise<LibraryAvailability> {
+  try {
+    return { status: 'AVAILABLE', entries: await publishedLibrary(query) }
+  } catch (error) {
+    if (isHostUnavailable(error)) return { status: 'UNAVAILABLE' }
+    throw error
+  }
+}
+
+export type FeaturedAvailability =
+  | { status: 'UNAVAILABLE' }
+  | { status: 'AVAILABLE'; featured: LibraryCard | null }
+
+export async function featuredPublicationAvailability(): Promise<FeaturedAvailability> {
+  const library = await publishedLibraryAvailability()
+  return library.status === 'UNAVAILABLE'
+    ? { status: 'UNAVAILABLE' }
+    : { status: 'AVAILABLE', featured: library.entries[0] ?? null }
+}
+
+/**
+ * Whether this failure is the host being unreachable rather than a defect.
+ *
+ * Narrow by name, deliberately. `HostNotConfigured` and
+ * `DemoHostMisconfigured` are the two states a deployment can be in without
+ * anything being broken.
+ *
+ * HONEST LIMITATION: a configured PostgreSQL that is *down* raises a driver
+ * error, which is not in this list and will surface as a server error rather
+ * than a degraded page. Mapping driver-level outages needs a typed failure at
+ * the host boundary, and 11b did not add one.
+ */
+function isHostUnavailable(error: unknown): boolean {
+  const name = (error as { name?: string } | null)?.name
+  return name === 'HostNotConfigured' || name === 'DemoHostMisconfigured'
+}
