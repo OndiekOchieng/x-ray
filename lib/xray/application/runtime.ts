@@ -31,29 +31,58 @@ export class HostNotConfigured extends Error {
   }
 }
 
-let databaseProvider: (() => Promise<SnapshotDatabase>) | null = null
-let runtimeProvider: (() => Promise<ExecutionRuntime>) | null = null
+/**
+ * Registered providers, held on `globalThis`.
+ *
+ * WHY NOT MODULE-LEVEL VARIABLES
+ * ==============================
+ * They were, and it did not work. Next bundles the server startup hook
+ * separately from the app's server components, so each got its **own instance**
+ * of this module: `instrumentation.ts` registered a database into one copy and
+ * every page read `null` from another. The symptom was exactly the 11a symptom
+ * it was meant to fix — `/` and `/library` reporting storage unreachable while
+ * a perfectly good connection sat in the other bundle.
+ *
+ * One slot on `globalThis`, keyed by a named symbol, is shared by every bundle
+ * in the process. The seam is unchanged: hosts and check harnesses still
+ * register through `setDatabaseProvider`, and nothing reads these fields
+ * directly.
+ */
+interface ProviderSlot {
+  database: (() => Promise<SnapshotDatabase>) | null
+  runtime: (() => Promise<ExecutionRuntime>) | null
+}
+
+const SLOT = Symbol.for('xray.application.providers')
+
+function slot(): ProviderSlot {
+  const host = globalThis as unknown as Record<symbol, ProviderSlot | undefined>
+  host[SLOT] ??= { database: null, runtime: null }
+  return host[SLOT]
+}
 
 export function setDatabaseProvider(provider: (() => Promise<SnapshotDatabase>) | null): void {
-  databaseProvider = provider
+  slot().database = provider
 }
 
 export function setExecutionRuntimeProvider(
   provider: (() => Promise<ExecutionRuntime>) | null,
 ): void {
-  runtimeProvider = provider
+  slot().runtime = provider
 }
 
 export async function getDatabase(): Promise<SnapshotDatabase> {
-  if (!databaseProvider) throw new HostNotConfigured('DATABASE')
-  return databaseProvider()
+  const provider = slot().database
+  if (!provider) throw new HostNotConfigured('DATABASE')
+  return provider()
 }
 
 /** Whether a database is available, for readers that may legitimately do without. */
-export const databaseConfigured = (): boolean => databaseProvider !== null
+export const databaseConfigured = (): boolean => slot().database !== null
 
 export async function getExecutionRuntime(): Promise<ExecutionRuntime> {
-  return runtimeProvider ? runtimeProvider() : unconfiguredResearchRuntime()
+  const provider = slot().runtime
+  return provider ? provider() : unconfiguredResearchRuntime()
 }
 
 // ---------------------------------------------------------------------------
