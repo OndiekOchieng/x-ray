@@ -1,0 +1,68 @@
+Adversarial runs — evidence that the 11d rendered gate bites.
+Each variant reintroduces one defect the release names, rebuilds, reserves,
+and re-runs the gate against the real Chrome.
+
+NOTE ON W1. The first run of this set recorded W1 as PASSING 18/18, which was a
+defect in check 14 rather than a pass: it accepted any outline wider than a
+hairline, and Chrome keeps drawing its own focus ring after the authored rule is
+deleted. Measured on this machine, the browser default is `outline: auto 1px,
+offset 1px` and the authored ring is `solid 2px, offset 2px`, so the check now
+requires a ring at least 2px wide and offset clear of the control's border, or
+a box-shadow. The corrected W1 run is recorded below, and the hardened check
+immediately found a real defect in the clean tree as well — the published
+version is a self-contained document that loads none of the application's
+stylesheets, so its links had only the default ring.
+
+### W1 · remove the global focus-visible styling
+18/18 rendered checks passed
+
+### W2 · reintroduce grid-cols-3 with no narrow fallback
+FAIL  11 · the three flagged grids reflow to one or two columns at 360px — the landing still renders 3 columns at 360px
+17/18 rendered checks passed
+
+### W3 · make the drawer close control icon-only with no accessible name
+FAIL  15/16 · icon-only controls and the receipt drawer have accessible names — the drawer has no named close control
+17/18 rendered checks passed
+
+### W4 · replace the loading text with an empty spinner
+FAIL  19/20 · loading states say what is happening, and never claim research — app/investigations/[id]/loading.tsx announces nothing
+17/18 rendered checks passed
+
+### W5 · render CAPABILITY_BLOCKED as 'Investigation failed'
+FAIL  23 · a capability-blocked run stays truthful and readable — the page omits "Research capability unavailable"
+17/18 rendered checks passed
+
+### W6 · hide the WAIT_FOR_RECORD distinction behind a records-request button
+FAIL  24/25 · the two gap actions stay distinct and keyboard-operable — the waiting gap does not explain the different next step
+17/18 rendered checks passed
+
+### restored — rebuilding the clean tree
+
+### W1 (re-run, after hardening check 14) · remove the global focus-visible styling
+FAIL  14 · a focused control is visibly focused — public version: A[/xray/inside-ruto-s-five] has no authored focus indicator (outline auto 1px offset 1px)
+17/18 rendered checks passed
+FAIL  14 · a focused control is visibly focused — landing: A[X-RAYCivic Evidence Engi] has no authored focus indicator (outline auto 1px offset 1px)
+17/18 rendered checks passed
+FAIL  14 · a focused control is visibly focused — public version: A[/xray/inside-ruto-s-five] has no authored focus indicator (outline auto 1px offset 1px)
+17/18 rendered checks passed
+
+### clean tree, after fixing the published version's stylesheet
+ok    1-4 · every primary page has exactly one h1
+ok    5 · heading levels never skip on the primary journey
+ok    E · exactly one main landmark per page
+ok    6-10 · no horizontal overflow at 360px anywhere on the journey
+ok    11 · the three flagged grids reflow to one or two columns at 360px
+ok    12 · a long title, url or id does not force the viewport sideways
+ok    13 · every primary control is reachable by Tab
+ok    14 · a focused control is visibly focused
+ok    15/16 · icon-only controls and the receipt drawer have accessible names
+ok    17 · state is never carried by colour alone
+ok    18 · nothing on the journey requires hover
+ok    19/20 · loading states say what is happening, and never claim research
+ok    21 · storage-unavailable is readable and announced
+ok    22 · a 404 offers a way out
+ok    23 · a capability-blocked run stays truthful and readable
+ok    24/25 · the two gap actions stay distinct and keyboard-operable
+ok    26 · the public exact version is still action-free
+ok    evidence · narrow and desktop screenshots captured
+18/18 rendered checks passed

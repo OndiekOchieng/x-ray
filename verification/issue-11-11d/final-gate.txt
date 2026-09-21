@@ -1,0 +1,68 @@
+=== 11d rendered gate (real Chrome, seeded PostgreSQL) ===
+ok    1-4 · every primary page has exactly one h1
+ok    5 · heading levels never skip on the primary journey
+ok    E · exactly one main landmark per page
+ok    6-10 · no horizontal overflow at 360px anywhere on the journey
+ok    11 · the three flagged grids reflow to one or two columns at 360px
+ok    12 · a long title, url or id does not force the viewport sideways
+ok    13 · every primary control is reachable by Tab
+ok    14 · a focused control is visibly focused
+ok    15/16 · icon-only controls and the receipt drawer have accessible names
+ok    17 · state is never carried by colour alone
+ok    18 · nothing on the journey requires hover
+ok    19/20 · loading states say what is happening, and never claim research
+ok    21 · storage-unavailable is readable and announced
+ok    22 · a 404 offers a way out
+ok    23 · a capability-blocked run stays truthful and readable
+ok    24/25 · the two gap actions stay distinct and keyboard-operable
+ok    26 · the public exact version is still action-free
+ok    evidence · narrow and desktop screenshots captured
+18/18 rendered checks passed
+
+=== 11b and 11c gates ===
+check:demo-host        15/15 demo host checks passed
+check:legibility       20/20 legibility checks passed
+
+=== #6-#10 regression sweep ===
+check:fixtures                             PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entrie
+check:validation                           PASS  52/52 passed
+check:query                                PASS  56/56 passed
+check:review                               PASS  32/32 passed
+check:acceptance                           PASS  32/32 passed
+check:pipeline                             PASS  58/58 passed
+check:adapters                             PASS  45/45 passed
+check:replay                               PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entrie
+check:source-position                      PASS  14a: contextual positions, T1/T2, Evidence basis and orthogona
+check:source-position-pipeline             PASS  14b: TRACE retry identity, PROVENANCE revision, orthogonal lin
+check:source-position-review               PASS  14c: characterization, agency, retrospective intent, falsifier
+check:persistence-schema                   PASS  
+check:source-position-schema               PASS  15a schema: 29/29 checks passed
+check:persistence-roundtrip                PASS  15b: explicitly present empty membership round-trip PASS
+check:persistence-versioning               PASS  7c: stale expected predecessor conflicts without overwrite PAS
+check:source-position-versioning           PASS  15c: stale predecessor rejects without partial v2 change PASS
+check:persistence-workspace                PASS  7d-a: resumed run skips success, retains failure, clears stale
+check:persistence-audit                    PASS  7d-b: missing ReviewerModel remains NOT_EVALUATED and capabili
+check:persistence-ati                      PASS  7d-d ATI: version-scoped eligible origin, invalid references, 
+check:persistence-durable-integration      PASS  7d-d: restart → resume → gates → audit → graduation �
+check:persistence-graduation               PASS  7c: stale expected predecessor conflicts without overwrite PAS
+check:investigation-service                PASS  8a: owner-scoped run/candidate reads; exact v1/v2 snapshots; o
+check:inline-execution                     PASS  8b: the surface Source appears only from actual INGEST output 
+check:api-routes                           PASS  23/23 passed
+check:lifecycle                            PASS  21/21 passed
+check:publication                          PASS  26/26 passed
+check:public-resolver                      PASS  25/25 passed
+check:public-routes                        PASS  31/31 passed
+check:public-library                       PASS  25/25 passed
+check:version-lineage                      PASS  15/15 passed
+check:ati-lifecycle                        PASS  28/28 passed
+check:ati-commands                         PASS  
+check:ati-responses                        PASS  
+check:ati-research                         PASS  
+check:ati-surface                          PASS  
+check:benchmark-corpus                     PASS  benchmark corpus: 12 cases, 1 executable fixture(s), registry 
+
+=== tsc + build ===
+tsc clean
+◐  (Partial Prerender)  prerendered as static HTML with dynamic server-streamed content
+ƒ  (Dynamic)            server-rendered on demand
+
