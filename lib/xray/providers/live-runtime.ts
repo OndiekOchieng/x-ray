@@ -45,6 +45,7 @@ import {
 } from './registry'
 import type { Environment } from './config'
 import { liveStages, newRunMaterial, type RunMaterial } from './live-stages'
+import type { QueryPlan } from '@/lib/xray/pipeline/query-plan'
 
 /** What a composition attempt produced. */
 export type RuntimeComposition =
@@ -76,6 +77,14 @@ export interface LiveRuntimeOptions {
    * out not to work.
    */
   readonly registry?: ProviderRegistry
+  /**
+   * Told what each search was, as `PLAN` formulates it.
+   *
+   * So a host — the first-light script above all — can report what X-Ray
+   * actually asked for rather than inferring it from what came back. Run
+   * diagnostics: nothing canonical passes through it.
+   */
+  readonly observeQueryPlan?: (plan: QueryPlan) => void
 }
 
 /**
@@ -155,6 +164,8 @@ export function liveRuntime(
         ? {} : { researchCutoffAt: options.researchCutoffAt }),
       ...(options.retrieveLimit === undefined
         ? {} : { retrieveLimit: options.retrieveLimit }),
+      ...(options.observeQueryPlan === undefined
+        ? {} : { observeQueryPlan: options.observeQueryPlan }),
     })
 
   return {

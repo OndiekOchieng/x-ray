@@ -86,6 +86,9 @@ import {
   hashExtract, isInspectable, isQuotable,
   type RetrievalQuery, type RetrievedDocument,
 } from '@/lib/xray/pipeline/retrieval-port'
+import {
+  investigationAnchors, planQuery, type QueryPlan,
+} from '@/lib/xray/pipeline/query-plan'
 import type { StageContext, StageDefinition, StageOutcome } from '@/lib/xray/pipeline/stages'
 import { gatherMaterial, type GatheredMaterial } from './material'
 
@@ -101,8 +104,14 @@ import { gatherMaterial, type GatheredMaterial } from './material'
 export interface RunMaterial {
   /** The submitted record, once INGEST has obtained it. */
   surface?: RetrievedDocument
-  /** Queries PLAN formulated, per claim id. Run state, never canonical. */
-  plannedQueries: Map<string, RetrievalQuery>
+  /**
+   * What PLAN searched for and why, per claim id. Run state, never canonical.
+   *
+   * The plan rather than just the query: first light could report the four
+   * wrong countries it found but not the query that found them, and "what did
+   * X-Ray actually ask?" should not have to be reconstructed from results.
+   */
+  queryPlans: Map<string, QueryPlan>
   /** Material TRACE gathered, per claim id. */
   gathered: Map<string, GatheredMaterial>
   /**
@@ -124,7 +133,7 @@ export interface RunMaterial {
 }
 
 export const newRunMaterial = (): RunMaterial => ({
-  plannedQueries: new Map(),
+  queryPlans: new Map(),
   gathered: new Map(),
   rediscoveries: new Map(),
   reusedSourceIds: [],
@@ -146,6 +155,17 @@ export interface LiveStageOptions {
    * field that tolerates a placeholder. See `observedAt`.
    */
   readonly now: () => string
+  /**
+   * Told what each search was, as `PLAN` formulates it.
+   *
+   * A diagnostics seam, so a host can log what X-Ray actually asked without
+   * reaching into `RunMaterial` — which a resumed run rebuilds and a finished
+   * run drops. Nothing canonical passes through it and nothing reads its
+   * result. It is not wrapped: an observer that throws will fail the stage,
+   * because a diagnostics channel that swallows its own bugs is how a log
+   * quietly stops being written.
+   */
+  readonly observeQueryPlan?: (plan: QueryPlan) => void
 }
 
 /**
@@ -442,23 +462,42 @@ function classify(options: LiveStageOptions): StageDefinition {
  * `TraceInput.queriesAttempted`, exactly where the model port puts them.
  *
  * They are built here rather than asked for: there is no `plan` method on the
- * port by design (D17), and terms drawn from the claim's own text and entities
- * need no model judgement.
+ * port by design (D17), and `query-plan.ts` needs no model judgement.
+ *
+ * Each query is the claim's own terms plus the investigation's anchors, which
+ * is first light's Finding 3. A claim decomposed out of an article does not
+ * repeat the article's context — "the Auditor General has highlighted wastage
+ * of public funds by counties" names no country — so a search built from the
+ * claim alone found Ontario, Michigan, Guyana and the DCAA. The anchors come
+ * from the surface record the investigation was submitted with; see
+ * `query-plan.ts` for what they are and, more importantly, what they are not.
+ *
+ * The anchors are computed once per stage run rather than once per claim: they
+ * are a property of the investigation, and every claim's query narrows the
+ * same context.
  */
 function plan(options: LiveStageOptions): StageDefinition {
   return {
     stage: 'PLAN',
     run(ctx: StageContext): StageOutcome {
+      const surfaceSource = ctx.graph.sources.find(
+        (source) => source.id === ctx.graph.investigation.surfaceSourceId)
+      const anchors = investigationAnchors({
+        ...(ctx.graph.investigation.focus === undefined
+          ? {} : { focus: ctx.graph.investigation.focus }),
+        // SURFACE only: what the article said, not what tracing has since found.
+        surfaceClaims: ctx.graph.claims.filter((claim) => claim.origin === 'SURFACE'),
+        ...(surfaceSource === undefined ? {} : { surfaceSource }),
+      })
+
       for (const claim of ctx.graph.claims) {
-        const entities = claim.entities.slice(0, 3).join(' ')
-        const terms = [claim.text.slice(0, 180), entities].filter(Boolean).join(' ')
-        options.material.plannedQueries.set(claim.id, {
-          terms,
-          ...(claim.entities.length > 0 ? { constraints: [...claim.entities] } : {}),
+        const planned = planQuery(claim, anchors, {
           ...(options.researchCutoffAt === undefined
             ? {} : { researchCutoffAt: options.researchCutoffAt }),
           maxResults: options.retrieveLimit ?? 5,
         })
+        options.material.queryPlans.set(claim.id, planned)
+        options.observeQueryPlan?.(planned)
       }
       return {}
     },
@@ -511,7 +550,7 @@ function trace(options: LiveStageOptions): StageDefinition {
       const surfaceSourceId = ctx.graph.investigation.surfaceSourceId
 
       for (const claim of ctx.graph.claims) {
-        const query = options.material.plannedQueries.get(claim.id)
+        const query = options.material.queryPlans.get(claim.id)?.query
           ?? { terms: claim.text.slice(0, 180) }
 
         const gathered = await gatherMaterial(

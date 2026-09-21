@@ -1,0 +1,15 @@
+=== pnpm check:query-plan ===
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/providers/query-plan-checks.ts
+ok    1 · the first-light shape carries investigation anchors into a generic query
+ok    2 · the fixture reproduces first light, and the anchors change the result
+ok    3 · the same generic claim in two jurisdictions produces two queries
+ok    4 · claim specificity survives anchoring
+ok    5 · the claim leads its own query and is never displaced
+ok    6 · no anchors degrades to the claim query, and invents nothing
+ok    7 · anchors mint nothing canonical
+ok    8 · what was searched for is inspectable run state
+ok    9 · the anchor budget holds, and the rest still narrows the search
+ok    10 · tracing cannot re-anchor the investigation
+ok    11 · no jurisdiction is hard-coded in planning or runtime code
+
+11/11 query plan checks passed

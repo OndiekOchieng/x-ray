@@ -1,0 +1,20 @@
+=== anchors read off the surface record ===
+  SURFACE_RECURRING_ENTITY   Auditor General
+  SURFACE_PUBLISHER          The Standard
+  SURFACE_HOST               standardmedia.co.ke
+  SURFACE_PERIOD             2026
+
+=== what first light searched for ===
+  C001: The Auditor General's findings raise questions about whether taxpayers are getting value for money. Auditor General taxpayers
+      constraints: ["Auditor General","taxpayers"]
+  C002: The Auditor General has highlighted wastage of public funds by counties. Auditor General counties
+      constraints: ["Auditor General","counties"]
+
+=== what it would search for now ===
+  C001: The Auditor General's findings raise questions about whether taxpayers are getting value for money. Auditor General taxpayers The Standard standardmedia.co.ke 2026 — The Standard [SURFACE_PUBLISHER], standardmedia.co.ke [SURFACE_HOST], 2026 [SURFACE_PERIOD]; claim already named 1
+      constraints: ["Auditor General","taxpayers","The Standard","standardmedia.co.ke","2026"]
+  C002: The Auditor General has highlighted wastage of public funds by counties. Auditor General counties The Standard standardmedia.co.ke 2026 — The Standard [SURFACE_PUBLISHER], standardmedia.co.ke [SURFACE_HOST], 2026 [SURFACE_PERIOD]; claim already named 1
+      constraints: ["Auditor General","counties","The Standard","standardmedia.co.ke","2026"]
+
+No provider was called. Whether the retrieval actually improves is
+for the civic rerun to establish, not this script.
