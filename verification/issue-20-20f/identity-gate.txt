@@ -3,12 +3,13 @@ ok    26 · one artifact yields one Source, and never corroborates its own claim
 ok    26b · same locator with different content is NOT collapsed
 ok    26d · one corroborator found twice yields one Source
 ok    26c · different URLs are never collapsed, whatever their hashes
+ok    26f · a resume withholds the surface record even when its bytes changed
 ok    26e · a resumed run still withholds the surface artifact
 ok    17 · the stage layer is provider-neutral and the pipeline is untouched
 ok    18 · review stays out of the pipeline adapters
 ok    19 · no secret reaches a composed runtime, a plan, or a graph
 
-34/34 live runtime checks passed
+35/35 live runtime checks passed
 Every call went to 127.0.0.1. No civic URL was used.
 
 
@@ -23,14 +24,28 @@ same normalised locator + same STAGE-COMPUTED content hash, in one run
   hash differs, same locator       -> two Sources (a changed record is a new observation)
   either hash missing              -> two Sources (identity is established, never assumed)
 
-Two decisions turn on it, and they answer different questions:
-  sameArtifact()      "have I already got this?"   -> minting: reuse the id
-  isSurfaceArtifact() "is this the article under investigation?" -> withhold it
-                                                      from a SURFACE claim
+=== the two predicates are NOT the same test ===
+  sameArtifact      locator AND stage-computed hash -> canonical identity reuse
+  isSurfaceRecord   locator ONLY                    -> withhold from a
+                                                       SURFACE claim
 
-Withholding consults the surface document in hand AND the graph's surface
-Source, so it keeps working on a resumed run where the in-memory material is
-empty. The XR-INV-001 id comparison is the third layer.
+Identity needs the hash: a changed record is a distinct observation and
+collapsing it would discard the change.
+
+Surface isolation must NOT use the hash. A document at the investigation's
+surface locator is the surface article whatever it now says. Conflating the two
+left a hole that was reachable on resume:
+
+  INGEST takes the page at H1
+  -> run interrupted -> the page changes
+  -> resume has fresh RunMaterial, re-fetches the locator and gets H2
+  -> a hash-sensitive test answers "not the surface record"
+  -> offered, cited for a SURFACE claim, minted under a new id
+  -> the validator misses it: sourceId != surfaceSourceId
+
+The surface locator comes from the graph's surface Source (authoritative, and
+present from INGEST onwards), with material in hand only as a fallback. The
+XR-INV-001 id comparison is the third layer.
 
 === why this was an invariant defect, not a tidiness one ===
 validateEpistemics: `if (e.sourceId !== surfaceSourceId) continue`
@@ -50,6 +65,10 @@ AP identity collapses on locator alone            -> FAIL 26b
 AQ identity collapses on hash alone               -> FAIL 26b, 26c
 AR rediscovered material re-fetched not reused    -> FAIL 26
 AT withholding consults only in-memory material   -> FAIL 26e
+AU surface recognition made hash-sensitive again  -> FAIL 26b, 26f
+     26f: "the changed surface page was offered as material for a SURFACE claim"
+     — the review's hole, reproduced exactly
+AV surface locator read only from in-memory material -> FAIL 26e, 26f
      "the surface artifact was not withheld on resume; only the backstop caught it"
      — which is also the evidence that the backstop works when withholding is
        defeated

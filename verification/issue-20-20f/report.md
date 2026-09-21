@@ -4,6 +4,12 @@ Branch `feat/live-provider-composition`, from `6700013` (first light).
 Fixes only the defect first light exposed as Finding 4. No other behaviour
 changed.
 
+> **Amendment (review response).** The canonical dedup was accepted; surface
+> withholding was using the **same** equivalence, which left a hole reachable
+> on resume. The two predicates are now explicitly separate: identity needs
+> locator **and** hash, surface recognition uses the **locator only**. See
+> *Amendment* below. First submission `ba6bdc3`.
+
 ## The rule, as decided
 
 **Same normalised locator + same stage-computed content hash, in one run = one
@@ -38,6 +44,80 @@ One artifact, one id, is what makes that comparison sound. **Nothing in the
 validator changed** — the fix restores the precondition the invariant was
 always written against.
 
+## Amendment — the two predicates are not the same test
+
+The dedup rule was right and the withholding rule borrowed it, which was wrong.
+
+`isSurfaceArtifact` compared locator **and** stage-computed hash, exactly as
+`sameArtifact` does. But `XR-INV-001` is not about bytes: a document at the
+investigation's surface locator **is** the surface article whatever it now says.
+A surface source establishes that a claim was *made*; changing its text does not
+make it able to corroborate that claim.
+
+### The hole, and why it was reachable
+
+```
+INGEST takes the surface page at H1
+  -> the run is interrupted
+  -> the page changes
+  -> the resume has fresh RunMaterial
+  -> TRACE re-fetches the same locator and gets H2
+  -> a hash-sensitive test answers "not the surface record"
+  -> offered, cited for a SURFACE claim, minted under a new id
+  -> the validator misses it: sourceId != surfaceSourceId
+```
+
+That is the *same laundering* the dedup fix closed, through the one door still
+open — and my own check 26e could not see it, because its fixture returned
+**unchanged** bytes on the re-fetch. The mechanism was tested; the case that
+defeats it was not.
+
+### The separation
+
+```
+sameArtifact      locator AND stage-computed hash  ->  canonical identity reuse
+isSurfaceRecord   locator ONLY                     ->  withhold from a
+                                                       SURFACE claim
+```
+
+Identity keeps the hash, because a changed record is a distinct observation and
+collapsing H1 with H2 would discard the change. Surface recognition drops it.
+
+The canonical surface locator now comes from the **graph's** surface `Source`,
+which is authoritative and present from `INGEST` onwards; material in hand is
+only a fallback for before it exists.
+
+**Withholding did not become dedup.** H1 and H2 are still two observations if
+either needs canonical representation — a `DISCOVERED` claim may legitimately
+draw on the changed page, and it would be minted as a second `Source` at that
+locator. What cannot happen is the surface locator's content, old or new,
+bearing on a claim decomposed out of it.
+
+### Check 26f
+
+The path above, end to end: graph holds `SRC-001` at `L`/`H1`, `RunMaterial`
+is empty as on resume, search rediscovers `L`, retrieve returns `H2`, and the
+model would cite anything it is shown. It asserts the changed page was **not
+offered** (by inspecting what `trace` actually received), that no evidence from
+that locator bears on the `SURFACE` claim, that `XR-INV-001` is clean under
+`STAGED` validation, and that `H1`/`H2` were **not** silently deduped — the
+seeded observation still carries `H1` and `sameArtifact` still separates them.
+
+### Controls
+
+| Control | Result |
+|---|---|
+| **AU · surface recognition made hash-sensitive again** | **FAIL 26b, 26f** — *"the changed surface page was offered as material for a SURFACE claim"*: the review's hole, reproduced |
+| **AV · surface locator read only from in-memory material** | **FAIL 26e, 26f** |
+
+### And a check that encoded the bug
+
+26b's structural assertion required the **withholding** path to compare the
+stage-computed hash. It was asserting the defect — a check that should have
+caught the hole instead insisted on it. It now asserts the opposite: that
+surface recognition mentions no hash at all and compares the locator. Control
+AU fails on that assertion as well as on the behaviour.
+
 ## What was changed
 
 Two decisions turn on identity, and they answer different questions:
@@ -46,9 +126,10 @@ Two decisions turn on identity, and they answer different questions:
   against `ctx.graph.sources` **and** the `Source`s this stage minted a moment
   ago, so two claims whose searches both find the same corroborating record
   share one identity.
-- **`isSurfaceArtifact()`** — *"is this the article under investigation?"* The
-  surface artifact is **withheld from the material offered** for a `SURFACE`
-  claim, so it cannot be cited because it is never shown.
+- **`isSurfaceRecord()`** — *"is this the article under investigation?"*
+  **Locator only.** The surface record is **withheld from the material
+  offered** for a `SURFACE` claim, so it cannot be cited because it is never
+  shown.
 
 Prevention at the material boundary, not repair afterwards — and never repair
 by `PROVENANCE`, which decides lineage and is not an identity-fixing stage.
@@ -90,7 +171,7 @@ the search found.
 
 ## Gate
 
-`pnpm check:live-runtime` — **34/34**.
+`pnpm check:live-runtime` — **35/35**.
 
 | Check | |
 |---|---|
@@ -99,6 +180,7 @@ the search found.
 | **26c** | two mirrored URLs serving identical bytes stay two `Source`s, with no dependency inferred |
 | **26d** | one corroborator found by two claims' searches yields one `Source` |
 | **26e** | a resumed run still withholds the surface artifact, *and withholding is what did it* |
+| **26f** | a resume withholds the surface record **even when its bytes changed** — the review's hole |
 
 ### Negative controls
 
@@ -110,6 +192,8 @@ the search found.
 | AQ · identity collapses on hash alone | FAIL 26b, 26c |
 | AR · rediscovered material re-fetched not reused | FAIL 26 |
 | AT · withholding consults only in-memory material | FAIL 26e |
+| **AU · surface recognition made hash-sensitive again** | **FAIL 26b, 26f** |
+| **AV · surface locator read only from in-memory material** | **FAIL 26e, 26f** |
 | **AS · the XR-INV-001 backstop removed** | **no check fails** |
 
 **AS is reported as a gap, not hidden.** Withholding always wins, so no check
@@ -142,6 +226,13 @@ recorded rather than claiming coverage it does not have.
   first id). 26e's first version ran `DECOMPOSE`, which reported a capability
   gap for want of the surface document, so there were no claims and `TRACE`
   never ran.
+- **A check that asserted the defect.** 26b required the withholding path to
+  compare the stage-computed hash — it encoded the exact hole the review found,
+  so the check that should have caught it was instead insisting on it. Now
+  inverted: surface recognition must mention no hash.
+- **My resume check used unchanged bytes.** 26e proved withholding survives a
+  resume and was blind to the case that defeats it, because its fixture
+  re-fetched identical content. 26f is that case.
 - **Check 13's exclusion rule lagged the convention again.** The 20e
   first-light runner in `verification/` composes providers on purpose and was
   flagged as application code. Excluded, and named in the source — this is the

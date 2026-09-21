@@ -42,7 +42,18 @@
  *
  *   - identity is resolved before minting, against `Source`s the run already
  *     has, so one artifact has one id and the invariant's comparison is sound;
- *   - the surface artifact is withheld from the material offered for a
+ * THE TWO PREDICATES ARE NOT THE SAME TEST
+ * ========================================
+ *     sameArtifact      locator AND stage-computed hash -> canonical identity
+ *     isSurfaceRecord   locator only                    -> withhold from a
+ *                                                          SURFACE claim
+ *
+ * Identity needs the hash: a changed record is a distinct observation and
+ * collapsing it would discard the change. Surface isolation must **not** use
+ * the hash, or a changed surface page re-enters `TRACE` under a new id on
+ * resume, where the validator cannot see it.
+ *
+ *   - the surface record is withheld from the material offered for a
  *     `SURFACE` claim, so it cannot re-enter `TRACE` at all for the claims it
  *     is the origin of. Prevention at the material boundary, not repair after
  *     the fact — and never repair by `PROVENANCE`, which decides lineage and
@@ -525,27 +536,36 @@ function trace(options: LiveStageOptions): StageDefinition {
          * forbid it.
          */
         /*
-         * The surface artifact, identified from the graph as well as from
-         * material in hand.
+         * Is this the article under investigation? **Locator only.**
          *
-         * `material.surface` is per-plan and in memory, so a **resumed** run
-         * does not have it — and withholding that depended on it alone would
-         * quietly stop working on resume, exactly when the graph still holds
-         * SRC-001 and a search can still rediscover it. The canonical Source
-         * carries the locator and the stage-computed hash, which is all the
-         * comparison needs.
+         * This is not `sameArtifact`, and conflating the two was a real hole.
+         * Canonical identity needs locator *and* hash, because a record that
+         * changed is a distinct observation. `XR-INV-001` is not about bytes: a
+         * document at the investigation's surface locator *is* the surface
+         * article whatever it now says, and a surface source establishes that a
+         * claim was made rather than corroborating it.
+         *
+         * The hole was reachable on resume. INGEST takes the page at H1; the
+         * run is interrupted; the page changes; the resume has fresh
+         * `RunMaterial` and re-fetches the same locator at H2 — and a
+         * hash-sensitive test answered "not the surface record", so it was
+         * offered, cited, and minted under a new id. The validator then missed
+         * it, because it compares `sourceId` against `surfaceSourceId` and the
+         * ids differed. The same laundering the dedup fix closed, through the
+         * one door still open.
+         *
+         * The canonical surface locator comes from the graph's surface Source,
+         * which is authoritative and present from INGEST onwards; material in
+         * hand is only a fallback for before it exists.
          */
         const surfaceSource = ctx.graph.sources.find(
           (source) => source.id === surfaceSourceId)
-        const surfaceLocator = surfaceDocument?.locator ?? surfaceSource?.url
-        const surfaceHash = surfaceDocument === undefined
-          ? surfaceSource?.contentHash : stageHash(surfaceDocument)
-        const isSurfaceArtifact = (document: RetrievedDocument): boolean =>
-          surfaceLocator !== undefined && surfaceHash !== undefined
-          && document.locator === surfaceLocator && stageHash(document) === surfaceHash
+        const surfaceLocator = surfaceSource?.url ?? surfaceDocument?.locator
+        const isSurfaceRecord = (document: RetrievedDocument): boolean =>
+          surfaceLocator !== undefined && document.locator === surfaceLocator
 
         const offerable = claim.origin === 'SURFACE'
-          ? gathered.documents.filter((document) => !isSurfaceArtifact(document))
+          ? gathered.documents.filter((document) => !isSurfaceRecord(document))
           : gathered.documents
         const withheldFromClaim = gathered.documents.length - offerable.length
         if (withheldFromClaim > 0) withheldSurfaceOffers += withheldFromClaim

@@ -1731,10 +1731,22 @@ check('26b · same locator with different content is NOT collapsed', () => {
     .replace(/\s+/g, ' ')
   if (!/sameArtifact\(candidate, document\.locator, hash\)/.test(stages))
     return 'the minting path no longer resolves identity'
-  if (!/stageHash\(document\) === surfaceHash/.test(stages))
-    return 'the withholding path no longer compares the stage-computed hash'
-  return /source\.contentHash === hash/.test(stages)
-    ? null : 'identity no longer compares the stage-computed hash'
+  if (!/source\.contentHash === hash/.test(stages))
+    return 'identity no longer compares the stage-computed hash'
+
+  /*
+   * And the two predicates stay separate. An earlier version of this assertion
+   * required the *withholding* path to compare the hash too — it encoded the
+   * exact hole the review found, so a check that should have caught the bug
+   * instead insisted on it. Surface recognition must be locator-only.
+   */
+  const recognition = /const isSurfaceRecord = \(document: RetrievedDocument\): boolean => ([^;]*)/
+    .exec(stages)
+  if (recognition === null) return 'the surface-recognition predicate was not found'
+  if (/[Hh]ash/.test(recognition[1]!))
+    return `surface recognition is hash-sensitive: ${recognition[1]!.slice(0, 120)}`
+  return /document\.locator === surfaceLocator/.test(recognition[1]!)
+    ? null : 'surface recognition no longer compares the locator'
 })
 
 check('26d · one corroborator found twice yields one Source', async () => {
@@ -1867,6 +1879,152 @@ check('26c · different URLs are never collapsed, whatever their hashes', async 
     return `${result.graph.sourceDependencies.length} source dependencies were inferred`
   return new Set(mirrors.map((source) => source.id)).size === 2
     ? null : 'the mirrors were collapsed onto one identity'
+})
+
+check('26f · a resume withholds the surface record even when its bytes changed', async () => {
+  /*
+   * The hole the review found, end to end.
+   *
+   *   INGEST takes the surface page at H1
+   *   -> the run is interrupted
+   *   -> the page changes
+   *   -> the resume has fresh RunMaterial
+   *   -> TRACE re-fetches the same locator and gets H2
+   *
+   * A hash-sensitive surface test answers "not the surface record" here, so the
+   * changed page is offered, cited for a SURFACE claim, and minted under a new
+   * id — and the validator misses it, because it compares `sourceId` against
+   * `surfaceSourceId` and the ids differ.
+   *
+   * `isSurfaceRecord` compares the locator only, so the article under
+   * investigation stays the article under investigation whatever it now says.
+   */
+  const CHANGED = 'The county has since revised the resurfaced length to 31 kilometres.'
+  const H1 = hashExtract({ text: ARTICLE, truncated: false })
+  const H2 = hashExtract({ text: CHANGED, truncated: false })
+  if (H1 === H2) return 'the fixture content does not actually differ'
+
+  const material = newRunMaterial()
+  const stages = liveStages({
+    sourceUrl: URL_UNDER_INVESTIGATION,
+    material,
+    now: () => '2026-09-21T12:00:00Z',
+    retrieveLimit: 3,
+  })
+  // A resume after CLASSIFY: INGEST and DECOMPOSE already ran, so the surface
+  // Source and the claims come from durable state and the material is empty.
+  const resumed = stages.filter((stage) =>
+    stage.stage !== 'INGEST' && stage.stage !== 'DECOMPOSE' && stage.stage !== 'CLASSIFY')
+
+  const surface: Source = {
+    id: 'SRC-001',
+    title: 'The article under investigation, as first retrieved',
+    url: URL_UNDER_INVESTIGATION,
+    retrievedAt: '2026-09-21T11:00:00Z',
+    sourceType: 'NEWS',
+    evidenceClass: 'SECONDARY',
+    originStatus: 'UNKNOWN',
+    accessibility: 'RETRIEVED',
+    contentHash: H1,
+  }
+  const alreadyDecomposed: Claim = {
+    id: 'C001',
+    origin: 'SURFACE',
+    investigationId: 'XRAY-LIVE-202',
+    text: 'The county resurfaced 42 kilometres of road in the period.',
+    layer: 'OBSERVATION',
+    type: 'QUANTITATIVE',
+    priority: 'HIGH',
+    entities: ['Kisumu County'],
+    ambiguities: [],
+  }
+
+  /** Rediscovers the surface locator and returns *changed* bytes for it. */
+  const offered: string[] = []
+  const changedOnRefetch: ResearchAdapter = {
+    name: 'stub:changed-on-refetch',
+    capabilities: ['search', 'retrieve'],
+    async search(query) {
+      return available({
+        query,
+        documents: [document('s1', URL_UNDER_INVESTIGATION, undefined, 'NOT_RETRIEVED')],
+      })
+    },
+    async retrieve(locator) {
+      return available(document('d1', locator,
+        locator === URL_UNDER_INVESTIGATION ? CHANGED : CORROBORATION))
+    },
+  }
+  const watchingModel: ResearchModel = {
+    ...citingModel(),
+    async trace(input) {
+      for (const entry of input.documents) offered.push(String(entry.locator))
+      // Would cite anything it is shown, for the claim it is given.
+      return available({
+        evidence: input.documents.filter((entry) => isInspectable(entry)).map((entry) => ({
+          sourceRef: entry.ref,
+          proposition: `Drawn from ${String(entry.locator)}.`,
+          relationship: 'SUPPORTS' as const,
+          strength: 'DIRECT' as const,
+          claimRefs: [input.claim.ref],
+        })),
+        discoveredClaims: [],
+      })
+    },
+  }
+
+  const result = await runPipeline({
+    investigation: submittedInvestigation('XRAY-LIVE-202', '2026-04-01T00:00:00Z'),
+    stages: resumed,
+    adapters: { model: watchingModel, research: changedOnRefetch },
+    seed: { sources: [surface], claims: [alreadyDecomposed] },
+    maxAttempts: 1,
+  })
+  const graph = result.graph
+
+  if (material.surface !== undefined)
+    return 'the fixture populated the surface document; this is not the resume shape'
+  if (graph.claims.filter((claim) => claim.origin === 'SURFACE').length === 0)
+    return 'the fixture produced no surface claim, so nothing was traced'
+
+  // 1 — it was not offered for the SURFACE claim, despite the changed bytes.
+  if (offered.includes(URL_UNDER_INVESTIGATION))
+    return 'the changed surface page was offered as material for a SURFACE claim'
+  if (material.withheldSurfaceOffers === 0)
+    return 'the changed surface page was not withheld'
+
+  // 2 — no evidence from that locator bears on the surface claim.
+  const surfaceClaimIds = new Set<string>(
+    graph.claims.filter((claim) => claim.origin === 'SURFACE').map((claim) => claim.id))
+  const fromSurfaceLocator = new Set(
+    graph.sources.filter((source) => source.url === URL_UNDER_INVESTIGATION)
+      .map((source) => source.id))
+  for (const item of graph.evidence) {
+    if (!fromSurfaceLocator.has(item.sourceId)) continue
+    const own = item.claimIds.filter((id) => surfaceClaimIds.has(id))
+    if (own.length > 0)
+      return `${item.id} (from the surface locator, source ${item.sourceId}) bears on`
+        + ` surface claim(s) ${own.join(', ')}`
+  }
+  const validation = validateXRayGraph(graph, { mode: 'STAGED' })
+  if (validation.violations.some((violation) => violation.invariant === 'XR-INV-001'))
+    return 'XR-INV-001 violated on the changed-surface resume path'
+
+  /*
+   * 3 — and the identity rule is untouched: H1 and H2 were not silently
+   * collapsed. Nothing minted a second Source here because nothing was
+   * offered, so the graph still holds exactly the one seeded observation —
+   * which is the point. Withholding is not dedup, and it did not become it.
+   */
+  const atSurfaceLocator = graph.sources.filter(
+    (source) => source.url === URL_UNDER_INVESTIGATION)
+  if (atSurfaceLocator.length !== 1)
+    return `${atSurfaceLocator.length} Sources at the surface locator, expected the seeded one`
+  if (atSurfaceLocator[0]!.contentHash !== H1)
+    return 'the seeded observation was overwritten by the changed bytes'
+  return sameArtifact({ url: URL_UNDER_INVESTIGATION, contentHash: H1 },
+    URL_UNDER_INVESTIGATION, H2)
+    ? 'identity collapsed H1 and H2' : null
 })
 
 check('26e · a resumed run still withholds the surface artifact', async () => {
