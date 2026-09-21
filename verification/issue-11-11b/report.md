@@ -1,60 +1,117 @@
 # Issue #11 slice 11b — seeded demo host and honest fresh path
 
-**Released from:** `f2bec0b`
-**Gate:** `pnpm check:demo-host` — **13/13**
-**Live evidence:** `verification/issue-11-11b/live-journey.txt` (Next production build against PostgreSQL 17.11)
+**Released from:** `f2bec0b` · **remediated after independent review**
+**Gate:** `pnpm check:demo-host` — **15/15**
+**#6 proof:** `pnpm check:pipeline` — **58/58**, including A1–A10
+**Live evidence:** `live-journey-refreshed.txt` (Next production build against PostgreSQL 17.11)
 **Database choice:** PostgreSQL for the deployment; PGlite for local reproduction
 
 ---
 
-## One released item is RED
+## Item 19 — remediated per the #6 amendment
 
-**Item 19 — "with no research adapter, execution ends `CAPABILITY_BLOCKED`" — is not met.**
-It ends `GATE_BLOCKED`, and the reason is architectural rather than incidental.
+The review was right that this was a #6 regression rather than an 11b
+shortcoming. `runPipeline` reached a gate verdict before its final capability
+check, so with no adapter every stage was capability-blocked, the graph was
+empty, `VALIDATE` legitimately refused it, and the run durably recorded
+`GATE_BLOCKED` — attributing to the graph what belonged to work that was never
+attempted, against D19's own rule.
 
-`runPipeline` decides its terminal status in a fixed order. `CAPABILITY_BLOCKED`
-is reached in two places: when a revision left stages stale, and at the very end
-if any capability gap was recorded. In between, the control gates run. With no
-adapter every stage reports a capability gap, so the graph is empty, the
-`VALIDATE` gate legitimately refuses it, and the run returns `GATE_BLOCKED`
-before the final capability check is ever consulted.
+**One narrow terminal-precedence rule, as amended:**
 
-```text
-fresh submission, no provider
-  10 stage runs, all PENDING (scheduled, never executed)
-  status = GATE_BLOCKED
-  committedVersion = null
-  committed versions for the fresh investigation: 0
+```ts
+const producedNothing = journal.succeededStages().length === 0
+const blockedOnCapability =
+  journal.activeCapabilityEntries().length > 0 && producedNothing
+
+if (journal.staleStages().length > 0 || blockedOnCapability) {
+  → TERMINAL CAPABILITY_BLOCKED, no VALIDATE, no REVIEW
+}
 ```
 
-So the durable status says *a control gate refused the result* when the truth is
-that **no result was produced**. That reads as a judgment about the graph, and
-the graph is empty because nothing ran.
+It sits beside the existing stale-stages branch because both say the same
+thing: **there is no research candidate for a control gate to judge.**
+`GATE_BLOCKED` means a produced candidate was refused.
 
-Changing that precedence is a #6 decision — the same class as the staged-debt
-exemption — so I did not make it. The narrow shape would be: at the gate-blocked
-return, prefer `CAPABILITY_BLOCKED` when every scheduled stage was
-capability-blocked, on the grounds that a gate verdict over a graph no stage
-produced is not a verdict about the graph.
+Read from **execution history**, never from graph emptiness — a stage that
+deliberately contributed nothing is not the same fact as a stage that never ran,
+and only the journal can tell them apart. No `ResearchStop` is manufactured and
+no `VALIDATE`/`REVIEW` record is written.
 
-**What I did instead, inside 11b's scope.** The surface tells the truth without
-rewriting what the pipeline recorded. `executionStateView` derives
-`blockedBeforeResearch` when no stage ran, and presents that run as *"Research
-capability unavailable"* while keeping `outcome: 'GATE_BLOCKED'` untouched as the
-durable fact. Proven live:
+### The bound, and that it holds
+
+| Run | Terminal status | Proof |
+| --- | --- | --- |
+| no stage succeeded, capability gaps | `CAPABILITY_BLOCKED`, zero gates | A1–A5 |
+| some stage succeeded, invalid candidate | `GATE_BLOCKED` | A7–A9 |
+| some stage succeeded, valid, capability gaps | `CAPABILITY_BLOCKED` | A7–A9 |
+| no capability gaps, invalid candidate | `GATE_BLOCKED` | A10 |
+
+A7–A9 is the one that matters most: `INGEST` succeeds and everything after it
+reports a gap, so a candidate exists, a gate inspects it, FULL validation runs,
+and the status follows from what FULL found. The rule is not "capability
+outranks validation".
+
+### The eleven required proofs
+
+| # | Item | Where |
+| --- | --- | --- |
+| 1 | all stages capability-unavailable → `CAPABILITY_BLOCKED` | A1–A5, and live |
+| 2 | no research stage `SUCCEEDED` | A1–A5 |
+| 3 | zero control gates ran | A1–A5 — asserts `gateEntries().length === 0`, `validation` and `review` both absent |
+| 4 | capability records remain inspectable | A1–A5 — 10 active records, 10 reported to the caller, 10 stage entries journalled `PENDING` |
+| 5 | no `ResearchStop` invented | A1–A5 |
+| 6 | no committed version can follow | A6 · live (0 rows) |
+| 7 | one succeeded stage still reaches FULL | A7–A9 |
+| 8 | invalid partial candidate stays `GATE_BLOCKED` | A7–A9 |
+| 9 | FULL-valid partial with a gap ends `CAPABILITY_BLOCKED` | A7–A9 |
+| 10 | ordinary invalid run with no gap stays `GATE_BLOCKED` | A10 |
+| 11 | existing #6 replay/retry/resume gates green | `check:pipeline` 58/58, `check:replay` 21/21 |
+
+### One existing gate assertion had to change, and why
+
+`check:inline-execution` asserted `gateEntries().length === 2` for a run whose
+only stage reported a capability gap. That encoded the pre-amendment behaviour:
+the gates ran on the empty graph and the run reached `CAPABILITY_BLOCKED` only
+at the final check. The amendment requires **zero** gate records — "do not
+manufacture VALIDATE/REVIEW records when no research stage ran" — so the
+assertion is now `0`, with the reason recorded beside it. This is the
+amendment's intended consequence, not a regression: every other #8 assertion in
+that gate is unchanged and green.
+
+**Two of my own assertions were wrong first**, and the fix is worth recording:
+A1–A5 and A6 initially asserted "no research stop was invented" against the
+benchmark's *own* investigation record, which arrives `RESEARCH_COMPLETE` with a
+`completedAt` and a recorded `SATURATION` stop. That tested the fixture, not the
+pipeline. Both now run against a fresh-run investigation shape — `RUNNING`, no
+`completedAt`, no stop, no stage runs — which is also the faithful scenario.
+
+### Durable, not merely presented
+
+Gate item 19 now drives a real submission and a real run through the default
+unconfigured runtime and asserts the **`execution_runs` row**, not the DTO and
+not the projection. Live, against PostgreSQL:
 
 ```text
-ok  present: Research capability unavailable
-ok  present: Scheduled and did not run
-ok  present: no version committed
-ok  present: no evidence was gathered
-ok  present: says nothing about the submitted source
-ok  absent : Inside Ruto
-ok  absent : Repetition is not corroboration
+run:          status=CAPABILITY_BLOCKED committedVersion=None stageRuns=10 allPending=True
+durable row:  CAPABILITY_BLOCKED | committed_version=null
+committed versions: 0
+progress page: ok present: Research capability unavailable
+               ok present: Scheduled and did not run
+               ok present: no version committed
+               ok present: no evidence was gathered
+               ok present: says nothing about the submitted source
+               ok absent : control gate
+               ok absent : Inside Ruto
 ```
 
-Items 20, 21 and 22 are therefore green: the state is rendered truthfully, no
-version was committed, and no benchmark graph was substituted.
+`control gate` is now **absent** from the rendered page — the run no longer has
+a gate verdict to report, so the copy no longer has to explain one away.
+
+**Historical rows are not rewritten.** Check 20b keeps the compatibility rule
+the review allowed: an all-`PENDING` `GATE_BLOCKED` run persisted before the
+amendment still renders as *Research capability unavailable*, while
+`outcome: 'GATE_BLOCKED'` stays untouched as the durable fact.
 
 ---
 
@@ -253,15 +310,31 @@ rejects route segment config because it always runs on Node.)
 | 14, 15 | unknown investigation and gap → HTTP 404 | live |
 | 16 | known demo URL offers existing research, starts no execution | component phase machine; **not HTTP-tested** — it is a client-side decision |
 | 17, 18 | arbitrary URL creates a real investigation and starts a real run | live |
-| 19 | no adapter → `CAPABILITY_BLOCKED` | **RED** — see above |
-| 20 | capability-blocked state rendered truthfully | live |
-| 21 | no version committed for the blocked run | live (0 rows) |
+| 19 | no adapter → `CAPABILITY_BLOCKED` | gate 19/21 (durable row) · live · A1–A5 |
+| 20 | capability-blocked state rendered truthfully | gate 20 · 20b · live |
+| 21 | no version committed for the blocked run | gate 19/21 · A6 · live (0 rows) |
 | 22 | no benchmark substituted | live (absence asserted) |
 | 23 | storage failure → non-leaking 503 | gate 23 |
 | 24 | #9/#10 gates green | `final-gate.txt` |
 | 25 | production build green | `final-gate.txt` |
 
 ---
+
+## Two carried architecture gaps, as the review recorded them
+
+**1 · Single shared PostgreSQL connection.** Accepted for the single-operator
+hackathon demo only. Not concurrency-safe for multiple writers. Before broader
+or public concurrent mutation, `SnapshotDatabase` needs a real transaction scope
+— `withTransaction(fn)` or an equivalent bound-client API — so pooling is safe.
+Stated in `lib/xray/host/database.ts` and asserted by the gate.
+
+**2 · First-version graduation linkage.** The seed's explicit `UPDATE` is
+provisioning glue, acceptable because #7 has no production first-version
+commit/link operation. Documented in `demo-seed.ts` and here. **Not to be
+generalized into application behaviour**: the seed is the only caller, and a
+first-version promotion path belongs in #7.
+
+Neither is authorization to start 11c.
 
 ## Stop line respected
 
@@ -292,5 +365,6 @@ round trip over one connection.
 
 ## Files
 
-- `verification/issue-11-11b/live-journey.txt` — provisioning, demo path, 404s and the fresh path against real PostgreSQL
-- `verification/issue-11-11b/final-gate.txt` — 13/13 plus the regression sweep
+- `verification/issue-11-11b/live-journey.txt` — the pre-amendment journey, kept as the record of the `GATE_BLOCKED` finding
+- `verification/issue-11-11b/live-journey-refreshed.txt` — the same journey after the amendment, with the durable status
+- `verification/issue-11-11b/final-gate.txt` — 15/15, the #6 focused proof, and the regression sweep

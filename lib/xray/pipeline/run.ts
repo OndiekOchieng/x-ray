@@ -468,7 +468,42 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
   // Control gates
   // -------------------------------------------------------------------------
 
-  if (journal.staleStages().length > 0) {
+  /*
+   * TWO WAYS A RUN ENDS BEFORE THE GATES
+   * ====================================
+   * Both are the same statement: there is no research candidate for a control
+   * gate to judge. `GATE_BLOCKED` means a produced candidate was refused, and
+   * refusing something nothing produced would attribute to the graph what
+   * belongs to the work that did not happen.
+   *
+   * 1 · Stale stages. A revision invalidated work that has not been redone.
+   *
+   * 2 · Capability absence with nothing produced (#6 amendment, 2026-09-21).
+   *     Every scheduled research stage reported a capability gap and none
+   *     succeeded, so D19's rule applies in full: unconfigured capability is a
+   *     run-level blocker, not a graph defect. 11b surfaced the contradiction —
+   *     the default unconfigured runtime produced an empty graph, FULL
+   *     validation legitimately refused it, and the run durably recorded
+   *     `GATE_BLOCKED` for work that was never attempted.
+   *
+   * DELIBERATELY NARROW. This is not "capability outranks validation". The
+   * moment **any** research stage succeeds there is a candidate, and the run
+   * goes on to FULL validation — which may legitimately refuse an invalid
+   * partial candidate as `GATE_BLOCKED`.
+   *
+   * Read from execution history, never from graph emptiness: a stage that
+   * deliberately contributed nothing is not the same fact as a stage that
+   * never ran, and only the journal can tell them apart.
+   *
+   * Neither branch manufactures a `ResearchStop`, and neither appends a
+   * `VALIDATE` or `REVIEW` gate record — a failed-stage run already
+   * establishes that the gates do not inspect state no research stage
+   * vouched for.
+   */
+  const producedNothing = journal.succeededStages().length === 0
+  const blockedOnCapability = journal.activeCapabilityEntries().length > 0 && producedNothing
+
+  if (journal.staleStages().length > 0 || blockedOnCapability) {
     await boundary('TERMINAL', 'CAPABILITY_BLOCKED')
     return {
       investigationId, status: 'CAPABILITY_BLOCKED', journal, accumulator,

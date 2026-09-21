@@ -24,7 +24,9 @@ import { readFileSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import { PGlite } from '@electric-sql/pglite'
 
-import { setDatabaseProvider, setExecutionRuntimeProvider } from '@/lib/xray/application/runtime'
+import {
+  getExecutionRuntime, setDatabaseProvider, setExecutionRuntimeProvider,
+} from '@/lib/xray/application/runtime'
 import { readAtiActionSurfaces } from '@/lib/xray/persistence/ati-surface-reader'
 import { readSnapshot } from '@/lib/xray/persistence/snapshot'
 import { createXrayKe001Graph } from '@/lib/xray/fixtures/xray-ke-001/graph'
@@ -206,27 +208,80 @@ async function main(): Promise<void> {
 
     // === the honest fresh path ============================================
 
-    await check('19/20/21 · a run that could do no work reports itself, and commits nothing', async () => {
-      // The shape the unconfigured runtime produces: every stage scheduled,
-      // none executed. Projected exactly as the progress screen projects it.
+    await check('19/21 · a fresh run with no provider durably records CAPABILITY_BLOCKED', async () => {
+      // A real submission and a real run, through the default unconfigured
+      // runtime — which is what a deployment without a research provider has.
+      // The durable status is what is asserted, not its presentation.
+      const { InvestigationService } = await import('@/lib/xray/application/investigation-service')
+      const { InlineExecutionService } = await import('@/lib/xray/application/inline-execution')
+      const service = new InvestigationService(db)
+      const created = await service.createInvestigation({
+        sourceUrl: 'https://example.org/a-source-with-no-provider',
+      })
+      const started = await new InlineExecutionService(db, await getExecutionRuntime())
+        .startExecution(created.investigationId)
+
+      if (started.status !== 'CAPABILITY_BLOCKED') return `status ${started.status}`
+      if (started.committedVersion !== null) return 'a blocked run committed a version'
+
+      // The durable row, not the returned DTO.
+      const stored = (await db.query(
+        'SELECT status, committed_version FROM execution_runs WHERE id=$1',
+        [started.executionRunId])).rows[0]
+      if (stored.status !== 'CAPABILITY_BLOCKED')
+        return `execution_runs.status is ${String(stored.status)}`
+      if (stored.committed_version !== null) return 'the durable row names a version'
+
+      // No control gate inspected a candidate no stage vouched for.
+      const { readExecutionAudit } = await import('@/lib/xray/persistence/execution-audit')
+      const audit = await readExecutionAudit(db, started.executionRunId)
+      if (audit.journal.gateEntries().length !== 0)
+        return `${audit.journal.gateEntries().length} gate record(s) were written`
+      if (audit.journal.succeededStages().length !== 0)
+        return `${audit.journal.succeededStages().length} stage(s) succeeded`
+      if (audit.validations.length !== 0) return 'a validation result was recorded'
+      // And no version can follow.
+      const versions = Number((await db.query(
+        'SELECT count(*)::int AS n FROM investigation_versions WHERE investigation_id=$1',
+        [created.investigationId])).rows[0].n)
+      return versions === 0 ? null : `${versions} version(s) committed`
+    })
+
+    await check('20 · the blocked run is rendered truthfully, and says nothing about the source', async () => {
+      const { InvestigationService } = await import('@/lib/xray/application/investigation-service')
+      const runs = (await db.query(
+        "SELECT id, investigation_id FROM execution_runs WHERE status='CAPABILITY_BLOCKED' AND id LIKE 'RUN-%' ORDER BY started_at DESC LIMIT 1")).rows
+      if (runs.length !== 1) return 'no capability-blocked run to render'
+      const status = await new InvestigationService(db).getExecutionStatus(
+        String(runs[0].investigation_id), String(runs[0].id))
+      const view = executionStateView(status)
+
+      if (view.outcome !== 'CAPABILITY_BLOCKED') return `outcome ${view.outcome}`
+      if (view.statusLabel !== 'Research capability unavailable')
+        return `status label "${view.statusLabel}"`
+      if (view.stagesNotRun.length === 0) return 'no stage was reported as not run'
+      if (view.committedVersion !== null) return 'a version was reported'
+      if (!/no evidence was gathered/i.test(view.explanation))
+        return 'the copy does not say that nothing was concluded'
+      return /says nothing about the submitted source/i.test(view.explanation)
+        ? null : 'the copy does not separate the run from the source'
+    })
+
+    await check('20b · a historical GATE_BLOCKED run where nothing ran still renders truthfully', async () => {
+      // The compatibility rule the review allowed to remain. Previously
+      // persisted runs are not rewritten, and an all-PENDING GATE_BLOCKED run
+      // from before the #6 amendment still reads as what it was.
       const view = executionStateView({
-        investigationId: 'XRAY-FRESH', executionRunId: 'RUN-FRESH',
+        investigationId: 'XRAY-HISTORICAL', executionRunId: 'RUN-HISTORICAL',
         status: 'GATE_BLOCKED', startedAt: DEMO_SEED.provisionedAt, committedVersion: null,
-        stageRuns: ['INGEST', 'DECOMPOSE', 'CLASSIFY', 'PLAN', 'TRACE'].map((stage, index) => ({
+        stageRuns: ['INGEST', 'DECOMPOSE', 'TRACE'].map((stage, index) => ({
           id: `SR-00${index + 1}`, stage, status: 'PENDING', inputArtifactVersion: 0,
         })),
       })
-      if (!view.blockedBeforeResearch) return 'a run where nothing ran was not recognised'
+      if (!view.blockedBeforeResearch) return 'the historical run was not recognised'
       if (view.statusLabel !== 'Research capability unavailable')
         return `status label "${view.statusLabel}"`
-      if (view.stagesNotRun.length !== 5)
-        return `${view.stagesNotRun.length} stage(s) reported as not run`
-      if (view.committedVersion !== null) return 'a blocked run reported a version'
-      if (!/no evidence was gathered/i.test(view.explanation))
-        return 'the copy does not say that nothing was concluded'
-      if (!/says nothing about the submitted source/i.test(view.explanation))
-        return 'the copy does not separate the run from the source'
-      // The recorded outcome is never rewritten — only its presentation.
+      // The durable fact is never rewritten, only its presentation.
       return view.outcome === 'GATE_BLOCKED'
         ? null : `the recorded outcome was rewritten to ${view.outcome}`
     })

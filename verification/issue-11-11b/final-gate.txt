@@ -1,4 +1,4 @@
-=== 11b gate ===
+=== 11b gate (refreshed) ===
 ok    1 · a fresh database and one seed create exactly one demo lineage
 ok    2 · a second seed duplicates no version and no publication event
 ok    3 · the seeded version round-trips as the benchmark froze it
@@ -8,42 +8,38 @@ ok    7/8/9 · alias, exact version and history all resolve from the seed
 ok    10 · the internal explorer resolves from storage, not the fixture
 ok    11 · ATI action availability is readable from stored state
 ok    12/13 · storage unavailable is authored, and never an empty library
-ok    19/20/21 · a run that could do no work reports itself, and commits nothing
+ok    19/21 · a fresh run with no provider durably records CAPABILITY_BLOCKED
+ok    20 · the blocked run is rendered truthfully, and says nothing about the source
+ok    20b · a historical GATE_BLOCKED run where nothing ran still renders truthfully
 ok    22 · no benchmark graph can stand in for a fresh investigation
 ok    guard · the single-connection limitation is stated, not papered over
 ok    23 · a route with no database still fails without leaking
-13/13 demo host checks passed
+15/15 demo host checks passed
 
-=== #10 and #7-#9 gates ===
-check:ati-lifecycle                      PASS  28/28 passed
-check:ati-commands                       PASS  
-check:ati-responses                      PASS  
-check:ati-research                       PASS  
-check:ati-surface                        PASS  
-check:validation                         PASS  52/52 passed
-check:pipeline                           PASS  54/54 passed
-check:query                              PASS  56/56 passed
-check:acceptance                         PASS  32/32 passed
-check:fixtures                           PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
-check:persistence-roundtrip              PASS  15b: explicitly present empty membership round-trip PASS
-check:persistence-versioning             PASS  7c: stale expected predecessor conflicts without overwrite PASS
-check:persistence-workspace              PASS  7d-a: resumed run skips success, retains failure, clears stale/capabil
-check:persistence-audit                  PASS  7d-b: missing ReviewerModel remains NOT_EVALUATED and capability-incom
-check:persistence-ati                    PASS  7d-d ATI: version-scoped eligible origin, invalid references, lifecycl
-check:persistence-durable-integration    PASS  7d-d: restart → resume → gates → audit → graduation → commit
-check:publication                        PASS  26/26 passed
-check:public-resolver                    PASS  25/25 passed
-check:public-routes                      PASS  31/31 passed
-check:public-library                     PASS  25/25 passed
-check:version-lineage                    PASS  15/15 passed
-check:api-routes                         PASS  23/23 passed
-check:lifecycle                          PASS  21/21 passed
-check:investigation-service              PASS  8a: owner-scoped run/candidate reads; exact v1/v2 snapshots; ordered h
-check:inline-execution                   PASS  8b: the surface Source appears only from actual INGEST output PASS
-check:benchmark-corpus                   PASS  benchmark corpus: 12 cases, 1 executable fixture(s), registry integrit
+=== #6 focused proof (A1-A10) ===
+ ok   A1-A5 · every stage capability-blocked ends the run before the gates    
+ ok   A6 · a capability-blocked run with nothing produced cannot be committed 
+ ok   A7-A9 · one succeeded stage still reaches FULL validation               
+ ok   A10 · an invalid candidate with no capability gap is still GATE_BLOCKED 
+58/58 passed
 
-=== tsc + build ===
-tsc clean
-◐  (Partial Prerender)  prerendered as static HTML with dynamic server-streamed content
-ƒ  (Dynamic)            server-rendered on demand
-
+=== #6-#10 regression sweep ===
+check:fixtures                             PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:validation                           PASS  52/52 passed
+check:query                                PASS  56/56 passed
+check:review                               PASS  32/32 passed
+check:acceptance                           PASS  32/32 passed
+check:pipeline                             PASS  58/58 passed
+check:adapters                             PASS  45/45 passed
+check:replay                               PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:source-position                      PASS  14a: contextual positions, T1/T2, Evidence basis and orthogonal prov
+check:source-position-pipeline             PASS  14b: TRACE retry identity, PROVENANCE revision, orthogonal lineage P
+check:source-position-review               PASS  14c: characterization, agency, retrospective intent, falsifier, and 
+check:persistence-schema                   PASS  
+check:source-position-schema               PASS  15a schema: 29/29 checks passed
+check:persistence-roundtrip                PASS  15b: explicitly present empty membership round-trip PASS
+check:persistence-versioning               PASS  7c: stale expected predecessor conflicts without overwrite PASS
+check:source-position-versioning           PASS  15c: stale predecessor rejects without partial v2 change PASS
+check:persistence-workspace                PASS  7d-a: resumed run skips success, retains failure, clears stale/capab
+check:persistence-audit                    PASS  7d-b: missing ReviewerModel remains NOT_EVALUATED and capability-inc
+check:persistence-ati                      

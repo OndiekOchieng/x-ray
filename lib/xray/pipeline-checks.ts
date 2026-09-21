@@ -724,6 +724,137 @@ async function main(): Promise<void> {
   })
 
   // -------------------------------------------------------------------------
+  // 11. Terminal precedence — capability absence with nothing produced
+  //     (#6 amendment, 2026-09-21)
+  // -------------------------------------------------------------------------
+
+  /**
+   * What the default unconfigured runtime returns: the operation could not
+   * run, and nothing was produced.
+   */
+  const unavailable = () => ({
+    kind: 'CAPABILITY_UNAVAILABLE' as const,
+    operation: 'research-adapter:retrieve',
+    reason: 'NOT_CONFIGURED' as const,
+    detail: 'No research adapter is configured for this run.',
+    resolvedBy: 'Configure a research adapter for this deployment.',
+  })
+
+  /**
+   * A brand-new run's investigation record.
+   *
+   * The benchmark's own investigation arrives `RESEARCH_COMPLETE` with a
+   * `completedAt` and a recorded `SATURATION` stop — it is a finished
+   * historical run. Asserting "no research stop was invented" against that
+   * input would test the fixture, not the pipeline, which is what the first
+   * version of these checks did.
+   */
+  const freshInvestigation = () => {
+    const {
+      completedAt: _completedAt, researchStop: _researchStop, ...carried
+    } = clone(investigation)
+    return { ...carried, status: 'RUNNING' as const, stageRuns: [] }
+  }
+
+  /** Stages that all report the same capability gap and produce nothing. */
+  const unavailableStages = (only?: readonly ResearchStage[]): StageDefinition[] =>
+    replayStages()
+      .filter((stage) => only === undefined || only.includes(stage.stage))
+      .map((stage) => ({
+        stage: stage.stage,
+        run: () => unavailable(),
+      } satisfies StageDefinition))
+
+  await checkAsync('A1-A5 · every stage capability-blocked ends the run before the gates', async () => {
+    const run = await runPipeline({
+      investigation: freshInvestigation(), stages: unavailableStages(), clock: () => AT,
+    })
+    // 1 · the terminal status is the run-level blocker, not a graph verdict.
+    if (run.status !== 'CAPABILITY_BLOCKED') return `status ${run.status}`
+    // 2 · no research stage succeeded.
+    if (run.journal.succeededStages().length !== 0)
+      return `${run.journal.succeededStages().length} stage(s) succeeded`
+    // 3 · no control gate ran at all — not even a SKIPPED record.
+    if (run.journal.gateEntries().length !== 0)
+      return `${run.journal.gateEntries().length} gate record(s) were written`
+    if (run.validation !== undefined) return 'a validation result was produced'
+    if (run.review !== undefined) return 'a review result was produced'
+    // 4 · the capability records stay inspectable.
+    const gaps = run.journal.activeCapabilityEntries()
+    if (gaps.length !== RESEARCH_STAGES.length)
+      return `${gaps.length} capability record(s) for ${RESEARCH_STAGES.length} stages`
+    if (run.capabilityGaps.length !== RESEARCH_STAGES.length)
+      return `${run.capabilityGaps.length} gap(s) reported to the caller`
+    // Each scheduled stage is journalled PENDING: scheduled, never executed.
+    const pending = run.journal.stageEntries().filter((entry) => entry.status === 'PENDING')
+    if (pending.length !== RESEARCH_STAGES.length)
+      return `${pending.length} stage(s) journalled as scheduled-but-not-run`
+    // 5 · no ResearchStop was invented.
+    return run.graph.investigation.researchStop === undefined
+      ? null : 'a research stop was manufactured'
+  })
+
+  await checkAsync('A6 · a capability-blocked run with nothing produced cannot be committed', async () => {
+    const run = await runPipeline({
+      investigation: freshInvestigation(), stages: unavailableStages(), clock: () => AT,
+    })
+    // #7 refuses this candidate on its own rules: research is not complete.
+    // Proven here rather than asserted, because "no version can follow" is the
+    // consequence that matters.
+    const investigationState = run.graph.investigation
+    if (investigationState.status === 'RESEARCH_COMPLETE')
+      return 'a blocked run reported research as complete'
+    if (investigationState.completedAt !== undefined)
+      return 'a blocked run carries a completion time'
+    return investigationState.researchStop === undefined
+      ? null : 'a blocked run carries a research stop'
+  })
+
+  await checkAsync('A7-A9 · one succeeded stage still reaches FULL validation', async () => {
+    // INGEST succeeds; everything after it reports a capability gap. There is
+    // now a candidate, so the narrow rule must not apply.
+    const stages: StageDefinition[] = replayStages().map((stage) =>
+      stage.stage === 'INGEST'
+        ? stage
+        : ({
+            stage: stage.stage,
+            run: () => unavailable(),
+          } satisfies StageDefinition),
+    )
+    const run = await runPipeline({
+      investigation: freshInvestigation(), stages, clock: () => AT,
+    })
+    if (run.journal.succeededStages().length === 0)
+      return 'the succeeding stage did not succeed'
+    // A gate ran: the partial candidate was judged, which is the point.
+    if (run.journal.gateEntries().length === 0)
+      return 'no gate inspected a candidate that a stage did vouch for'
+    if (run.validation === undefined) return 'FULL validation did not run'
+    // 8 · an invalid partial candidate is still GATE_BLOCKED.
+    // 9 · a FULL-valid one with a capability gap ends CAPABILITY_BLOCKED.
+    const expected = run.validation.summary.errorCount > 0
+      ? 'GATE_BLOCKED' : 'CAPABILITY_BLOCKED'
+    return run.status === expected
+      ? null : `status ${run.status} with ${run.validation.summary.errorCount} FULL error(s)`
+  })
+
+  await checkAsync('A10 · an invalid candidate with no capability gap is still GATE_BLOCKED', async () => {
+    // The ordinary case, unchanged: GAPS contributes nothing, leaving an
+    // unresolved finding with no gap — legal under STAGED, illegal under FULL.
+    const stages = replayStages().map((stage) =>
+      stage.stage === 'GAPS'
+        ? ({ stage: 'GAPS' as const, run: () => ({ gaps: [] }) } satisfies StageDefinition)
+        : stage,
+    )
+    const run = await runPipeline({
+      investigation: clone(investigation), stages, clock: () => AT,
+    })
+    if (run.journal.activeCapabilityEntries().length !== 0)
+      return 'the control case reported a capability gap'
+    return run.status === 'GATE_BLOCKED' ? null : `status ${run.status}`
+  })
+
+  // -------------------------------------------------------------------------
   // Report
   // -------------------------------------------------------------------------
 

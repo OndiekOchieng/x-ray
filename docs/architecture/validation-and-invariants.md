@@ -186,6 +186,42 @@ A conclusion that cannot describe how it could be overturned is invalid.
 
 ---
 
+> ### Amendment — capability absence outranks the gates when nothing was produced
+>
+> **Recorded:** 2026-09-21 · #6 amendment, surfaced by #11 slice 11b
+>
+> The control gates judge a research candidate. When **every** scheduled
+> research stage reported a capability gap and **none** succeeded, there is no
+> candidate: the graph is empty because no work was done, not because work went
+> wrong. FULL validation then refuses the empty graph, and the run used to
+> record `GATE_BLOCKED` — attributing to the graph what belongs to the absent
+> capability, and contradicting D19, which already makes unconfigured
+> capability a run-level blocker rather than a graph defect.
+>
+> So `runPipeline` ends such a run `CAPABILITY_BLOCKED` **before** `VALIDATE`
+> and `REVIEW`, appending no gate record at all — a failed-stage run already
+> establishes that the gates do not inspect state no research stage vouched
+> for. No `ResearchStop` is manufactured.
+>
+> **This is not "capability outranks validation".** The moment any research
+> stage succeeds there is a candidate, and the run proceeds to FULL validation:
+>
+> | Run | Terminal status |
+> | --- | --- |
+> | no stage succeeded, capability gaps | `CAPABILITY_BLOCKED`, no gates run |
+> | some stage succeeded, invalid candidate | `GATE_BLOCKED` |
+> | some stage succeeded, valid, capability gaps | `CAPABILITY_BLOCKED` |
+> | no capability gaps, invalid candidate | `GATE_BLOCKED` |
+>
+> Read from execution history — succeeded stage entries and active capability
+> records — never from graph emptiness. A stage that deliberately contributed
+> nothing is not the same fact as a stage that never ran, and only the journal
+> can tell them apart.
+>
+> **Historical rows are not rewritten.** A run persisted as `GATE_BLOCKED`
+> before this amendment stays as it is; the surface may still present an
+> all-`PENDING` one as *Research capability unavailable*, which is what it was.
+
 ## XR-INV-008 — Gap Preservation
 
 A material unresolved claim MUST expose the evidence gap preventing resolution.

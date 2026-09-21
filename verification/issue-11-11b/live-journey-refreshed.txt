@@ -1,0 +1,29 @@
+11b refreshed live journey — after the #6 terminal-precedence amendment.
+Next production build against PostgreSQL 17.11. Captured 2026-09-21T10:54:21Z.
+
+=== DEMO PATH (unchanged by the amendment) ===
+  /                              200   17817B | See what a civic claim is standing on | Featured Investigation
+  /library                       200   14325B | Inside Ruto
+  /xray/inside-ruto-s-five-day   307       0B -> /xray/inside-ruto-s-five-day-tour-of-kisumu-siaya-migori-and-homa-bay-520ecf67fe/v1
+  /xray/inside-ruto-s-five-day   200    5008B | Inside Ruto
+  /xray/inside-ruto-s-five-day   200    3100B
+  /investigations/XRAY-KE-001    200  316893B | Repetition is not corroboration
+  /gap/GAP-001                   200   28212B | Public record request
+  /investigations/NOPE           404   10125B
+  /gap/NOPE                      404   10125B
+
+=== FRESH PATH — durable status is now CAPABILITY_BLOCKED ===
+  investigation: XRAY-bd5f3c66-7e0b-4507-8973-9e650940a3dc
+  run: status=CAPABILITY_BLOCKED committedVersion=None stageRuns=10 allPending=True
+  durable row: CAPABILITY_BLOCKED | committed_version=null
+  gate records: n/a — see the gate, which asserts zero via readExecutionAudit
+  committed versions: 0
+  progress page: 200
+    ok   present: Research capability unavailable
+    ok   present: Scheduled and did not run
+    ok   present: no version committed
+    ok   present: no evidence was gathered
+    ok   present: says nothing about the submitted source
+    ok   absent : control gate
+    ok   absent : Inside Ruto
+    ok   absent : Repetition is not corroboration

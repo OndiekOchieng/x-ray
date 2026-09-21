@@ -150,9 +150,14 @@ async function run() {
     const capabilityAudit = await readExecutionAudit(db, 'RUN-8B-CAP')
     assert.equal(capabilityAudit.journal.activeCapabilityEntries().length, 1)
     assert.equal(capabilityAudit.journal.stageEntries()[0].error, undefined)
-    assert.equal(capabilityAudit.journal.gateEntries().length, 2)
+    // ZERO gate records, per the #6 terminal-precedence amendment (2026-09-21).
+    // This asserted 2 before it: the gates used to run on the empty graph and
+    // the run reached CAPABILITY_BLOCKED only at the final check. The gates now
+    // never see a candidate no research stage vouched for, so no VALIDATE or
+    // REVIEW record is written at all.
+    assert.equal(capabilityAudit.journal.gateEntries().length, 0)
     assert.equal(capability.committedVersion, null)
-    console.log('8b: unavailable adapter stays capability-blocked, not stage-failed or committed PASS')
+    console.log('8b: unavailable adapter stays capability-blocked before the gates, not stage-failed or committed PASS')
 
     // -- Gap 1 + 2: revision routing, and control transitions durable at the
     // exact point they are appended rather than at the next stage boundary.
