@@ -53,6 +53,7 @@ import {
 } from '@/lib/xray/persistence/ati-lifecycle'
 import { readRunsForIntake } from '@/lib/xray/persistence/execution-cause'
 import type { CausalReference, ReEvaluationAudit } from '@/lib/xray/persistence/version-commit'
+import { assessCandidate } from './assessment'
 import { GraduationService } from './graduation-service'
 import { InlineExecutionService } from './inline-execution'
 
@@ -372,7 +373,15 @@ export class ATIResearchBridge {
       return { result: 'NO_CANONICAL_CHANGE', executionRunId, binding }
     }
 
-    await this.graduation.assess(binding.investigationId, executionRunId, {
+    /*
+     * Through `assessCandidate`, not `graduation.assess` directly.
+     *
+     * That is the hop that reads the host's registered reviewer. A caller
+     * supplying `options.model` still wins — every existing check harness
+     * injects one — and a caller supplying none gets whatever the deployment
+     * configured, which is how a live reviewer reaches the REVIEW gate at all.
+     */
+    await assessCandidate(this.graduation, binding.investigationId, executionRunId, {
       ...(options.behaviors ? { behaviors: options.behaviors } : {}),
       ...(options.requiredReviewChecks
         ? { requiredReviewChecks: options.requiredReviewChecks } : {}),

@@ -18,7 +18,7 @@ Every call went to 127.0.0.1. No request left this machine.
 
 === check:live-runtime ===
 
-26/26 live runtime checks passed
+27/27 live runtime checks passed
 Every call went to 127.0.0.1. No civic URL was used.
 
 === check:fixtures ===

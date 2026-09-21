@@ -35,6 +35,10 @@ import { isInspectable } from '@/lib/xray/pipeline/retrieval-port'
 import type { ProposalRef } from '@/lib/xray/pipeline/proposals'
 import type { GraduationResult } from '@/lib/xray/acceptance'
 import { activePortChecks } from '@/lib/xray/review'
+import { assessCandidate } from '@/lib/xray/application/assessment'
+import {
+  getReviewerModel, setReviewerModelProvider,
+} from '@/lib/xray/application/runtime'
 import { GraduationService } from '@/lib/xray/application/graduation-service'
 import { checkpointCandidate } from '@/lib/xray/persistence/graduation-check-support'
 import { xrayKe001Graph } from '@/lib/xray/fixtures/xray-ke-001/graph'
@@ -420,17 +424,19 @@ check('3 · a complete configuration composes, and registration is conditional',
     ? null : `reported ${JSON.stringify(complete.registered)}`
 })
 
-check('3b · every required slot corresponds to a registered capability', async () => {
+check('3b · every required slot corresponds to a CONSUMED capability', async () => {
   /*
-   * The amendment's rule, as a check. A slot that is required but never
-   * installed anywhere is a dead composition token: it makes a deployment look
-   * configured, forces an operator to supply a key, and changes nothing about
-   * what runs. That is what the reviewer was before this amendment — composed,
-   * returned, and never consumed by any production path.
+   * Registration is not consumption, and this check is about the second.
    *
-   * So: three required slots, and each one reaches a consumer. The research
-   * model and the retrieval adapter arrive through the runtime's
-   * `StageAdapters`; the reviewer arrives through its own seam.
+   * A slot that is required and installed but never *read* is still a dead
+   * token: the deployment looks configured, the operator supplies a key, and
+   * nothing changes about what runs. That was true of the reviewer twice over
+   * in 20d — first never installed, then installed into a seam nobody read.
+   *
+   * So each required slot must reach a consumer: the research model and the
+   * retrieval adapter through the runtime's `StageAdapters`, and the reviewer
+   * through a path that actually resolves the seam. Check 20 drives that path
+   * for real; this asserts the correspondence.
    */
   if (JSON.stringify([...REQUIRED_SLOTS]) !== JSON.stringify([
     'RESEARCH_MODEL', 'REVIEWER_MODEL', 'RETRIEVAL',
@@ -454,9 +460,22 @@ check('3b · every required slot corresponds to a registered capability', async 
   })
   if (complete.composition.status !== 'COMPOSED') return 'the environment did not compose'
 
-  // The reviewer slot is registered, so requiring it is not a dead token.
+  // Installed...
   if (!installed.includes('REVIEWER_MODEL'))
     return 'REVIEWER_MODEL is required but never installed'
+
+  // ...and read. Registering into a slot nobody resolves fails here.
+  const registered = countingReviewer()
+  setReviewerModelProvider(async () => registered)
+  try {
+    const resolved = await getReviewerModel()
+    if (resolved !== registered)
+      return 'REVIEWER_MODEL is installed but the seam does not resolve it'
+    if (!/getReviewerModel/.test(stripComments(read('lib/xray/application/assessment.ts'))))
+      return 'no application path consumes the reviewer seam'
+  } finally {
+    setReviewerModelProvider(null)
+  }
   // And the research/retrieval slots reach the pipeline through the runtime.
   const plan = await complete.composition.runtime.initial('XRAY-LIVE-005', {
     sourceUrl: URL_UNDER_INVESTIGATION, createdAt: '2026-04-01T00:00:00Z',
@@ -947,21 +966,35 @@ function countingReviewer(behaviour: {
   }
 }
 
-/** Assess the canonical graph through the real service, with a reviewer. */
-async function assessWith(reviewer: ReviewerModel | undefined): Promise<GraduationResult> {
+/**
+ * Assess the canonical graph through the real application path.
+ *
+ * `assessCandidate` — not `GraduationService.assess` directly, and not with a
+ * model injected. The reviewer is **registered through the host seam** and the
+ * application path resolves it, because "a reviewer was installed" and "a
+ * reviewer is consumed" are different claims and only the second one matters.
+ *
+ * The seam is a process global, so it is set and cleared around each call.
+ */
+async function assessThroughSeam(
+  reviewer: ReviewerModel | undefined,
+  runId = 'RUN-20D-REVIEW',
+): Promise<GraduationResult> {
+  setReviewerModelProvider(reviewer === undefined ? null : async () => reviewer)
   const db = new PGlite()
   try {
     await migrate(db)
     const graph = xrayKe001Graph
-    await checkpointCandidate(db, 'RUN-20D-REVIEW', graph, '2026-04-01T00:00:00Z')
+    await checkpointCandidate(db, runId, graph, '2026-04-01T00:00:00Z')
     const service = new GraduationService(db, () => '2026-04-01T00:00:00Z')
-    const audit = await service.assess(graph.investigation.id, 'RUN-20D-REVIEW', {
+    // No `model` option: the path must find the reviewer itself.
+    const audit = await assessCandidate(service, graph.investigation.id, runId, {
       behaviors: [],
-      ...(reviewer === undefined ? {} : { model: reviewer }),
     })
     return audit.result
   } finally {
     await db.close()
+    setReviewerModelProvider(null)
   }
 }
 
@@ -969,7 +1002,7 @@ async function assessWith(reviewer: ReviewerModel | undefined): Promise<Graduati
 const modelAssisted = (result: GraduationResult) =>
   result.detail.review.checks.filter((check) => check.capability === 'MODEL_ASSISTED')
 
-check('20 · a live reviewer is actually asked, and its checks become EVALUATED', async () => {
+check('20 · a reviewer registered through the seam is resolved and asked', async () => {
   /*
    * The amendment's blocker. `composeLiveRuntime` constructed a reviewer and
    * nothing consumed it, and `GraduationService.assess` passed a model into
@@ -981,9 +1014,19 @@ check('20 · a live reviewer is actually asked, and its checks become EVALUATED'
    *   ReviewerModel -> collectModelJudgments -> judgments as data -> pure review
    */
   const reviewer = countingReviewer()
-  const withModel = await assessWith(reviewer)
 
-  // It was asked. Not "an object was constructed".
+  // Registered exactly as a host registers it, and resolvable exactly as the
+  // application path resolves it.
+  setReviewerModelProvider(async () => reviewer)
+  const resolved = await getReviewerModel()
+  if (resolved !== reviewer) return 'getReviewerModel did not return the registered reviewer'
+  setReviewerModelProvider(null)
+  if (await getReviewerModel() !== undefined)
+    return 'clearing the seam did not clear the reviewer'
+
+  const withModel = await assessThroughSeam(reviewer)
+
+  // It was asked — through the seam, with no model injected anywhere.
   if (reviewer.asked.length === 0) return 'judge() was never called'
   const kinds = [...new Set(reviewer.asked)].sort()
   if (!kinds.includes('CLAIM_ATOMICITY'))
@@ -1002,7 +1045,7 @@ check('20 · a live reviewer is actually asked, and its checks become EVALUATED'
    * the comparison that would have caught the original defect: before the
    * amendment both sides of it were identical.
    */
-  const withoutModel = await assessWith(undefined)
+  const withoutModel = await assessThroughSeam(undefined, 'RUN-20D-NO-REVIEWER')
   const unreviewed = modelAssisted(withoutModel)
   if (!unreviewed.every((check) => check.outcome === 'NOT_EVALUATED'))
     return 'model-assisted checks were EVALUATED with no reviewer configured'
@@ -1012,8 +1055,9 @@ check('20 · a live reviewer is actually asked, and its checks become EVALUATED'
   return null
 })
 
-check('21 · an unconfigured reviewer is a truthful blocker, never a silent pass', async () => {
-  const withoutModel = await assessWith(undefined)
+check('21 · a cleared seam is a truthful blocker, never a silent pass', async () => {
+  // The seam is explicitly cleared, and the same application path runs.
+  const withoutModel = await assessThroughSeam(undefined, 'RUN-20D-CLEARED')
   const checks = modelAssisted(withoutModel)
 
   /*
@@ -1048,7 +1092,7 @@ check('22 · a refusing reviewer leaves the check unevaluated, not flagged', asy
    * though the graph were at fault.
    */
   const reviewer = countingReviewer({ refuse: true })
-  const refused = await assessWith(reviewer)
+  const refused = await assessThroughSeam(reviewer, 'RUN-20D-REFUSE')
   if (reviewer.asked.length === 0) return 'judge() was never called'
 
   /*
@@ -1099,18 +1143,19 @@ check('23 · a broken reviewer is an outage, and blocks rather than committing',
    */
   const reviewer = countingReviewer({ throwOn: 'CLAIM_ATOMICITY' })
   let threw = false
-  try { await assessWith(reviewer) } catch { threw = true }
+  try { await assessThroughSeam(reviewer, 'RUN-20D-OUTAGE-1') } catch { threw = true }
   if (!threw) return 'a broken reviewer produced an assessment anyway'
 
   // And no assessment was recorded, so a commit has nothing to stand on.
+  setReviewerModelProvider(async () => reviewer)
   const db = new PGlite()
   try {
     await migrate(db)
     await checkpointCandidate(db, 'RUN-20D-OUTAGE', xrayKe001Graph, '2026-04-01T00:00:00Z')
     const service = new GraduationService(db, () => '2026-04-01T00:00:00Z')
     try {
-      await service.assess(xrayKe001Graph.investigation.id, 'RUN-20D-OUTAGE', {
-        behaviors: [], model: reviewer,
+      await assessCandidate(service, xrayKe001Graph.investigation.id, 'RUN-20D-OUTAGE', {
+        behaviors: [],
       })
     } catch { /* expected */ }
     const assessment = await service.latestAssessment('RUN-20D-OUTAGE')
@@ -1118,7 +1163,42 @@ check('23 · a broken reviewer is an outage, and blocks rather than committing',
       ? null : 'an assessment was recorded despite the reviewer outage'
   } finally {
     await db.close()
+    setReviewerModelProvider(null)
   }
+})
+
+check('20b · the seam is consumed by an application path, not just installed', () => {
+  /*
+   * The distinction the final amendment turned on. 20d's first two attempts
+   * both composed a reviewer and installed it, and neither made anything read
+   * it — the chain stopped at the host seam and every model-assisted check
+   * stayed NOT_EVALUATED in a fully configured deployment.
+   *
+   * Runtime proof is check 20. This is the structural half: exactly one
+   * application function reads the seam, the service does not, and the
+   * production caller goes through that function.
+   */
+  const readers = ['assessment.ts', 'ati-routes.ts', 'investigation-service.ts',
+    'graduation-service.ts', 'inline-execution.ts', 'ati-research-bridge.ts']
+    .filter((file) => {
+      try {
+        return /getReviewerModel/.test(stripComments(read(`lib/xray/application/${file}`)))
+      } catch { return false }
+    })
+  if (JSON.stringify(readers) !== JSON.stringify(['assessment.ts']))
+    return `the seam is read by ${JSON.stringify(readers)}, expected only assessment.ts`
+
+  // GraduationService never reaches for a global: it receives a reviewer.
+  const service = stripComments(read('lib/xray/application/graduation-service.ts'))
+  if (/getReviewerModel|setReviewerModelProvider/.test(service))
+    return 'GraduationService reads the host seam itself'
+
+  // And the production caller assesses through the orchestration boundary.
+  const bridge = stripComments(read('lib/xray/application/ati-research-bridge.ts'))
+  if (/this\.graduation\.assess\(/.test(bridge))
+    return 'the bridge calls graduation.assess directly, bypassing the seam'
+  return /assessCandidate\(this\.graduation/.test(bridge)
+    ? null : 'the bridge does not assess through assessCandidate'
 })
 
 check('24 · no provider-specific reviewer type leaves composition', () => {

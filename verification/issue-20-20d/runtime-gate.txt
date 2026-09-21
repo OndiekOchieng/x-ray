@@ -2,7 +2,7 @@
 ok    1 · an unconfigured environment composes nothing and says which slots
 ok    2 · a partial configuration composes nothing — no silent fallback
 ok    3 · a complete configuration composes, and registration is conditional
-ok    3b · every required slot corresponds to a registered capability
+ok    3b · every required slot corresponds to a CONSUMED capability
 ok    4 · re-evaluation is not planned by the live runtime
 ok    5 · discovery is followed by retrieval, in that order
 ok    6 · a record that could not be obtained stays unreadable, and stays
@@ -16,17 +16,18 @@ ok    13 · no submitted URL blocks every stage with a reason
 ok    14 · a paused search turn continues and completes, without restarting
 ok    15 · a continued search feeds the composed runtime as material
 ok    16 · the continuation bound stops the turn and says so
-ok    20 · a live reviewer is actually asked, and its checks become EVALUATED
-ok    21 · an unconfigured reviewer is a truthful blocker, never a silent pass
+ok    20 · a reviewer registered through the seam is resolved and asked
+ok    21 · a cleared seam is a truthful blocker, never a silent pass
 ok    22 · a refusing reviewer leaves the check unevaluated, not flagged
 ok    23 · a broken reviewer is an outage, and blocks rather than committing
+ok    20b · the seam is consumed by an application path, not just installed
 ok    24 · no provider-specific reviewer type leaves composition
 ok    25 · a record with no retrievedAt gets X-Ray's own observation time
 ok    17 · the stage layer is provider-neutral and the pipeline is untouched
 ok    18 · review stays out of the pipeline adapters
 ok    19 · no secret reaches a composed runtime, a plan, or a graph
 
-26/26 live runtime checks passed
+27/27 live runtime checks passed
 Every call went to 127.0.0.1. No civic URL was used.
 
 === earlier gates ===
@@ -39,14 +40,24 @@ composeLiveRuntime            -> constructs the ReviewerModel
 registerLiveProviders         -> installs it via setReviewerModelProvider
                                  (its own seam: StageAdapters has no reviewer member,
                                   because a research stage must not be handed one)
+assessCandidate               -> getReviewerModel()          <- THE CONSUMING HOP
+  (application orchestration)    explicit options.model wins; otherwise the seam
+ATIResearchBridge.processIntake-> assessCandidate(this.graduation, ...)
 GraduationService.assess      -> collectModelJudgments(candidate, model)
                               -> assessGraduation(candidate, { model, judgments })
                               -> reviewXRayGraph(graph, { validation, model, judgments })
                                  ... which is pure, and no network call happens inside it
 
-Before the amendment: assess() passed `model` into the SYNCHRONOUS reviewXRayGraph,
-which does not collect judgments. A fully configured deployment reported the
-capability and left every model-assisted check NOT_EVALUATED.
+Two defects, fixed in two rounds, both leaving the same symptom:
+  first submission  - nothing installed the reviewer, and assess() passed `model`
+                      into the SYNCHRONOUS reviewXRayGraph, which does not collect
+  second submission - installed into the seam, and no application path read it
+Either way a fully configured deployment reported the capability and left every
+model-assisted check NOT_EVALUATED.
+
+GraduationService never reads the seam. It receives a ReviewerModel, so its
+dependencies stay visible and a harness can drive it without arranging a global.
+Exactly one application file reads the seam, and the gate asserts that.
 
 reviewer absent   -> model-assisted checks NOT_EVALUATED with a reason;
                      graduation BLOCKED; fullCapability false. No PASS exists to
@@ -56,11 +67,13 @@ reviewer refuses  -> the asked checks stay NOT_EVALUATED with a reason; no revie
 reviewer throws   -> an outage, not a capability gap; propagates, no assessment is
                      appended, so commit() has nothing to stand on
 
-Requirements <-> registrations:
+Requirements <-> CONSUMED capabilities:
   REQUIRED_SLOTS = RESEARCH_MODEL, REVIEWER_MODEL, RETRIEVAL
   research model + retrieval reach the pipeline through the runtime's StageAdapters
-  reviewer reaches the REVIEW gate and graduation through its own seam
-  -> every required slot has a consumer; none is a dead composition token
+  reviewer reaches the REVIEW gate and graduation through assessCandidate, which
+    resolves the seam
+  -> every required slot has a CONSUMER, not merely a registration. A reviewer
+     installed into a slot nobody reads fails check 3b and check 20b.
 
 === retrievedAt ===
 observedAt(provided, now):
@@ -93,3 +106,11 @@ AF the reviewer seam is never installed              -> FAIL 3, 3b
      3b: "REVIEWER_MODEL is required but never installed"
 AG retrievedAt falls back to a non-timestamp         -> FAIL 25
      the run fails STRUCTURAL/NON_ISO_TIMESTAMP at INGEST; verified directly
+
+final amendment controls:
+AH the application path stops reading the seam       -> FAIL 20, 22, 23
+     "judge() was never called" — the defect the final amendment closes
+AI the production caller bypasses assessCandidate    -> FAIL 20b
+     "the bridge calls graduation.assess directly, bypassing the seam"
+AJ GraduationService reaches for the host seam       -> FAIL 20b
+     'the seam is read by ["assessment.ts","graduation-service.ts"]'

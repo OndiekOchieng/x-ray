@@ -5,14 +5,13 @@ The three implemented ports become a runtime the application already knows how
 to drive. **No real civic URL was used; every call went to `127.0.0.1` or to a
 hand-written port stub.**
 
-> **Amendment (review response).** The composed reviewer was dead capability —
-> constructed, returned, and consumed by nothing, with
-> `GraduationService.assess` passing a model into the *synchronous*
-> `reviewXRayGraph`, which does not collect judgments. It is now wired through
-> its own host seam and the real assessment path collects judgments as data.
-> And `INGEST`'s `retrievedAt` fell back to an **investigation id**; it now
-> falls back to an injected clock. See *Amendment* below. First submission
-> `9703c06`.
+> **Amendment (review response), in two rounds.** The composed reviewer was
+> dead capability. Round one wired it into a host seam and made
+> `GraduationService.assess` collect judgments as data. **Round two found the
+> chain still stopped at the seam** — nothing read `getReviewerModel()` — and
+> added the consuming hop. `INGEST`'s `retrievedAt`, which fell back to an
+> investigation id, now falls back to an injected clock. See *Amendment* below.
+> First submission `9703c06`; round one `5df69b8`.
 
 ## What was added
 
@@ -33,9 +32,13 @@ composition" stops being true.
 
 ## Amendment
 
-### 1 · The reviewer was dead capability
+### 1 · The reviewer was dead capability — twice
 
-Accepted, and the diagnosis was exact. Two separate failures compounding:
+Accepted both times, and the second catch was the important one: I fixed the
+symptom's two lower layers and left the top one missing, then reported it as
+wired.
+
+**Round one.** Two failures compounding:
 
 `composeLiveRuntime` constructed a `ReviewerModel` and returned it, and
 `registerLiveRuntime` installed only the `ExecutionRuntime`. No production path
@@ -69,13 +72,49 @@ reviewer member — a research stage must not be handed a reviewer — so
 same `globalThis` slot. Check **18** still asserts `StageAdapters` carries no
 reviewer.
 
-Check **20** proves it by asking, not by construction: a counting stub records
-every `judge()` call, and the check asserts `judge()` was called, that
-`CLAIM_ATOMICITY` was among the queries, that model-assisted checks came back
-`EVALUATED`, and that **the same assessment without a reviewer leaves them
-unevaluated** with a lower `checksEvaluated`. That last comparison is the one
-that would have caught the original defect: before the amendment both sides of
-it were identical.
+**Round two: installed is not consumed.** Round one composed the reviewer,
+registered it through `setReviewerModelProvider`, exposed `getReviewerModel()`
+— and **nothing called it**. `GraduationService.assess` collected judgments
+correctly *when given a model*, and no production path ever gave it one. The
+chain stopped at the host seam and the observable symptom was unchanged: a
+fully configured deployment still left every model-assisted check
+`NOT_EVALUATED`.
+
+My round-one gate could not see this because every check injected the model
+directly. It proved the machinery worked when handed a reviewer, which was
+never the thing in doubt.
+
+The missing hop is now `lib/xray/application/assessment.ts`:
+
+```ts
+export async function assessCandidate(graduation, investigationId, executionRunId, options) {
+  const model = options.model ?? await getReviewerModel()
+  return graduation.assess(investigationId, executionRunId, { ...options, ...(model && { model }) })
+}
+```
+
+`ATIResearchBridge.processIntake` — the only production caller of `assess` —
+goes through it. Dependency direction stays one-way and explicit:
+**`GraduationService` never reads the seam.** It receives a `ReviewerModel`, so
+its dependencies stay visible and a harness can drive it without arranging
+process state. An explicit `options.model` still wins, because every existing
+check harness injects one and a global that overrode an argument would make
+those harnesses depend on state they never set.
+
+Check **20** now drives the **registered seam**, not an injected model: it
+registers a counting reviewer through `setReviewerModelProvider`, asserts
+`getReviewerModel()` returns it and that clearing the seam clears it, then
+calls `assessCandidate` with **no model option** against a real PGlite
+checkpoint. It asserts `judge()` was called, `CLAIM_ATOMICITY` was among the
+queries, model-assisted checks came back `EVALUATED`, and that the same path
+with the seam **cleared** leaves them unevaluated with a lower
+`checksEvaluated`.
+
+Check **20b** is the structural half: exactly one application file reads the
+seam (`assessment.ts`), `GraduationService` reads none, and the bridge does not
+call `graduation.assess` directly. Control **AH** removes the seam read and
+fails 20, 22 and 23 with *"judge() was never called"* — which is precisely the
+state round one shipped in.
 
 - **Check 21** — unconfigured reviewer: every model-assisted check
   `NOT_EVALUATED` *with a reason* and zero findings, `fullCapability` false,
@@ -96,19 +135,20 @@ it were identical.
   type appears in `application/runtime.ts`, `graduation-service.ts`,
   `acceptance/runner.ts`, or the composition's public surface.
 
-### Requirements now correspond to registrations
+### Requirements correspond to *consumed* capabilities
 
-The amendment's warning was that a reviewer must not be mandatory *merely* as a
-dead token. It is now consumed, so requiring it is legitimate — and the
-correspondence is asserted rather than assumed.
+The rule, in the terminology the final amendment asked for: registration is not
+consumption. A slot that is required and installed but never **read** is still
+a dead token — the deployment looks configured, the operator supplies a key,
+and nothing changes about what runs. That was true of the reviewer twice over:
+first never installed, then installed into a seam nobody read.
 
-`REQUIRED_SLOTS` is exported, and check **3b** asserts each required slot
-reaches a consumer: the research model and the retrieval adapter through the
-runtime's `StageAdapters`, the reviewer through its own seam. Check **3**
-asserts an incomplete composition installs **neither** seam and a complete one
-installs **both**. Control AF removes the reviewer installation and fails 3b
-with *"REVIEWER_MODEL is required but never installed"* — which is exactly the
-state the first submission shipped in.
+Check **3b** now asserts consumption, not registration: the reviewer is
+installed, the seam **resolves** it, and an application path exists that reads
+it. Check **3** asserts an incomplete composition installs neither seam and a
+complete one installs both. Control **AF** removes the installation (fails 3b),
+and control **AH** removes the *read* (fails 20/22/23) — the two halves of the
+same rule, each with its own control.
 
 ### 2 · `INGEST`'s `retrievedAt`
 
@@ -284,7 +324,7 @@ important thing 20e will have to report.
 
 ## Gate
 
-`pnpm check:live-runtime` — **26/26**, in `runtime-gate.txt`. Two kinds of
+`pnpm check:live-runtime` — **27/27**, in `runtime-gate.txt`. Two kinds of
 stub, deliberately: hand-written ports exercise the provider-neutral
 composition, and an HTTP stub on `127.0.0.1` exercises `pause_turn`, which is a
 property of the transport and cannot be reached through a hand-written port.
@@ -308,6 +348,9 @@ port was called in protocol order.
 | **AE · `assessGraduation` drops the judgments it was given** | **FAIL 20** — *"all 6 model-assisted checks are still NOT_EVALUATED"* |
 | **AF · the reviewer seam is never installed** | **FAIL 3, 3b** |
 | **AG · `retrievedAt` falls back to a non-timestamp** | **FAIL 25** |
+| **AH · the application path stops reading the seam** | **FAIL 20, 22, 23** — *"judge() was never called"*: round one's defect, reproduced |
+| **AI · the production caller bypasses `assessCandidate`** | **FAIL 20b** |
+| **AJ · `GraduationService` reaches for the host seam** | **FAIL 20b** |
 
 **Control Z's first attempt was worthless and I nearly reported it as
 evidence.** It edited the `locator === undefined` branch, which the check's
@@ -379,6 +422,12 @@ check:acceptance BLOCKED (0 reason(s) against the graph, 6 capability blocker(s)
 - **A dead assertion**, again: check 21 compared `ReviewOutcome` against
   `'PASS'`/`'CLEAR'`, which the union does not contain. Replaced with the
   assertion that actually holds.
+- **My round-one reviewer checks tested the wrong thing.** All four injected
+  the model directly, so they proved the machinery works when handed a
+  reviewer — which was never in doubt — and were blind to nothing ever handing
+  it one. They now register through the seam and pass no model. The lesson is
+  the same one control Z taught: a check has to exercise the path that is
+  actually in question, not an adjacent one that is easier to set up.
 
 ## Carried forward
 
