@@ -76,6 +76,38 @@ export interface LiveStageOptions {
   readonly researchCutoffAt?: string
   /** Records one query will try to obtain. Cost control, not a limit on truth. */
   readonly retrieveLimit?: number
+  /**
+   * When X-Ray observed something, as an ISO instant.
+   *
+   * Injected rather than read from a global clock, so a run is reproducible —
+   * and required rather than optional, because `Source.retrievedAt` is not a
+   * field that tolerates a placeholder. See `observedAt`.
+   */
+  readonly now: () => string
+}
+
+/** An ISO 8601 instant. Anything else is not a time. */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+
+/**
+ * When the record was obtained.
+ *
+ * The provider's timestamp when it supplied a real one, and **X-Ray's own
+ * clock** otherwise. Two rules, both learned the hard way:
+ *
+ *   - a provider value is validated, not trusted. `retrievedAt` is what a
+ *     reader relies on to know how current a record was when it was read, and
+ *     an unparseable string there is worse than an honest observation of when
+ *     we looked.
+ *   - the fallback is a clock. An earlier version of this file used
+ *     `ctx.correlation.investigationId` — an investigation id where a
+ *     timestamp belongs. It typechecked because both are strings, and the gate
+ *     never caught it because every fixture happened to supply a
+ *     `retrievedAt`. Hence the adversarial check that now omits one.
+ */
+function observedAt(provided: string | undefined, now: () => string): string {
+  if (provided !== undefined && ISO_INSTANT.test(provided)) return provided
+  return now()
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +187,7 @@ function ingest(options: LiveStageOptions): StageDefinition {
         ...(observed.author === undefined ? {} : { author: observed.author }),
         url: document.locator ?? options.sourceUrl,
         ...(observed.publishedAt === undefined ? {} : { publishedAt: observed.publishedAt }),
-        retrievedAt: document.retrievedAt ?? ctx.correlation.investigationId,
+        retrievedAt: observedAt(document.retrievedAt, options.now),
         sourceType: 'NEWS',
         evidenceClass: 'SECONDARY',
         originStatus: 'UNKNOWN',
@@ -388,7 +420,7 @@ function trace(options: LiveStageOptions): StageDefinition {
         for (const ref of [...drawnOn].sort()) {
           const document = documentByRef.get(ref)
           if (document === undefined) continue
-          const source = sourceFrom(document, ctx.ids.source())
+          const source = sourceFrom(document, ctx.ids.source(), options.now)
           sources.push(source)
           sourceIdByRef.set(ref, source.id)
         }
@@ -493,7 +525,9 @@ function trace(options: LiveStageOptions): StageDefinition {
  * the only honest value before `PROVENANCE` runs. A provider cannot influence
  * either, because neither is read from a proposal.
  */
-function sourceFrom(document: RetrievedDocument, sourceId: string): Source {
+function sourceFrom(
+  document: RetrievedDocument, sourceId: string, now: () => string,
+): Source {
   const observed = document.observed
   return {
     id: sourceId,
@@ -503,7 +537,7 @@ function sourceFrom(document: RetrievedDocument, sourceId: string): Source {
     ...(observed.author === undefined ? {} : { author: observed.author }),
     ...(document.locator === undefined ? {} : { url: document.locator }),
     ...(observed.publishedAt === undefined ? {} : { publishedAt: observed.publishedAt }),
-    retrievedAt: document.retrievedAt ?? '1970-01-01T00:00:00Z',
+    retrievedAt: observedAt(document.retrievedAt, now),
     sourceType: 'OTHER',
     evidenceClass: 'SECONDARY',
     originStatus: 'UNKNOWN',

@@ -35,16 +35,22 @@
 
 export async function register(): Promise<void> {
   const { hostDatabase, hostDatabaseConfigured } = await import('@/lib/xray/host/database')
-  const { setDatabaseProvider, setExecutionRuntimeProvider } =
+  const { setDatabaseProvider, setExecutionRuntimeProvider, setReviewerModelProvider } =
     await import('@/lib/xray/application/runtime')
 
   if (hostDatabaseConfigured()) setDatabaseProvider(() => hostDatabase())
 
-  const { registerLiveRuntime } = await import('@/lib/xray/providers/live-runtime')
-  const composition = await registerLiveRuntime(setExecutionRuntimeProvider)
+  const { registerLiveProviders } = await import('@/lib/xray/providers/live-runtime')
+  const { composition, registered } = await registerLiveProviders({
+    setExecutionRuntime: setExecutionRuntimeProvider,
+    // The reviewer's own seam. The pipeline gets its adapters through the
+    // runtime; the REVIEW gate and graduation get the reviewer through here.
+    setReviewerModel: setReviewerModelProvider,
+  })
 
   if (composition.status === 'COMPOSED') {
     console.log(`[xray] ${composition.summary}`)
+    console.log(`[xray] capabilities registered: ${registered.join(', ')}`)
     return
   }
   /*

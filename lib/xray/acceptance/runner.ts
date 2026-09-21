@@ -22,6 +22,7 @@ import {
   fingerprintGraph,
   reviewXRayGraph,
   PORT_DEPENDENT_CHECKS,
+  type ModelJudgmentSet,
   type ReviewerModel,
   type ReviewResult,
 } from '@/lib/xray/review'
@@ -103,7 +104,24 @@ export interface GraduationOptions {
    * actually ran. Narrow it deliberately, never by accident.
    */
   requiredReviewChecks?: readonly string[]
+  /**
+   * Model port, for capability reporting only.
+   *
+   * Supplying it does **not** make model-assisted checks run: `reviewXRayGraph`
+   * is synchronous and asking a model is not. Pass `judgments` as well — a
+   * caller that has a model should use `collectModelJudgments` first. Kept
+   * because the capability report distinguishes "no model configured" from "a
+   * model is configured but produced nothing for this graph".
+   */
   model?: ReviewerModel
+  /**
+   * Pre-collected model answers (#6 D21).
+   *
+   * Passed as data so assessment stays a pure function of a graph and a set of
+   * judgments, and a recorded assessment can be reproduced without asking a
+   * model again.
+   */
+  judgments?: ModelJudgmentSet
   assessedAt?: string
   /** Run-level capability gaps remain separate from ResearchStop (D23). */
   capabilityGaps?: readonly CapabilityUnavailable[]
@@ -120,6 +138,7 @@ export function assessGraduation(
   const review = reviewXRayGraph(graph, {
     validation,
     model: options.model,
+    ...(options.judgments === undefined ? {} : { judgments: options.judgments }),
     reviewedAt: assessedAt,
   })
 

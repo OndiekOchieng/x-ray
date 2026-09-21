@@ -18,7 +18,7 @@ Every call went to 127.0.0.1. No request left this machine.
 
 === check:live-runtime ===
 
-19/19 live runtime checks passed
+26/26 live runtime checks passed
 Every call went to 127.0.0.1. No civic URL was used.
 
 === check:fixtures ===
@@ -87,6 +87,11 @@ $ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persist
 === check:persistence-durable-integration ===
 $ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/durable-integration-checks.ts
 7d-d: restart → resume → gates → audit → graduation → commit; failed run stays uncommitted PASS
+
+=== check:persistence-graduation ===
+7c: deferred FK failure leaves no v2/audit/pointer change PASS
+7c: v2 deep-equal; v1 unchanged; supersession, additions, reasons PASS
+7c: stale expected predecessor conflicts without overwrite PASS
 
 === check:investigation-service ===
 $ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/investigation-service-checks.ts

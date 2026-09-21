@@ -20,6 +20,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { readFileSync } from 'node:fs'
 
+import { PGlite } from '@electric-sql/pglite'
+
 import { available, unavailable, isAvailable, isUnavailable } from '@/lib/xray/capability'
 import type { CapabilityResult } from '@/lib/xray/capability'
 import type { Claim, Evidence, Finding, Gap, Source, SourcePosition } from '@/lib/xray/domain'
@@ -31,8 +33,14 @@ import type {
 } from '@/lib/xray/pipeline/retrieval-port'
 import { isInspectable } from '@/lib/xray/pipeline/retrieval-port'
 import type { ProposalRef } from '@/lib/xray/pipeline/proposals'
-import { submittedInvestigation } from '@/lib/xray/application/runtime'
-import { composeLiveRuntime, liveRuntime, registerLiveRuntime } from './live-runtime'
+import type { GraduationResult } from '@/lib/xray/acceptance'
+import { activePortChecks } from '@/lib/xray/review'
+import { GraduationService } from '@/lib/xray/application/graduation-service'
+import { checkpointCandidate } from '@/lib/xray/persistence/graduation-check-support'
+import { xrayKe001Graph } from '@/lib/xray/fixtures/xray-ke-001/graph'
+import {
+  composeLiveRuntime, liveRuntime, registerLiveProviders, REQUIRED_SLOTS,
+} from './live-runtime'
 import { gatherMaterial } from './material'
 import { newRunMaterial } from './live-stages'
 import { PROVIDER_ENV } from './config'
@@ -389,20 +397,73 @@ check('3 · a complete configuration composes, and registration is conditional',
     return `reviewer ${composition.reviewer.name}`
   if (composition.summary.includes(SECRET)) return 'the summary leaked the key'
 
-  // Registered only when complete.
-  let registered: unknown = 'untouched'
-  const incomplete = await registerLiveRuntime((provider) => { registered = provider }, {
-    environment: {},
-  })
-  if (incomplete.status !== 'INCOMPLETE') return 'an empty environment composed'
-  if (registered !== 'untouched') return 'an incomplete composition registered a runtime'
+  // Registered only when complete, and both seams are installed.
+  const installed: string[] = []
+  const seams = {
+    setExecutionRuntime: () => { installed.push('EXECUTION_RUNTIME') },
+    setReviewerModel: () => { installed.push('REVIEWER_MODEL') },
+  }
 
-  const complete = await registerLiveRuntime((provider) => { registered = provider }, {
-    environment,
+  const incomplete = await registerLiveProviders(seams, { environment: {} })
+  if (incomplete.composition.status !== 'INCOMPLETE') return 'an empty environment composed'
+  if (installed.length !== 0)
+    return `an incomplete composition installed ${installed.join(', ')}`
+
+  const complete = await registerLiveProviders(seams, { environment })
+  if (complete.composition.status !== 'COMPOSED')
+    return 'a complete environment did not compose'
+  if (JSON.stringify([...installed].sort())
+    !== JSON.stringify(['EXECUTION_RUNTIME', 'REVIEWER_MODEL']))
+    return `installed ${JSON.stringify(installed)}`
+  return JSON.stringify([...complete.registered].sort())
+    === JSON.stringify(['EXECUTION_RUNTIME', 'REVIEWER_MODEL'])
+    ? null : `reported ${JSON.stringify(complete.registered)}`
+})
+
+check('3b · every required slot corresponds to a registered capability', async () => {
+  /*
+   * The amendment's rule, as a check. A slot that is required but never
+   * installed anywhere is a dead composition token: it makes a deployment look
+   * configured, forces an operator to supply a key, and changes nothing about
+   * what runs. That is what the reviewer was before this amendment — composed,
+   * returned, and never consumed by any production path.
+   *
+   * So: three required slots, and each one reaches a consumer. The research
+   * model and the retrieval adapter arrive through the runtime's
+   * `StageAdapters`; the reviewer arrives through its own seam.
+   */
+  if (JSON.stringify([...REQUIRED_SLOTS]) !== JSON.stringify([
+    'RESEARCH_MODEL', 'REVIEWER_MODEL', 'RETRIEVAL',
+  ])) return `required slots are ${JSON.stringify(REQUIRED_SLOTS)}`
+
+  const installed: string[] = []
+  const complete = await registerLiveProviders({
+    setExecutionRuntime: () => { installed.push('EXECUTION_RUNTIME') },
+    setReviewerModel: () => { installed.push('REVIEWER_MODEL') },
+  }, {
+    environment: {
+      ANTHROPIC_API_KEY: SECRET,
+      ANTHROPIC_BASE_URL: stub.baseUrl,
+      XRAY_ANTHROPIC_SEARCH_MODEL_ID: 'search-model',
+      [PROVIDER_ENV.researchModel]: 'anthropic',
+      [PROVIDER_ENV.researchModelId]: 'research-model',
+      [PROVIDER_ENV.reviewerModel]: 'anthropic',
+      [PROVIDER_ENV.reviewerModelId]: 'reviewer-model',
+      [PROVIDER_ENV.retrieval]: 'anthropic',
+    },
   })
-  if (complete.status !== 'COMPOSED') return 'a complete environment did not compose'
-  return typeof registered === 'function'
-    ? null : 'a complete composition did not register'
+  if (complete.composition.status !== 'COMPOSED') return 'the environment did not compose'
+
+  // The reviewer slot is registered, so requiring it is not a dead token.
+  if (!installed.includes('REVIEWER_MODEL'))
+    return 'REVIEWER_MODEL is required but never installed'
+  // And the research/retrieval slots reach the pipeline through the runtime.
+  const plan = await complete.composition.runtime.initial('XRAY-LIVE-005', {
+    sourceUrl: URL_UNDER_INVESTIGATION, createdAt: '2026-04-01T00:00:00Z',
+  })
+  if (plan.adapters?.model === undefined) return 'the plan carries no research model'
+  return plan.adapters.research === undefined
+    ? 'the plan carries no retrieval adapter' : null
 })
 
 check('4 · re-evaluation is not planned by the live runtime', () => {
@@ -841,6 +902,326 @@ check('16 · the continuation bound stops the turn and says so', async () => {
   if (found.value.moreAvailable !== true) return 'the bound did not report more may exist'
   return /still paused at the continuation limit/.test(found.value.diagnostics?.note ?? '')
     ? null : 'the bound was not disclosed'
+})
+
+// ---------------------------------------------------------------------------
+// 20 — the reviewer is live capability, not a composition token
+// ---------------------------------------------------------------------------
+
+async function migrate(db: PGlite): Promise<void> {
+  for (const name of ['0001_version_ownership', '0002_source_retrieval_precision',
+    '0003_reevaluation_audit', '0004_source_position_knowledge_basis',
+    '0005_execution_audit', '0006_graduation_audit']) {
+    await db.exec(readFileSync(
+      new URL(`../../../db/migrations/${name}.up.sql`, import.meta.url), 'utf8'))
+  }
+}
+
+/** A reviewer that records what it was asked, and can refuse or break. */
+function countingReviewer(behaviour: {
+  readonly refuse?: boolean
+  readonly throwOn?: ReviewerModelQuery['kind']
+  readonly flag?: boolean
+} = {}): ReviewerModel & { asked: ReviewerModelQuery['kind'][] } {
+  const asked: ReviewerModelQuery['kind'][] = []
+  return {
+    name: 'stub:reviewer',
+    asked,
+    async judge(query) {
+      asked.push(query.kind)
+      if (behaviour.throwOn === query.kind) {
+        throw new Error('synthetic reviewer outage')
+      }
+      if (behaviour.refuse) {
+        return unavailable(`reviewer-model:${query.kind}`, 'REFUSED_FOR_INPUT',
+          'the stub declined this query', 'configure a reviewer that answers it')
+      }
+      return available({
+        flagged: behaviour.flag === true,
+        severity: 'ADVISORY' as const,
+        rationale: 'stub judgment',
+        requiredAction: 'none',
+        targets: [],
+      })
+    },
+  }
+}
+
+/** Assess the canonical graph through the real service, with a reviewer. */
+async function assessWith(reviewer: ReviewerModel | undefined): Promise<GraduationResult> {
+  const db = new PGlite()
+  try {
+    await migrate(db)
+    const graph = xrayKe001Graph
+    await checkpointCandidate(db, 'RUN-20D-REVIEW', graph, '2026-04-01T00:00:00Z')
+    const service = new GraduationService(db, () => '2026-04-01T00:00:00Z')
+    const audit = await service.assess(graph.investigation.id, 'RUN-20D-REVIEW', {
+      behaviors: [],
+      ...(reviewer === undefined ? {} : { model: reviewer }),
+    })
+    return audit.result
+  } finally {
+    await db.close()
+  }
+}
+
+/** The model-assisted checks, from the full review the assessment recorded. */
+const modelAssisted = (result: GraduationResult) =>
+  result.detail.review.checks.filter((check) => check.capability === 'MODEL_ASSISTED')
+
+check('20 · a live reviewer is actually asked, and its checks become EVALUATED', async () => {
+  /*
+   * The amendment's blocker. `composeLiveRuntime` constructed a reviewer and
+   * nothing consumed it, and `GraduationService.assess` passed a model into
+   * the *synchronous* `reviewXRayGraph` — which does not collect judgments. So
+   * a fully configured deployment reported the capability and left every
+   * model-assisted check NOT_EVALUATED.
+   *
+   * This asserts the chain end to end through the real service:
+   *   ReviewerModel -> collectModelJudgments -> judgments as data -> pure review
+   */
+  const reviewer = countingReviewer()
+  const withModel = await assessWith(reviewer)
+
+  // It was asked. Not "an object was constructed".
+  if (reviewer.asked.length === 0) return 'judge() was never called'
+  const kinds = [...new Set(reviewer.asked)].sort()
+  if (!kinds.includes('CLAIM_ATOMICITY'))
+    return `asked ${JSON.stringify(kinds)}, expected CLAIM_ATOMICITY among them`
+
+  // And the answers landed: model-assisted checks are EVALUATED.
+  const checks = modelAssisted(withModel)
+  if (checks.length === 0) return 'no model-assisted checks were reported'
+  const evaluated = checks.filter((check) => check.outcome !== 'NOT_EVALUATED')
+  if (evaluated.length === 0)
+    return `all ${checks.length} model-assisted checks are still NOT_EVALUATED`
+
+  /*
+   * The same assessment without a reviewer leaves them unevaluated — so the
+   * difference above is the reviewer being asked, not something else. This is
+   * the comparison that would have caught the original defect: before the
+   * amendment both sides of it were identical.
+   */
+  const withoutModel = await assessWith(undefined)
+  const unreviewed = modelAssisted(withoutModel)
+  if (!unreviewed.every((check) => check.outcome === 'NOT_EVALUATED'))
+    return 'model-assisted checks were EVALUATED with no reviewer configured'
+  if (withModel.review.checksEvaluated <= withoutModel.review.checksEvaluated)
+    return `checksEvaluated did not increase (${withoutModel.review.checksEvaluated}`
+      + ` -> ${withModel.review.checksEvaluated})`
+  return null
+})
+
+check('21 · an unconfigured reviewer is a truthful blocker, never a silent pass', async () => {
+  const withoutModel = await assessWith(undefined)
+  const checks = modelAssisted(withoutModel)
+
+  /*
+   * `ReviewOutcome` is `EVALUATED | NOT_EVALUATED` — there is no PASS to
+   * collapse into, which is #4's design. So the silent-pass failure mode here
+   * is a check reported EVALUATED without anyone having judged it, and that is
+   * what this asserts against.
+   */
+  for (const check of checks) {
+    if (check.outcome !== 'NOT_EVALUATED')
+      return `${check.checkId} is ${check.outcome} with no reviewer configured`
+    if ((check.notEvaluatedReason ?? '').trim() === '')
+      return `${check.checkId} gives no reason for not being evaluated`
+    if (check.findingCount !== 0)
+      return `${check.checkId} raised ${check.findingCount} findings without being evaluated`
+  }
+
+  // Graduation says BLOCKED, and names the capability.
+  if (withoutModel.verdict !== 'BLOCKED')
+    return `verdict ${withoutModel.verdict} with no reviewer`
+  if (withoutModel.review.fullCapability)
+    return 'full review capability was claimed with no reviewer'
+  return withoutModel.blockers.some((blocker) => /Reviewer/i.test(blocker.resolvedBy))
+    ? null : 'no blocker names the missing reviewer'
+})
+
+check('22 · a refusing reviewer leaves the check unevaluated, not flagged', async () => {
+  /*
+   * A refusal is a capability fact about one query, not a finding about the
+   * graph. `collectModelJudgments` returns it as `UNAVAILABLE`, the check stays
+   * NOT_EVALUATED with a reason, and nothing is written into the review as
+   * though the graph were at fault.
+   */
+  const reviewer = countingReviewer({ refuse: true })
+  const refused = await assessWith(reviewer)
+  if (reviewer.asked.length === 0) return 'judge() was never called'
+
+  /*
+   * Scoped to the checks that actually had something to judge.
+   *
+   * A model-assisted check the graph raises no subject for is legitimately
+   * EVALUATED — "the graph raised no subject" is a completed check, and
+   * reporting it unevaluated would leave a permanent capability gap on graphs
+   * that simply have no findings yet. An earlier version of this check
+   * asserted *every* model-assisted check went unevaluated and failed on
+   * exactly that case.
+   *
+   * So the subjects are identified by what the reviewer was asked, and only
+   * those must be unevaluated under refusal.
+   */
+  const askedKinds = new Set(reviewer.asked)
+  const refusedCheckIds = new Set(
+    activePortChecks(xrayKe001Graph.investigation.protocolVersion)
+      .filter((portCheck) => askedKinds.has(portCheck.queryKind))
+      .map((portCheck) => portCheck.checkId))
+  if (refusedCheckIds.size === 0) return 'no port check corresponds to what was asked'
+
+  const checks = modelAssisted(refused).filter((check) => refusedCheckIds.has(check.checkId))
+  if (checks.length === 0) return 'the refused checks were not reported'
+  for (const check of checks) {
+    if (check.outcome !== 'NOT_EVALUATED')
+      return `${check.checkId} was ${check.outcome} after its query was refused`
+    if ((check.notEvaluatedReason ?? '') === '')
+      return `${check.checkId} gave no reason after a refusal`
+  }
+
+  // No finding was raised from a refusal.
+  const findings = refused.detail.review.findings
+  if (findings.length !== 0)
+    return `${findings.length} review finding(s) came out of a refusal`
+  // A refusal is our capability gap, not a claim about the graph.
+  return refused.reasons.some((reason) => /reviewer|judgment/i.test(reason.message))
+    ? 'a refusal became a graduation reason about the graph' : null
+})
+
+check('23 · a broken reviewer is an outage, and blocks rather than committing', async () => {
+  /*
+   * A throw is not a capability gap. `collectModelJudgments` documents that
+   * swallowing it would report an outage as something an operator cannot act
+   * on, so it propagates — and the consequence is what matters: no assessment
+   * is appended, so nothing can be committed on the strength of a review that
+   * never happened.
+   */
+  const reviewer = countingReviewer({ throwOn: 'CLAIM_ATOMICITY' })
+  let threw = false
+  try { await assessWith(reviewer) } catch { threw = true }
+  if (!threw) return 'a broken reviewer produced an assessment anyway'
+
+  // And no assessment was recorded, so a commit has nothing to stand on.
+  const db = new PGlite()
+  try {
+    await migrate(db)
+    await checkpointCandidate(db, 'RUN-20D-OUTAGE', xrayKe001Graph, '2026-04-01T00:00:00Z')
+    const service = new GraduationService(db, () => '2026-04-01T00:00:00Z')
+    try {
+      await service.assess(xrayKe001Graph.investigation.id, 'RUN-20D-OUTAGE', {
+        behaviors: [], model: reviewer,
+      })
+    } catch { /* expected */ }
+    const assessment = await service.latestAssessment('RUN-20D-OUTAGE')
+    return assessment === undefined
+      ? null : 'an assessment was recorded despite the reviewer outage'
+  } finally {
+    await db.close()
+  }
+})
+
+check('24 · no provider-specific reviewer type leaves composition', () => {
+  /*
+   * The seam is typed `ReviewerModel` — the port — so a consumer cannot come
+   * to depend on an Anthropic type. Asserted structurally, because a leak here
+   * would be invisible until someone tried to swap providers.
+   */
+  const runtime = stripComments(read('lib/xray/application/runtime.ts'))
+  if (!/setReviewerModelProvider/.test(runtime)) return 'the reviewer seam is gone'
+  if (/anthropic/i.test(runtime)) return 'the application runtime names a provider'
+  if (!/provider: \(\(\) => Promise<ReviewerModel>\) \| null/.test(runtime))
+    return 'the reviewer seam is not typed against the port'
+
+  const graduation = stripComments(read('lib/xray/application/graduation-service.ts'))
+  if (/anthropic/i.test(graduation)) return 'graduation names a provider'
+  if (!/collectModelJudgments/.test(graduation))
+    return 'graduation does not collect judgments'
+
+  const acceptance = stripComments(read('lib/xray/acceptance/runner.ts'))
+  if (/anthropic/i.test(acceptance)) return 'the acceptance runner names a provider'
+
+  // And no Anthropic reviewer type is imported outside the provider layer.
+  const live = stripComments(read('lib/xray/providers/live-runtime.ts'))
+  return /AnthropicReviewerModel/.test(live)
+    ? 'composition exposes the Anthropic reviewer type' : null
+})
+
+// ---------------------------------------------------------------------------
+// 25 — the retrieval timestamp
+// ---------------------------------------------------------------------------
+
+check('25 · a record with no retrievedAt gets X-Ray\'s own observation time', async () => {
+  /*
+   * The second blocker, and a bug the gate had no right to miss: this fell
+   * back to `ctx.correlation.investigationId` — an investigation id where a
+   * timestamp belongs. It typechecked because both are strings, and every
+   * fixture happened to supply a `retrievedAt`, so nothing ever exercised the
+   * fallback.
+   */
+  const OBSERVED = '2026-09-21T12:34:56Z'
+  const noTimestamp: ResearchAdapter = {
+    name: 'stub:no-timestamp',
+    capabilities: ['search', 'retrieve'],
+    async search(query) { return available({ query, documents: [] }) },
+    async retrieve(locator) {
+      // Readable, and deliberately silent about when it was obtained.
+      return available({
+        ref: 'ref:d1' as ProposalRef,
+        locator,
+        outcome: 'RETRIEVED',
+        observed: { title: 'A record that does not say when it was read' },
+        extract: { text: ARTICLE, truncated: false },
+      })
+    },
+  }
+
+  const runtime = liveRuntime(
+    { model: stubModel(), research: noTimestamp }, { now: () => OBSERVED })
+  const plan = await runtime.initial('XRAY-LIVE-006', {
+    sourceUrl: URL_UNDER_INVESTIGATION, createdAt: '2026-04-01T00:00:00Z',
+  })
+  const result = await runPipeline({
+    investigation: plan.investigation,
+    stages: plan.stages,
+    ...(plan.adapters === undefined ? {} : { adapters: plan.adapters }),
+    maxAttempts: 1,
+  })
+
+  const surface = result.graph.sources[0]
+  if (surface === undefined) return 'no source was minted'
+  if (surface.retrievedAt !== OBSERVED)
+    return `retrievedAt is "${surface.retrievedAt}", expected the injected clock`
+  // Never an id, never a placeholder epoch.
+  if (surface.retrievedAt.includes('XRAY')) return 'retrievedAt carries an investigation id'
+  if (surface.retrievedAt.startsWith('1970')) return 'retrievedAt is a placeholder epoch'
+
+  // A provider value that is not an instant is not trusted either.
+  const nonsense: ResearchAdapter = {
+    ...noTimestamp,
+    async retrieve(locator) {
+      return available({
+        ref: 'ref:d1' as ProposalRef, locator, outcome: 'RETRIEVED',
+        retrievedAt: 'last Tuesday' as never,
+        observed: {}, extract: { text: ARTICLE, truncated: false },
+      })
+    },
+  }
+  const second = liveRuntime(
+    { model: stubModel(), research: nonsense }, { now: () => OBSERVED })
+  const secondPlan = await second.initial('XRAY-LIVE-007', {
+    sourceUrl: URL_UNDER_INVESTIGATION, createdAt: '2026-04-01T00:00:00Z',
+  })
+  const secondResult = await runPipeline({
+    investigation: secondPlan.investigation,
+    stages: secondPlan.stages,
+    ...(secondPlan.adapters === undefined ? {} : { adapters: secondPlan.adapters }),
+    maxAttempts: 1,
+  })
+  const secondSurface = secondResult.graph.sources[0]
+  if (secondSurface === undefined) return 'no source was minted for the nonsense timestamp'
+  return secondSurface.retrievedAt === OBSERVED
+    ? null : `an unparseable provider timestamp survived: "${secondSurface.retrievedAt}"`
 })
 
 // ---------------------------------------------------------------------------

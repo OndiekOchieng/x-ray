@@ -30,7 +30,7 @@
 import type { ClaimId, InvestigationVersionTrigger } from '@/lib/xray/domain'
 import { createXRayGraph, type XRayGraph } from '@/lib/xray/selectors'
 import { assessGraduation, type AcceptanceBehavior, type GraduationResult } from '@/lib/xray/acceptance'
-import type { ReviewerModel } from '@/lib/xray/review'
+import { collectModelJudgments, type ReviewerModel } from '@/lib/xray/review'
 import { GraphAccumulator } from '@/lib/xray/pipeline/accumulator'
 import { appendGraduationAudit, readLatestGraduation, type GraduationAuditRecord } from '@/lib/xray/persistence/graduation-audit'
 import { readSnapshot, type SnapshotDatabase } from '@/lib/xray/persistence/snapshot'
@@ -133,10 +133,33 @@ export class GraduationService {
       throw new GraduationNotEligible('Execution run belongs to a different investigation')
 
     const candidate = checkpoint.accumulator.rebuild()
+
+    /*
+     * Ask the reviewer *before* assessing, and pass the answers as data.
+     *
+     * `assessGraduation` is synchronous, and `reviewXRayGraph` is a pure
+     * function of a graph and a set of judgments. Handing it a model alone —
+     * which this method used to do — leaves every model-assisted check
+     * `NOT_EVALUATED`, because nothing ever asked. The model was configured,
+     * the capability report said so, and the checks still did not run.
+     *
+     * A model that *refuses* a query returns `UNAVAILABLE`, which keeps its
+     * check `NOT_EVALUATED` with a reason — a disclosure, not a pass. A model
+     * that *throws* is an outage and is deliberately not caught here:
+     * `collectModelJudgments` documents that swallowing it would report an
+     * outage as a capability gap an operator cannot act on. The assessment is
+     * then never appended, so `commit` refuses for want of one rather than
+     * committing an unreviewed candidate.
+     */
+    const judgments = options.model === undefined
+      ? undefined
+      : await collectModelJudgments(candidate, options.model)
+
     const result = assessGraduation(candidate, {
       behaviors: options.behaviors ?? [],
       ...(options.requiredReviewChecks ? { requiredReviewChecks: options.requiredReviewChecks } : {}),
       ...(options.model ? { model: options.model } : {}),
+      ...(judgments === undefined ? {} : { judgments }),
       assessedAt: this.clock(),
     })
     return appendGraduationAudit(this.db, executionRunId, candidate, result)

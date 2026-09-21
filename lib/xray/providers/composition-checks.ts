@@ -674,18 +674,38 @@ async function main(): Promise<void> {
      * against.
      */
     const instrumentation = stripComments(read('instrumentation.ts'))
-    if (!/registerLiveRuntime/.test(instrumentation))
-      return 'instrumentation no longer registers a live runtime'
-    if (!/setExecutionRuntimeProvider/.test(instrumentation))
-      return 'instrumentation does not pass the runtime seam'
+    if (!/registerLiveProviders/.test(instrumentation))
+      return 'instrumentation no longer registers the live providers'
 
-    // The conditional lives in `registerLiveRuntime`, and it is the only path
-    // that calls the seam.
+    /*
+     * Both seams, and the reviewer's is the one the 20d amendment was about:
+     * composing a reviewer and installing nothing left the capability dead —
+     * configured, reported, and never asked.
+     */
+    for (const seam of ['setExecutionRuntimeProvider', 'setReviewerModelProvider']) {
+      if (!instrumentation.includes(seam)) return `instrumentation does not pass ${seam}`
+    }
+
+    // The conditional lives in `registerLiveProviders`, and each seam is
+    // installed exactly once.
     const live = stripComments(read('lib/xray/providers/live-runtime.ts'))
-    if (!/if \(composition\.status !== 'COMPOSED'\) return composition/.test(live))
+    if (!/if \(composition\.status !== 'COMPOSED'\)\s*return \{ composition, registered: \[\] \}/
+      .test(live))
       return 'registration is not conditional on a complete composition'
-    const calls = live.match(/setProvider\(/g) ?? []
-    if (calls.length !== 1) return `setProvider is called ${calls.length} times`
+    for (const seam of ['setExecutionRuntime', 'setReviewerModel']) {
+      const calls = live.match(new RegExp(`seams\\.${seam}\\(`, 'g')) ?? []
+      if (calls.length !== 1) return `${seam} is installed ${calls.length} times`
+    }
+
+    /*
+     * Every required slot must reach a consumer. A slot required but never
+     * installed is a dead composition token: it makes a deployment look
+     * configured and changes nothing about what runs.
+     */
+    if (!/REQUIRED_SLOTS/.test(live)) return 'the required slots are not declared'
+    for (const slot of ['RESEARCH_MODEL', 'REVIEWER_MODEL', 'RETRIEVAL']) {
+      if (!live.includes(slot)) return `${slot} is not among the required slots`
+    }
 
     // A composition with any slot unavailable reports the slots, never a
     // partial runtime.

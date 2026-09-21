@@ -2,6 +2,7 @@
 ok    1 · an unconfigured environment composes nothing and says which slots
 ok    2 · a partial configuration composes nothing — no silent fallback
 ok    3 · a complete configuration composes, and registration is conditional
+ok    3b · every required slot corresponds to a registered capability
 ok    4 · re-evaluation is not planned by the live runtime
 ok    5 · discovery is followed by retrieval, in that order
 ok    6 · a record that could not be obtained stays unreadable, and stays
@@ -15,63 +16,80 @@ ok    13 · no submitted URL blocks every stage with a reason
 ok    14 · a paused search turn continues and completes, without restarting
 ok    15 · a continued search feeds the composed runtime as material
 ok    16 · the continuation bound stops the turn and says so
+ok    20 · a live reviewer is actually asked, and its checks become EVALUATED
+ok    21 · an unconfigured reviewer is a truthful blocker, never a silent pass
+ok    22 · a refusing reviewer leaves the check unevaluated, not flagged
+ok    23 · a broken reviewer is an outage, and blocks rather than committing
+ok    24 · no provider-specific reviewer type leaves composition
+ok    25 · a record with no retrievedAt gets X-Ray's own observation time
 ok    17 · the stage layer is provider-neutral and the pipeline is untouched
 ok    18 · review stays out of the pipeline adapters
 ok    19 · no secret reaches a composed runtime, a plan, or a graph
 
-19/19 live runtime checks passed
+26/26 live runtime checks passed
 Every call went to 127.0.0.1. No civic URL was used.
 
-=== earlier gates, re-aimed for 20d ===
+=== earlier gates ===
 
-22/22 provider composition checks passed
 28/28 Anthropic adapter checks passed
 29/29 Anthropic retrieval checks passed
 
-=== composition semantics ===
-every slot AVAILABLE            -> COMPOSED; runtime registered; summary logged (names only)
-any slot not AVAILABLE          -> INCOMPLETE; nothing registered; each missing slot named
-                                   with its reason. getExecutionRuntime() keeps returning
-                                   unconfiguredResearchRuntime, so a fresh run ends
-                                   CAPABILITY_BLOCKED exactly as every #6-#11 gate expects.
-no submitted URL                -> all ten stages report one capability gap each
-reevaluation                    -> deliberately not implemented; startReevaluation says a
-                                   re-evaluation cannot be planned rather than re-researching
-                                   the original URL and calling it a successor version
+=== the reviewer chain, as it now runs ===
+composeLiveRuntime            -> constructs the ReviewerModel
+registerLiveProviders         -> installs it via setReviewerModelProvider
+                                 (its own seam: StageAdapters has no reviewer member,
+                                  because a research stage must not be handed one)
+GraduationService.assess      -> collectModelJudgments(candidate, model)
+                              -> assessGraduation(candidate, { model, judgments })
+                              -> reviewXRayGraph(graph, { validation, model, judgments })
+                                 ... which is pure, and no network call happens inside it
 
-=== search -> retrieve sequencing ===
-search returns NOT_RETRIEVED results with no extract (20c).
-gatherMaterial then fetches each discovered locator, keeping the SEARCH handle.
-  obtained     -> RETRIEVED / PARTIAL with an extract; isInspectable true
-  unobtainable -> kept in the material, no extract; isInspectable false
-Unobtained records are kept, not dropped: a record that was found and could not be
-read is a research fact, and dropping it would make the search look narrower than
-it was. XR-INV-006 turns on the extent of the search.
+Before the amendment: assess() passed `model` into the SYNCHRONOUS reviewXRayGraph,
+which does not collect judgments. A fully configured deployment reported the
+capability and left every model-assisted check NOT_EVALUATED.
 
-TRACE refuses to mint evidence from a non-inspectable document, and throws rather
-than dropping the proposition, because StageOutcome is a contribution OR a gap and
-never both -- so a stage that kept its other work could not report the refusal.
-Defence in depth: with that guard removed, STAGED validation still catches it as
-XR-INV-006/EVIDENCE_FROM_UNOBTAINED_SOURCE (verified, see report).
+reviewer absent   -> model-assisted checks NOT_EVALUATED with a reason;
+                     graduation BLOCKED; fullCapability false. No PASS exists to
+                     collapse into: ReviewOutcome is EVALUATED | NOT_EVALUATED.
+reviewer refuses  -> the asked checks stay NOT_EVALUATED with a reason; no review
+                     finding and no graduation reason about the graph
+reviewer throws   -> an outage, not a capability gap; propagates, no assessment is
+                     appended, so commit() has nothing to stand on
 
-=== pause_turn continuation ===
-Implemented at the Anthropic server-tool transport boundary, as 20c recorded.
-  one user message, sent once; each continuation appends the paused assistant
-  message unchanged, including every encrypted_content
-  blocks accumulate across turns, so earlier results are never discarded
-  bound: 4 continuations (5 requests). At the bound the gathered results are
-  returned with moreAvailable: true and a note saying the turn was still paused.
+Requirements <-> registrations:
+  REQUIRED_SLOTS = RESEARCH_MODEL, REVIEWER_MODEL, RETRIEVAL
+  research model + retrieval reach the pipeline through the runtime's StageAdapters
+  reviewer reaches the REVIEW gate and graduation through its own seam
+  -> every required slot has a consumer; none is a dead composition token
+
+=== retrievedAt ===
+observedAt(provided, now):
+  a provider value that is a real ISO instant  -> used
+  anything else, or absent                     -> the injected clock, now()
+Before: `document.retrievedAt ?? ctx.correlation.investigationId` — an investigation
+id where a timestamp belongs. It typechecked because both are strings, and every
+fixture supplied a retrievedAt so the fallback never ran.
+Verified backstop: with the bad fallback restored, INGEST fails
+STRUCTURAL/NON_ISO_TIMESTAMP and no source is minted. The bug was latent, not
+silent-corrupting — but it would have failed any live run where a provider omitted
+the timestamp.
 
 === negative controls (each verified to apply, then reverted) ===
 W  composes despite missing slots                    -> FAIL 1, 2, 3
-X  registration no longer conditional                -> FAIL 3  ("an incomplete composition registered a runtime")
+X  registration no longer conditional                -> FAIL 3
 Y  search results passed through without retrieval   -> FAIL 5, 6, 8, 15
 Z  unobtained records dropped after retrieval        -> FAIL 6, 7
-     first attempt at this control edited the wrong branch and passed 19/19
-     without testing anything; corrected and re-run
 AA TRACE accepts evidence from an unobtained record  -> FAIL 7
-     and the recorded reason changes: the STAGED validator catches it as
-     XR-INV-006/EVIDENCE_FROM_UNOBTAINED_SOURCE instead of the stage naming
-     the provider. Verified directly, not assumed.
+     (STAGED validation then catches it as XR-INV-006/EVIDENCE_FROM_UNOBTAINED_SOURCE)
 AB INGEST asserts originStatus before PROVENANCE     -> FAIL 9
-AC continuation restarts instead of resuming         -> FAIL 14 ("request 2 carried 1 messages, expected 2")
+AC continuation restarts instead of resuming         -> FAIL 14
+
+amendment controls:
+AD graduation stops collecting judgments             -> FAIL 20, 22, 23
+     "judge() was never called" — this is the original defect, reproduced
+AE assessGraduation drops the judgments it was given -> FAIL 20
+     "all 6 model-assisted checks are still NOT_EVALUATED"
+AF the reviewer seam is never installed              -> FAIL 3, 3b
+     3b: "REVIEWER_MODEL is required but never installed"
+AG retrievedAt falls back to a non-timestamp         -> FAIL 25
+     the run fails STRUCTURAL/NON_ISO_TIMESTAMP at INGEST; verified directly

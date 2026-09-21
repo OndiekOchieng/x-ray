@@ -20,6 +20,7 @@ import { notConfigured } from '@/lib/xray/capability'
 import { RESEARCH_STAGES } from '@/lib/xray/pipeline/stages'
 import type { StageDefinition } from '@/lib/xray/pipeline/stages'
 import type { SnapshotDatabase } from '@/lib/xray/persistence/snapshot'
+import type { ReviewerModel } from '@/lib/xray/review'
 import type { ExecutionRuntime, InitialExecutionPlan, ExecutionPlan } from './inline-execution'
 
 export class HostNotConfigured extends Error {
@@ -51,13 +52,22 @@ export class HostNotConfigured extends Error {
 interface ProviderSlot {
   database: (() => Promise<SnapshotDatabase>) | null
   runtime: (() => Promise<ExecutionRuntime>) | null
+  /**
+   * The reviewer, registered separately from the runtime.
+   *
+   * Separately because it is consumed somewhere else entirely: the REVIEW gate
+   * and graduation ask a `ReviewerModel`, and `StageAdapters` deliberately has
+   * no reviewer member — a research stage must not be handed one. One seam per
+   * consumer keeps that true.
+   */
+  reviewer: (() => Promise<ReviewerModel>) | null
 }
 
 const SLOT = Symbol.for('xray.application.providers')
 
 function slot(): ProviderSlot {
   const host = globalThis as unknown as Record<symbol, ProviderSlot | undefined>
-  host[SLOT] ??= { database: null, runtime: null }
+  host[SLOT] ??= { database: null, runtime: null, reviewer: null }
   return host[SLOT]
 }
 
@@ -84,6 +94,29 @@ export async function getExecutionRuntime(): Promise<ExecutionRuntime> {
   const provider = slot().runtime
   return provider ? provider() : unconfiguredResearchRuntime()
 }
+
+export function setReviewerModelProvider(
+  provider: (() => Promise<ReviewerModel>) | null,
+): void {
+  slot().reviewer = provider
+}
+
+/**
+ * The configured reviewer, or `undefined`.
+ *
+ * `undefined` is not an error and must not become one. A deployment with no
+ * reviewer runs the deterministic checks and reports every model-assisted
+ * check `NOT_EVALUATED` with a reason — which is #4's promise and the opposite
+ * of a silent pass. A caller that treated absence as "nothing to check" would
+ * report an unreviewed graph as reviewed.
+ */
+export async function getReviewerModel(): Promise<ReviewerModel | undefined> {
+  const provider = slot().reviewer
+  return provider ? provider() : undefined
+}
+
+/** Whether a reviewer is configured, for capability reporting. */
+export const reviewerConfigured = (): boolean => slot().reviewer !== null
 
 // ---------------------------------------------------------------------------
 // The default runtime

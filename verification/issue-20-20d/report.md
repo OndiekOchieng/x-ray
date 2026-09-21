@@ -5,6 +5,15 @@ The three implemented ports become a runtime the application already knows how
 to drive. **No real civic URL was used; every call went to `127.0.0.1` or to a
 hand-written port stub.**
 
+> **Amendment (review response).** The composed reviewer was dead capability —
+> constructed, returned, and consumed by nothing, with
+> `GraduationService.assess` passing a model into the *synchronous*
+> `reviewXRayGraph`, which does not collect judgments. It is now wired through
+> its own host seam and the real assessment path collects judgments as data.
+> And `INGEST`'s `retrievedAt` fell back to an **investigation id**; it now
+> falls back to an injected clock. See *Amendment* below. First submission
+> `9703c06`.
+
 ## What was added
 
 | File | Role |
@@ -21,6 +30,119 @@ The provider layer now has **two tiers**, and check 15b holds them apart:
 `live-runtime.ts` are provider-neutral composition over the ports. The neutral
 tier may not name a vendor — otherwise "swapping a provider changes only
 composition" stops being true.
+
+## Amendment
+
+### 1 · The reviewer was dead capability
+
+Accepted, and the diagnosis was exact. Two separate failures compounding:
+
+`composeLiveRuntime` constructed a `ReviewerModel` and returned it, and
+`registerLiveRuntime` installed only the `ExecutionRuntime`. No production path
+consumed the reviewer at all.
+
+And underneath that, `GraduationService.assess` passed `model` into
+`assessGraduation` → `reviewXRayGraph`, which is **synchronous**. Per the
+existing contract that does not collect judgments — the option's own docblock
+says so — so every model-assisted check stayed `NOT_EVALUATED`. A fully
+configured deployment would have reported the capability and never asked
+anything.
+
+The chain now runs end to end:
+
+```
+ReviewerModel
+  -> registerLiveProviders installs it via setReviewerModelProvider
+  -> GraduationService.assess: collectModelJudgments(candidate, model)
+  -> assessGraduation(candidate, { model, judgments })
+  -> reviewXRayGraph(graph, { validation, model, judgments })   // pure
+```
+
+`judgments` is threaded through `GraduationOptions` as **data**, so assessment
+stays a pure function of a graph and a set of judgments and a recorded
+assessment can be reproduced without asking a model again. No network call
+happens inside the pure reviewer.
+
+**Its own seam, not `StageAdapters`.** `StageAdapters` deliberately has no
+reviewer member — a research stage must not be handed a reviewer — so
+`setReviewerModelProvider` sits beside the database and runtime seams on the
+same `globalThis` slot. Check **18** still asserts `StageAdapters` carries no
+reviewer.
+
+Check **20** proves it by asking, not by construction: a counting stub records
+every `judge()` call, and the check asserts `judge()` was called, that
+`CLAIM_ATOMICITY` was among the queries, that model-assisted checks came back
+`EVALUATED`, and that **the same assessment without a reviewer leaves them
+unevaluated** with a lower `checksEvaluated`. That last comparison is the one
+that would have caught the original defect: before the amendment both sides of
+it were identical.
+
+- **Check 21** — unconfigured reviewer: every model-assisted check
+  `NOT_EVALUATED` *with a reason* and zero findings, `fullCapability` false,
+  graduation `BLOCKED`, and a blocker naming the missing reviewer. There is no
+  `PASS` to collapse into — `ReviewOutcome` is `EVALUATED | NOT_EVALUATED`,
+  which is #4's design — so the silent-pass failure mode here is a check
+  reported `EVALUATED` that nobody judged, and that is what the check asserts
+  against.
+- **Check 22** — refusal: the asked checks stay `NOT_EVALUATED` with a reason,
+  no review finding is raised, and no graduation *reason about the graph*
+  appears. A refusal is our capability gap, not the graph's fault.
+- **Check 23** — outage: a throwing reviewer is deliberately **not** caught.
+  `collectModelJudgments` documents that swallowing it would report an outage
+  as something an operator cannot act on. The consequence is what matters: no
+  assessment is appended, so `commit` refuses for want of one rather than
+  committing on the strength of a review that never happened.
+- **Check 24** — the seam is typed against the port, and no Anthropic reviewer
+  type appears in `application/runtime.ts`, `graduation-service.ts`,
+  `acceptance/runner.ts`, or the composition's public surface.
+
+### Requirements now correspond to registrations
+
+The amendment's warning was that a reviewer must not be mandatory *merely* as a
+dead token. It is now consumed, so requiring it is legitimate — and the
+correspondence is asserted rather than assumed.
+
+`REQUIRED_SLOTS` is exported, and check **3b** asserts each required slot
+reaches a consumer: the research model and the retrieval adapter through the
+runtime's `StageAdapters`, the reviewer through its own seam. Check **3**
+asserts an incomplete composition installs **neither** seam and a complete one
+installs **both**. Control AF removes the reviewer installation and fails 3b
+with *"REVIEWER_MODEL is required but never installed"* — which is exactly the
+state the first submission shipped in.
+
+### 2 · `INGEST`'s `retrievedAt`
+
+```ts
+retrievedAt: document.retrievedAt ?? ctx.correlation.investigationId   // wrong
+```
+
+An investigation id where a timestamp belongs. It typechecked because both are
+strings, and **the gate never caught it because every fixture supplied a
+`retrievedAt`**, so the fallback never ran.
+
+It is now `observedAt(document.retrievedAt, options.now)`:
+
+- a provider value that is a **real ISO instant** is used;
+- anything else — absent, or unparseable — falls back to the **injected
+  clock**. `retrievedAt` is what a reader relies on to know how current a
+  record was when it was read, so an unparseable string there is worse than an
+  honest observation of when we looked.
+
+`now` is a required member of `LiveStageOptions`, threaded from the runtime's
+clock, so a stage cannot reach for a global. `TRACE`'s `sourceFrom` had the
+same bug class — a `'1970-01-01T00:00:00Z'` placeholder — and uses the same
+function.
+
+Check **25** drives a readable document with **no** `retrievedAt` and asserts
+the canonical `Source` carries the injected instant, contains no `XRAY` id, and
+is not a placeholder epoch. It then drives a document whose `retrievedAt` is
+`'last Tuesday'` and asserts the clock wins.
+
+**Verified backstop:** with the bad fallback restored, `INGEST` fails
+`STRUCTURAL/NON_ISO_TIMESTAMP` and no source is minted. So the bug was *latent*
+rather than silently corrupting — but it would have failed any live run where a
+provider omitted the timestamp, which is every search result before retrieval.
+I checked this directly rather than claiming it.
 
 ## Composition, and truthful failure
 
@@ -162,7 +284,7 @@ important thing 20e will have to report.
 
 ## Gate
 
-`pnpm check:live-runtime` — **19/19**, in `runtime-gate.txt`. Two kinds of
+`pnpm check:live-runtime` — **26/26**, in `runtime-gate.txt`. Two kinds of
 stub, deliberately: hand-written ports exercise the provider-neutral
 composition, and an HTTP stub on `127.0.0.1` exercises `pause_turn`, which is a
 property of the transport and cannot be reached through a hand-written port.
@@ -182,6 +304,10 @@ port was called in protocol order.
 | AA · TRACE accepts evidence from an unobtained record | FAIL 7 |
 | AB · INGEST asserts `originStatus` before `PROVENANCE` | FAIL 9 |
 | AC · continuation restarts instead of resuming | FAIL 14 |
+| **AD · graduation stops collecting judgments** | **FAIL 20, 22, 23** — *"judge() was never called"*: the original defect, reproduced |
+| **AE · `assessGraduation` drops the judgments it was given** | **FAIL 20** — *"all 6 model-assisted checks are still NOT_EVALUATED"* |
+| **AF · the reviewer seam is never installed** | **FAIL 3, 3b** |
+| **AG · `retrievedAt` falls back to a non-timestamp** | **FAIL 25** |
 
 **Control Z's first attempt was worthless and I nearly reported it as
 evidence.** It edited the `locator === undefined` branch, which the check's
@@ -214,13 +340,16 @@ Five checks asserted things 20d makes false by design. Re-aimed, not relaxed:
   checks 26b/26c cover continuation and its bound.
 - **20a check 4** was already re-aimed in 20c; unchanged here.
 
-`check:providers` **22/22**, `check:anthropic-adapters` **28/28**,
-`check:anthropic-retrieval` **29/29**.
+`check:providers` **22/22** — check 15 was updated again for the amendment: it
+now asserts **both** seams are passed from instrumentation, each installed
+exactly once, and that `REQUIRED_SLOTS` declares all three.
+`check:anthropic-adapters` **28/28**, `check:anthropic-retrieval` **29/29**.
 
 ## Regression
 
-`regression-sweep.txt`: typecheck clean, **39 gates green**, and the
-unconfigured path byte-identical:
+`regression-sweep.txt`: typecheck clean, **40 gates green**, and the
+unconfigured path byte-identical — including `check:review` and
+`check:acceptance`, which exercise the same code the amendment touched:
 
 ```
 check:adapters   6 port-dependent checks, 2 capability gap(s) journalled
@@ -241,6 +370,15 @@ check:acceptance BLOCKED (0 reason(s) against the graph, 6 capability blocker(s)
 - **Check 14's message arithmetic was wrong** — I expected user/assistant pairs
   (`index * 2 + 1`); a continuation appends only the assistant message, so it
   is `index + 1`. The code was right and the check was wrong.
+- **Check 22's first assertion was too strong.** It required *every*
+  model-assisted check to be unevaluated under refusal, and failed — because a
+  check the graph raises **no subject** for is legitimately `EVALUATED`
+  ("nothing to judge"), and reporting it unevaluated would leave a permanent
+  capability gap on graphs with no findings yet. It now scopes to the checks
+  the reviewer was actually asked, resolved through `activePortChecks`.
+- **A dead assertion**, again: check 21 compared `ReviewOutcome` against
+  `'PASS'`/`'CLEAR'`, which the union does not contain. Replaced with the
+  assertion that actually holds.
 
 ## Carried forward
 
@@ -268,4 +406,14 @@ check:acceptance BLOCKED (0 reason(s) against the graph, 6 capability blocker(s)
   placeholder. Classifying a record's type from its text is model work nobody
   has asked for yet.
 - **One bad proposition fails `TRACE`.** Deliberate; see above.
+- **`GraduationService.assess` now makes provider calls.** It was synchronous
+  work over durable state; with a reviewer configured it asks the model once
+  per judgment subject, sequentially (which `collectModelJudgments` does on
+  purpose, so the capability report is reproducible). An assessment of a large
+  graph is now a slow, billable operation. Nothing about that is hidden, but it
+  is new behaviour for a method that used to be cheap.
+- **A reviewer outage aborts `assess`.** Deliberate, and the existing contract's
+  choice rather than mine. The effect is that graduation cannot proceed and
+  nothing is recorded — correct, but it means a flaky reviewer blocks
+  graduation rather than degrading it.
 - No live URL, no first-light run. 20e owns that.

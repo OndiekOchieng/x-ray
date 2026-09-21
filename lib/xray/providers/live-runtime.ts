@@ -136,6 +136,9 @@ export function liveRuntime(
     liveStages({
       sourceUrl,
       material,
+      // The same clock the runtime uses. A stage recording when X-Ray obtained
+      // a record must read it from somewhere injected, not from a global.
+      now,
       ...(options.researchCutoffAt === undefined
         ? {} : { researchCutoffAt: options.researchCutoffAt }),
       ...(options.retrieveLimit === undefined
@@ -213,21 +216,57 @@ function blockedStages(detail: string, resolvedBy: string): StageDefinition[] {
 }
 
 /**
+ * Every slot the composition requires.
+ *
+ * Exported so the requirement and the registration can be checked against each
+ * other. A slot that is required but never installed anywhere is a dead
+ * composition token: it makes a deployment look configured, forces an operator
+ * to supply a key, and changes nothing about what actually runs. The gate
+ * asserts these two sets are equal.
+ */
+export const REQUIRED_SLOTS = ['RESEARCH_MODEL', 'REVIEWER_MODEL', 'RETRIEVAL'] as const
+
+/** The host seams a complete composition installs. One per required slot. */
+export interface HostSeams {
+  readonly setExecutionRuntime:
+  (provider: (() => Promise<ExecutionRuntime>) | null) => void
+  readonly setReviewerModel:
+  (provider: (() => Promise<ReviewerModel>) | null) => void
+}
+
+/** Which capabilities a registration actually installed. */
+export type RegisteredCapability = 'EXECUTION_RUNTIME' | 'REVIEWER_MODEL'
+
+export interface LiveRegistration {
+  readonly composition: RuntimeComposition
+  readonly registered: readonly RegisteredCapability[]
+}
+
+/**
  * Compose and register, for a host startup hook.
  *
- * Returns what happened so the host can say it. Registration is conditional on
- * a complete composition: a partial one registers nothing, leaving
- * `getExecutionRuntime()` to return the unconfigured runtime, which is the
- * behaviour every #6–#11 gate is written against.
+ * Registration is conditional on a complete composition: a partial one
+ * registers nothing, leaving `getExecutionRuntime()` to return the
+ * unconfigured runtime and `getReviewerModel()` to return `undefined` — which
+ * is the behaviour every #6–#11 gate is written against.
+ *
+ * Both seams are installed, and that is the point of the amendment. The
+ * research model and the retrieval adapter reach the pipeline through the
+ * runtime's `StageAdapters`; the reviewer reaches the REVIEW gate and
+ * graduation through its own seam, because `StageAdapters` deliberately has no
+ * reviewer member. Composing a reviewer and installing nothing left the
+ * capability dead: configured, reported, and never asked.
  */
-export async function registerLiveRuntime(
-  setProvider: (provider: (() => Promise<ExecutionRuntime>) | null) => void,
+export async function registerLiveProviders(
+  seams: HostSeams,
   options: LiveRuntimeOptions = {},
-): Promise<RuntimeComposition> {
+): Promise<LiveRegistration> {
   const composition = await composeLiveRuntime(options)
-  if (composition.status !== 'COMPOSED') return composition
+  if (composition.status !== 'COMPOSED') return { composition, registered: [] }
+
   // One composition per process, handed out by reference. Composing per
   // request would build a new adapter for every run.
-  setProvider(async () => composition.runtime)
-  return composition
+  seams.setExecutionRuntime(async () => composition.runtime)
+  seams.setReviewerModel(async () => composition.reviewer)
+  return { composition, registered: ['EXECUTION_RUNTIME', 'REVIEWER_MODEL'] }
 }
