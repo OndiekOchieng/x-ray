@@ -1,0 +1,32 @@
+Adversarial runs — evidence that the 10c gate is load-bearing.
+Each variant breaks one released 10c decision in ati-service.ts and re-runs the gate.
+
+########################################################################
+# A · drop the submission requirement (release §B)
+#   the RESPONSE_REQUIRES_SUBMISSION guard short-circuited to false
+########################################################################
+FAIL  2 · a DRAFT request cannot receive an ATI response — threw TypeError: Cannot read properties of undefined (reading 'occurredAt')
+FAIL  3 · an EXPORTED but unsubmitted request cannot receive an ATI response — threw TypeError: Cannot read properties of undefined (reading 'occurredAt')
+23/25 ATI response checks passed
+
+########################################################################
+# B · refuse a response after CLOSE (against release §C)
+#   refuseIfClosed added to the response command
+########################################################################
+FAIL  6 · a response after CLOSE is recorded, and the status stays CLOSED — threw: request ATI-R-CLOSED was closed at 2026-10-01T10:00:00Z; reopening is not designed
+FAIL  7 · a late response permits nothing else on a closed request — threw: request ATI-R-CLOSED was closed at 2026-10-01T10:00:00Z; reopening is not designed
+23/25 ATI response checks passed
+
+########################################################################
+# C · validate before taking the lock (against release §K)
+#   authorization and chronology read pre-lock state
+########################################################################
+FAIL  21 · the response command decides under the request lock — the response command reads history of its own
+FAIL  22 · authorization and chronology come from post-lock state — a response authorized by post-lock state was refused: request ATI-R-RACE was never filed (DRAFT), so nothing can be a response to it
+23/25 ATI response checks passed
+
+########################################################################
+# D · default absent completeness to UNSTATED (against release §D)
+########################################################################
+FAIL  10 · completeness is required, never defaulted, and UNSTATED is a choice — completeness is optional or renamed on ResponseAssertion
+24/25 ATI response checks passed
