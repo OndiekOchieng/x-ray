@@ -27,8 +27,7 @@
  * NOTHING HERE TOUCHES RESEARCH STATE
  * ===================================
  * No write in this module reaches a canonical table. The single exception is a
- * read: an acceptance foreign-keys to an existing version-scoped `Source` row,
- * non-deferrably, so it cannot be written before the commit that created it.
+ * read: an acceptance is checked against canonical state before it is allowed.
  */
 
 import type { CustodyBasis } from '@/lib/xray/domain'
@@ -269,12 +268,27 @@ export async function recordResponse(
 }
 
 /**
- * Link an intake to a canonical Source that a committed version now contains.
+ * Link an intake to a canonical Source a committed version introduced.
  *
- * The only bridge from action state to research. Its foreign key is not
- * deferrable, so the version-scoped source row must already exist — an
- * acceptance cannot be written ahead of the commit that created it, and a
- * future or imaginary source id simply has nothing to point at.
+ * The only bridge from action state to research, and the database checks four
+ * things before allowing one:
+ *
+ *   1. the intake belongs to this investigation;
+ *   2. the named version is already committed;
+ *   3. the exact version-scoped `Source` row exists;
+ *   4. **that version added it**, rather than inheriting it.
+ *
+ * The fourth is what keeps the link causal. Every committed version's sources
+ * include the ones it inherited, so existence alone would let a response be
+ * linked to a record that predates the request entirely. It also makes the
+ * duplicate case precise: a response containing something research already
+ * held adds no source, so there is nothing to accept.
+ *
+ * NOTE: the foreign key being non-deferrable does **not** prove the commit
+ * happened — it requires only that the row be visible at statement time, and
+ * #7 inserts version-scoped rows before advancing the committed pointer. An
+ * earlier version of this comment claimed otherwise and was wrong; condition 2
+ * is what establishes commitment.
  */
 export async function acceptIntakeSource(
   db: SnapshotDatabase, intakeId: string, accepted: {

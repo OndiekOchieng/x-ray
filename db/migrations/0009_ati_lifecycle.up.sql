@@ -121,10 +121,15 @@ CREATE TABLE ati_response_intakes (
 
 -- The only bridge from action state to canonical research.
 --
--- The foreign key is NOT deferrable on purpose: the version-scoped Source row
--- must already be committed. An acceptance therefore cannot be written ahead
--- of the commit that creates the Source, which is what "no imaginary SourceIds"
--- has to mean in storage rather than in a comment.
+-- The foreign key is NOT deferrable, so a bare invented source id has nothing
+-- to point at.
+--
+-- CORRECTED: an earlier version of this comment claimed the non-deferrable key
+-- meant the commit had already happened. It does not — it requires only that
+-- the row be visible at statement time, and #7 inserts version-scoped rows
+-- before advancing the committed pointer. Migration 0010 adds the commitment
+-- check and 0011 the added-source check. Comment only; the SQL below is
+-- unchanged from what was applied.
 CREATE TABLE ati_intake_source_acceptances (
   intake_id text NOT NULL REFERENCES ati_response_intakes(intake_id),
   ordinal integer NOT NULL CHECK (ordinal >= 0),

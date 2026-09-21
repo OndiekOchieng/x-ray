@@ -34,7 +34,8 @@ async function check(name: string, fn: () => Promise<string | null>): Promise<vo
 }
 
 async function migrate(db: PGlite) {
-  const ati = ['0009_ati_lifecycle', '0010_ati_origin_and_acceptance']
+  const ati = ['0009_ati_lifecycle', '0010_ati_origin_and_acceptance',
+    '0011_ati_acceptance_requires_added_source']
   for (const n of [...MIGRATIONS, ...ati])
     await db.exec(readFileSync(new URL(`../../../db/migrations/${n}.up.sql`, import.meta.url), 'utf8'))
   // Both ATI migrations must remain reversible, newest first.
@@ -252,7 +253,10 @@ async function main(): Promise<void> {
         investigationId: INV, committedVersion: 2, sourceId: 'SRC-DOES-NOT-EXIST', acceptedAt: AT,
       }).then(() => null, (e: unknown) => e as Error)
       if (outcome === null) return 'an imaginary source id was accepted'
-      if (!/foreign key|violates/i.test(outcome.message)) return `rejected as: ${outcome.message}`
+      // The added-source trigger fires before the foreign key, so either
+      // refusal is correct — what matters is that it is refused.
+      if (!/foreign key|violates|not added by version/i.test(outcome.message))
+        return `rejected as: ${outcome.message}`
       // And not in a future version either.
       const future = await acceptIntakeSource(db, 'INTAKE-1', {
         investigationId: INV, committedVersion: 3, sourceId: 'SRC-NEW-2', acceptedAt: AT,
@@ -260,10 +264,11 @@ async function main(): Promise<void> {
       return future !== null ? null : 'a source in an uncommitted version was accepted'
     })
 
-    await check('7 · acceptance succeeds against an exact committed source', async () => {
+    await check('7 · acceptance succeeds against a source that version added', async () => {
       const source = (await db.query(
-        `SELECT id FROM sources WHERE investigation_id=$1 AND version_number=2
-          ORDER BY id LIMIT 1`, [INV])).rows[0] as { id: string }
+        `SELECT source_id AS id FROM version_added_sources
+          WHERE investigation_id=$1 AND version_number=2 ORDER BY ordinal LIMIT 1`,
+        [INV])).rows[0] as { id: string }
       await acceptIntakeSource(db, 'INTAKE-1',
         { investigationId: INV, committedVersion: 2, sourceId: source.id, acceptedAt: AT })
       const lifecycle = (await readRequestLifecycle(db, 'ATI-1'))!
@@ -271,21 +276,6 @@ async function main(): Promise<void> {
       const intake = lifecycle.responses[1].intakes.find((i) => i.intakeId === 'INTAKE-1')!
       return intake.acceptedSources[0]?.committedVersion === 2
         ? null : 'the acceptance version was not recorded'
-    })
-
-    await check('7 · one intake may be accepted as several sources', async () => {
-      const sources = (await db.query(
-        `SELECT id FROM sources WHERE investigation_id=$1 AND version_number=2
-          ORDER BY id LIMIT 3`, [INV])).rows as { id: string }[]
-      await acceptIntakeSource(db, 'INTAKE-2',
-        { investigationId: INV, committedVersion: 2, sourceId: sources[1].id, acceptedAt: AT })
-      await acceptIntakeSource(db, 'INTAKE-2',
-        { investigationId: INV, committedVersion: 2, sourceId: sources[2].id, acceptedAt: AT })
-      const lifecycle = (await readRequestLifecycle(db, 'ATI-1'))!
-      const intake = lifecycle.responses[1].intakes.find((i) => i.intakeId === 'INTAKE-2')!
-      if (intake.acceptedSources.length !== 2) return `${intake.acceptedSources.length} accepted`
-      return lifecycle.receivedSourceIds.length === 3
-        ? null : `${lifecycle.receivedSourceIds.length} derived source ids`
     })
 
     // -- R1/R2/R3: the three remediation invariants -----------------------------------------
@@ -368,15 +358,76 @@ async function main(): Promise<void> {
         return `rejected as: ${accepted.message}`
       // And the same shape of acceptance succeeds once a version is committed.
       const committed = await commitFurtherVersion(db, INV, 'RUN-ATI-V3', seeded.candidate, 3)
+      // The source version 3 actually added, not merely one it inherited.
       const newSource = (await db.query(
-        `SELECT id FROM sources WHERE investigation_id=$1 AND version_number=3
-          ORDER BY id LIMIT 1`, [INV])).rows[0] as { id: string }
+        `SELECT source_id AS id FROM version_added_sources
+          WHERE investigation_id=$1 AND version_number=3 ORDER BY ordinal LIMIT 1`,
+        [INV])).rows[0] as { id: string }
       void committed
-      await acceptIntakeSource(db, 'INTAKE-2',
+      await acceptIntakeSource(db, 'INTAKE-1',
         { investigationId: INV, committedVersion: 3, sourceId: newSource.id, acceptedAt: AT })
       const lifecycle = (await readRequestLifecycle(db, 'ATI-1'))!
       return lifecycle.receivedSourceIds.includes(newSource.id)
         ? null : 'the committed acceptance was not recorded'
+    })
+
+    await check('R4 · acceptance requires a source that version added, not one it inherited', async () => {
+      // Every committed version's `sources` table carries its inherited rows
+      // too, so proving a source exists at version 3 says nothing about whether
+      // version 3 introduced it. Without this, a response could be linked to a
+      // record predating the request entirely — a manufactured causal claim.
+      const inherited = (await db.query(
+        `SELECT s.id FROM sources s
+          WHERE s.investigation_id=$1 AND s.version_number=3
+            AND NOT EXISTS (SELECT 1 FROM version_added_sources a
+                             WHERE a.investigation_id=s.investigation_id
+                               AND a.version_number=s.version_number AND a.source_id=s.id)
+          ORDER BY s.id LIMIT 1`, [INV])).rows[0] as { id: string } | undefined
+      if (inherited === undefined) return 'version 3 inherited nothing, so the case is untested'
+
+      const outcome = await acceptIntakeSource(db, 'INTAKE-2', {
+        investigationId: INV, committedVersion: 3, sourceId: inherited.id, acceptedAt: AT,
+      }).then(() => null, (e: unknown) => e as Error)
+      if (outcome === null) return `inherited source ${inherited.id} was accepted as a response record`
+      return /not added by version/i.test(outcome.message)
+        ? null : `rejected as: ${outcome.message}`
+    })
+
+    await check('R4 · one intake may be accepted as several sources, across versions', async () => {
+      // Version 2 adds exactly one source, so the several-per-intake case
+      // necessarily spans versions — the realistic shape anyway: a partial
+      // response ingested over two versions.
+      const lifecycle = (await readRequestLifecycle(db, 'ATI-1'))!
+      const intake = lifecycle.responses[1].intakes.find((i) => i.intakeId === 'INTAKE-1')!
+      if (intake.acceptedSources.length !== 2)
+        return `${intake.acceptedSources.length} accepted source(s) for one intake`
+      const versions = intake.acceptedSources.map((a) => a.committedVersion).sort()
+      if (versions.join() !== '2,3') return `accepted at versions ${versions.join()}`
+      return lifecycle.receivedSourceIds.length === 2
+        ? null : `${lifecycle.receivedSourceIds.length} derived source ids`
+    })
+
+    await check('R4 · a duplicate response yielding no new source gets no acceptance row', async () => {
+      // ADR-0018's duplicate case, made precise: if research introduced nothing,
+      // there is no added source to point at and therefore no acceptance.
+      const before = (await db.query(
+        `SELECT count(*)::int AS n FROM ati_intake_source_acceptances`)).rows[0] as { n: number }
+      const alreadyHeld = (await db.query(
+        `SELECT s.id FROM sources s
+          WHERE s.investigation_id=$1 AND s.version_number=2
+            AND NOT EXISTS (SELECT 1 FROM version_added_sources a
+                             WHERE a.investigation_id=s.investigation_id
+                               AND a.version_number=s.version_number AND a.source_id=s.id)
+          ORDER BY s.id LIMIT 3`, [INV])).rows as { id: string }[]
+      for (const source of alreadyHeld) {
+        const outcome = await acceptIntakeSource(db, 'INTAKE-2', {
+          investigationId: INV, committedVersion: 2, sourceId: source.id, acceptedAt: AT,
+        }).then(() => null, (e: unknown) => e as Error)
+        if (outcome === null) return `${source.id} was linked despite version 2 not adding it`
+      }
+      const after = (await db.query(
+        `SELECT count(*)::int AS n FROM ati_intake_source_acceptances`)).rows[0] as { n: number }
+      return after.n === before.n ? null : 'a refused acceptance still wrote a row'
     })
 
     // -- 8: append-only, and research untouched -------------------------------------------

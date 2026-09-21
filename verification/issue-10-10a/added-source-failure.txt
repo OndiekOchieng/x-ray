@@ -17,13 +17,13 @@ X-Ray ATI action lifecycle — 10a
  ok   5 · one response may carry several records, and there may be several responses
  ok   6 · an intake table has no column that could hold a source id                 
  ok   7 · acceptance of a nonexistent source is refused                             
- ok   7 · acceptance succeeds against a source that version added                   
+ ok   7 · acceptance succeeds against an exact committed source                     
+ ok   7 · one intake may be accepted as several sources                             
  ok   R1 · request identity and origin are immutable once history exists            
  ok   R2 · an intake cannot be accepted against another investigation's source      
  ok   R3 · acceptance requires the version to be committed, not merely present      
- ok   R4 · acceptance requires a source that version added, not one it inherited    
- ok   R4 · one intake may be accepted as several sources, across versions           
- ok   R4 · a duplicate response yielding no new source gets no acceptance row       
+FAIL  R4 · acceptance requires a source that version added, not one it inherited      -> inherited source SRC-001 was accepted as a response record
+FAIL  R4 · a duplicate response yielding no new source gets no acceptance row         -> SRC-001 was linked despite version 2 not adding it
  ok   8 · every history table rejects UPDATE and DELETE                             
  ok   8 · closure is administrative and changes no gap                              
  ok   8 · ATI activity moves no canonical state                                     
@@ -31,8 +31,9 @@ X-Ray ATI action lifecycle — 10a
  ok   deriveStatus follows the released progression                                 
  ok   10a wrote nothing into the evidence-graph aggregate                           
 ======================================================================================
-28/28 passed
+26/28 passed
 
 Status, draftedAt, submittedAt, respondedAt and receivedSourceIds are all
 derived; the superseded columns were never written.
 
+[ELIFECYCLE] Command failed with exit code 1.

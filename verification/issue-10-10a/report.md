@@ -56,9 +56,10 @@ upgraded.
 `ati_response_intakes` has **no source column at all**, so an intake cannot name a
 Source, imaginary or otherwise.
 
-`ati_intake_source_acceptances`'s foreign key to the version-scoped `sources` row is
-**not deferrable**, so the row must be visible at statement time — a bare invented id
-has nothing to point at.
+`ati_intake_source_acceptances` is guarded by four conditions, not one — see the
+remediation section. Its foreign key to the version-scoped `sources` row is not
+deferrable, so a bare invented id has nothing to point at, but that is the weakest of
+the four and on its own proves very little.
 
 > **Corrected after review.** This report originally claimed the non-deferrable key
 > meant "the commit that created the Source must already have happened". It does not.
@@ -128,11 +129,61 @@ succeeded.
 name true rather than aspirational. The same acceptance is then proved to succeed once
 version 3 is genuinely committed.
 
+### 4 · "Committed in that version" was not "added by that version"
+
+Closed by migration 0011, after the first three.
+
+Every committed version's `sources` table carries the rows it **inherited** as well as
+the ones it introduced. Conditions 1–3 therefore proved a Source existed in a committed
+version of the right investigation — and said nothing about whether that version
+brought it in.
+
+The proof is blunt about what that allowed: before remediation, `SRC-001` — the
+original surface source of the investigation, present since v1 and predating the
+request entirely — **was accepted as an ATI response record.** That is a manufactured
+causal link between a response and evidence it had nothing to do with.
+
+`check_ati_acceptance` now also requires the source to appear in
+`version_added_sources` for that exact version. This makes ADR-0018's duplicate case
+precise as well: if a response contains a document research already held, the version
+adds no source, there is nothing to point at, and no acceptance row is written. Zero
+new sources stays zero rather than acquiring a borrowed one.
+
+The four conditions are now:
+
+1. the intake belongs to this investigation;
+2. the named version is already committed;
+3. the exact version-scoped `Source` row exists;
+4. that version added it.
+
+### The disproven claim is gone from the repository
+
+Review flagged that `ati-lifecycle.ts` still repeated the retracted
+"non-deferrable FK means already committed" statement. It appeared in three places:
+two doc comments in `ati-lifecycle.ts` and the table comment in migration 0009.
+
+All three are corrected, each recording what the claim was and why it was wrong rather
+than deleting it silently. The 0009 edit is **comment-only**; its SQL is unchanged from
+what was applied.
+
+### Three older proofs the new invariant broke
+
+Adding condition 4 immediately failed three proofs that had been accepting inherited
+sources — which is the defect, showing up in the gate's own assertions:
+
+- the nonexistent-source proof now meets the added-source check before the foreign key,
+  so it accepts either refusal;
+- the acceptance-succeeds proof now uses the source version 2 actually added;
+- "one intake accepted as several sources" was impossible as written, because version 2
+  adds exactly one source. It now spans versions 2 and 3 — which is the realistic shape
+  anyway: a partial response ingested over two versions.
+
 ## Checks
 
-26 scenarios in `pnpm check:ati-lifecycle` (`final-gate.txt`). `first-attempt.txt`
-records the original 23-scenario run; `three-invariants-failure.txt` records the three
-remediation proofs failing before the fix. The gate covers all eight released proofs
+28 scenarios in `pnpm check:ati-lifecycle` (`final-gate.txt`). `first-attempt.txt`
+records the original 23-scenario run; `three-invariants-failure.txt` records the first
+three remediation proofs failing before their fix; `added-source-failure.txt` records
+the fourth failing, with `SRC-001` accepted as a response record. The gate covers all eight released proofs
 plus the three remediation invariants:
 
 - exact eligible origin, and four rejected origins (ineligible gap, wrong version,
@@ -161,7 +212,10 @@ plus the three remediation invariants:
 - **R3** — a Source visible inside an open commit transaction refused because its
   version is not yet committed, then accepted once it is;
 - ATI writes moving neither the version pointer nor any committed snapshot, asserted by
-  performing further ATI acts and re-reading.
+  performing further ATI acts and re-reading;
+- **R4** — an inherited source refused as a response record; one intake accepted as two
+  sources across versions 2 and 3; every source version 2 merely inherited refused, with
+  no acceptance row written.
 
 ## Regression
 
