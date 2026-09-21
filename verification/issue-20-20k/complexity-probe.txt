@@ -1,0 +1,14 @@
+=== every X-Ray tool, strict, as authored ===
+  CLASSIFY       objects= 4 props=18 optional=13  ACCEPTED
+  DECOMPOSE      objects= 4 props=19 optional=17  HTTP 400 invalid_request_error: Schema is too complex.
+  DISCONFIRM     objects= 2 props= 9 optional= 3  ACCEPTED
+  GRADE          objects= 2 props=10 optional= 4  ACCEPTED
+  IDENTIFY_GAPS  objects= 3 props=14 optional= 5  ACCEPTED
+  RECONCILE      objects= 2 props= 7 optional= 1  ACCEPTED
+  TRACE          objects=10 props=59 optional=43  HTTP 400 invalid_request_error: Schemas contains too many optional parameters (43), which would make grammar compilation inefficient. Reduce the number of optional parameters in your tool schemas (limit: 24).
+
+=== one flat object: properties against optionality ===
+  props= 8 optional= 0  ACCEPTED
+  props= 8 optional= 8  ACCEPTED
+  props=16 optional= 0  HTTP 400 invalid_request_error: Schema is too complex.
+  props=16 optional=16  HTTP 400 invalid_request_error: Schema is too complex.

@@ -1,0 +1,27 @@
+=== RUN-35b466fc-2c9f-44c5-bbd4-a6c02c78a318, from the durable record ===
+
+execution run    STAGE_FAILED, started 2026-09-21T20:12:04.750Z
+investigation    XRAY-1815170a-9f9e-454c-b419-995a69bc7955
+surface record   eastleighvoice.co.ke/africa/402329/south-africa-reports-18-
+                 confirmed-mpox-cases-calls-for-vigilance
+                 "South Africa reports 18 confirmed mpox cases, calls for
+                 vigilance | The Eastleigh Voice"
+
+  [0] STAGE  SR-001  INGEST     SUCCEEDED  in=0 out=1
+        20:12:04.752 → 20:12:09.223   (4.5s)
+  [1] STAGE  SR-002  DECOMPOSE  FAILED     in=1
+        20:12:09.234 → 20:13:45.080   (95.8s)
+        error: Anthropic returned HTTP 400 (invalid_request_error)
+               (request req_011CfHCEBdndC276PaxU298w).
+               The request will not succeed unchanged.
+  [2] STAGE  SR-003  DECOMPOSE  FAILED     in=1
+        20:13:45.090 → 20:15:12.428   (87.3s)
+        error: Anthropic returned HTTP 400 (invalid_request_error)
+               (request req_011CfHCMFarjLoG9Lfv6rEGy).
+               The request will not succeed unchanged.
+
+Both messages are verbatim the PERMANENT branch of classifyHttpFailure. So the
+failure was classified PERMANENT, journalled as PERMANENT, and retried anyway.
+
+The candidate workspace holds one Source and no claims: INGEST's surface record
+survived, DECOMPOSE produced nothing.

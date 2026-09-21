@@ -1,0 +1,20 @@
+=== what our own strict validator says about each schema ===
+  DECOMPOSE              compliant
+  DECOMPOSE + required   compliant
+  RECONCILE              compliant
+
+=== live requests, tiny synthetic document ===
+
+1 · DECOMPOSE as production sends it, strict
+  request body 3829 chars
+  HTTP 400  request req_011CfHDJPJF92QSavRPPfwve
+  error.type     invalid_request_error
+  error.message  Schema is too complex.
+
+2 · the same schema with strict removed
+  request body 3815 chars
+  HTTP 200  request req_011CfHDQLx2Hp9G6RsAPysjw
+  stop_reason    tool_use
+  tool answered  propose_claims
+  input keys     ["claims"]
+  tokens         in 1874, out 423

@@ -1,0 +1,40 @@
+=== a flat top-level object ===
+  props=8 all required           ACCEPTED
+  props=9 all required           ACCEPTED
+  props=10 all required          ACCEPTED
+  props=11 all required          ACCEPTED
+  props=12 all required          ACCEPTED
+  props=13 all required          ACCEPTED
+  props=14 all required          ACCEPTED
+  props=15 all required          Schema is too complex.
+  props=16 all required          Schema is too complex.
+
+  props=8 all optional           ACCEPTED
+  props=9 all optional           ACCEPTED
+  props=10 all optional          ACCEPTED
+  props=11 all optional          ACCEPTED
+  props=12 all optional          ACCEPTED
+  props=13 all optional          ACCEPTED
+  props=14 all optional          ACCEPTED
+  props=15 all optional          Schema is too complex.
+  props=16 all optional          Schema is too complex.
+
+=== the same properties inside an array item ===
+  item props=8 all required      ACCEPTED
+  item props=9 all required      ACCEPTED
+  item props=10 all required     ACCEPTED
+  item props=12 all required     ACCEPTED
+  item props=16 all required     ACCEPTED
+  item props=20 all required     ACCEPTED
+
+  item props=8 all optional      ACCEPTED
+  item props=9 all optional      ACCEPTED
+  item props=10 all optional     ACCEPTED
+  item props=12 all optional     Schema is too complex.
+
+PROBE FAILED: TimeoutError: The operation was aborted due to timeout
+
+
+[DOMException [TimeoutError]: The operation was aborted due to timeout]
+
+Node.js v26.8.2

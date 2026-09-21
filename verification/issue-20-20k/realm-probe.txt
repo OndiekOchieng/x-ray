@@ -1,0 +1,32 @@
+=== the retry defect, reproduced in a production build ===
+
+Method: `pnpm build` + `next start` on port 3011, with two temporary
+diagnostics, both reverted immediately afterwards and neither committed:
+
+  - instrumentation.ts published, on globalThis under Symbol.for(...), its own
+    `AdapterFailure` class and a factory that constructs one with
+    disposition 'PERMANENT';
+  - app/api/realm-probe/route.ts compared that class with the one the route
+    handler imports, and drove runPipeline (maxAttempts: 2) over a single
+    DECOMPOSE stage that throws the instrumentation-realm failure.
+
+GET /api/realm-probe:
+
+{
+  "classIdentical": false,
+  "instrumentationFailureIsRouteInstance": false,
+  "routeFailureIsRouteInstance": true,
+  "instrumentationFailureName": "AdapterFailure",
+  "instrumentationFailureDisposition": "PERMANENT",
+  "attempts": ["DECOMPOSE:FAILED", "DECOMPOSE:FAILED"]
+}
+
+Read in order:
+
+  classIdentical false         two AdapterFailure classes exist in one process
+  ...IsRouteInstance false     `instanceof` fails across them
+  disposition "PERMANENT"      the data is intact; only the identity check fails
+  attempts x2                  runPipeline retried a permanent failure
+
+The live run's journal shows the same two attempts, SR-002 and SR-003, both
+carrying the PERMANENT branch's own message.

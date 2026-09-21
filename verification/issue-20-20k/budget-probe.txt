@@ -1,0 +1,9 @@
+=== X-Ray shape: an array item with two nested optional sub-objects ===
+  item props=5 required=1 subs=2x4             optional=14  ACCEPTED
+  item props=7 required=1 subs=2x4             optional=16  Schema is too complex.
+  item props=8 required=1 subs=2x4             optional=17  Schema is too complex.
+  item props=9 required=1 subs=2x4             optional=18  Schema is too complex.
+
+=== without the nested sub-objects ===
+  item props=9 required=1 subs=0               optional= 8  ACCEPTED
+  item props=13 required=1 subs=0              optional=12  Schema is too complex.
