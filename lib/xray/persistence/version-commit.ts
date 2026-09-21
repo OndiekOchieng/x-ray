@@ -16,10 +16,13 @@ export interface ReEvaluationAudit {
   causes?: readonly CausalReference[]
 }
 export class VersionConflict extends Error {
-  readonly expected: number
+  /** `null` when the caller expected no committed version yet. */
+  readonly expected: number | null
   readonly actual: number | null
-  constructor(expected: number, actual: number | null) {
-    super(`Expected predecessor v${expected}, found ${actual === null ? 'no committed version' : `v${actual}`}`)
+  constructor(expected: number | null, actual: number | null) {
+    const describe = (value: number | null) =>
+      value === null ? 'no committed version' : `v${value}`
+    super(`Expected predecessor ${describe(expected)}, found ${describe(actual)}`)
     this.name = 'VersionConflict'
     this.expected = expected
     this.actual = actual
@@ -97,6 +100,48 @@ export function isEligibleAssessment(assessment: GraduationResult): boolean {
       (blocker) => blocker.ref === 'RESEARCH_STOP' || blocker.ref.startsWith('STALE/'))
 }
 
+/**
+ * The first version's own coherence rules.
+ *
+ * Deliberately the same shape of check as `assertVersionDiff`, with the
+ * predecessor's role taken by "there was nothing before":
+ *
+ *   - it is v1, and the investigation agrees;
+ *   - it supersedes nothing — an absent `supersedesVersion`, not a zero;
+ *   - every Source and every Evidence is *added*, because none was inherited;
+ *   - nothing was re-evaluated, so the list and the audit are both empty.
+ *
+ * The last one matters more than it looks: a re-evaluation audit row on a
+ * first version would claim a claim had been reconsidered, and there was no
+ * earlier assessment of it to reconsider.
+ *
+ * Exported so the gate can drive each refusal. `promote` never produces a v1
+ * carrying `supersedesVersion`, so without this the branch that refuses one
+ * would be unreachable by any test — and an unreachable guard is a guard
+ * nobody has run.
+ */
+export function assertFirstVersion(
+  graph: XRayGraph, audit: readonly ReEvaluationAudit[],
+) {
+  const version = graph.version
+  if (!version || version.version !== 1 || graph.investigation.currentVersion !== 1 ||
+      version.investigationId !== graph.investigation.id) {
+    throw new Error('Candidate is not a coherent first version')
+  }
+  if (version.supersedesVersion !== undefined) {
+    throw new Error('A first version supersedes nothing')
+  }
+  const sourceIds = graph.sources.map((item) => item.id)
+  const evidenceIds = graph.evidence.map((item) => item.id)
+  if (!isDeepStrictEqual([...version.addedSourceIds], sourceIds) ||
+      !isDeepStrictEqual([...version.addedEvidenceIds], evidenceIds)) {
+    throw new Error('A first version adds every source and every evidence it holds')
+  }
+  if (version.reEvaluatedClaimIds.length !== 0 || audit.length !== 0) {
+    throw new Error('A first version re-evaluates nothing')
+  }
+}
+
 function assertVersionDiff(previous: XRayGraph, graph: XRayGraph, audit: readonly ReEvaluationAudit[]) {
   const version = graph.version
   if (!version || !previous.version || graph.investigation.id !== previous.investigation.id ||
@@ -170,7 +215,18 @@ export interface IntakeSourceAcceptance {
 }
 
 export interface CommitVersionOptions {
-  expectedPredecessor: number
+  /**
+   * The version this candidate supersedes, or `null` for the first.
+   *
+   * `null` is the first-version case, and it is expressed here rather than in
+   * a second commit path on purpose. `writeInitialSnapshot` exists and inserts
+   * a v1 directly — with no assessment, no graduation audit and no execution
+   * run link — which is right for seeding a fixture and wrong for a version
+   * that claims to have been researched. Everything this function checks
+   * (eligibility, the assessment fingerprint, workspace staleness, the run
+   * link, the pointer race) applies to v1 exactly as it does to v2.
+   */
+  expectedPredecessor: number | null
   graph: XRayGraph
   assessment: GraduationResult
   reEvaluationAudit: readonly ReEvaluationAudit[]
@@ -191,13 +247,16 @@ export interface CommitVersionOptions {
 export async function commitNextVersion(db: SnapshotDatabase, options: CommitVersionOptions): Promise<void> {
   const { graph, assessment, expectedPredecessor, reEvaluationAudit, executionRunId } = options
   const acceptances = options.intakeAcceptances ?? []
-  if (!graph.version || graph.version.version !== expectedPredecessor + 1) throw new Error('Wrong candidate version')
+  const expected = expectedPredecessor === null ? 1 : expectedPredecessor + 1
+  if (!graph.version || graph.version.version !== expected) throw new Error('Wrong candidate version')
   for (const acceptance of acceptances) {
     if (!graph.version.addedSourceIds.includes(acceptance.sourceId))
       throw new Error(`Acceptance names source ${acceptance.sourceId}, which this version did not add`)
   }
-  const previous = await readSnapshot(db, graph.investigation.id, expectedPredecessor)
-  assertVersionDiff(previous, graph, reEvaluationAudit)
+  const previous = expectedPredecessor === null
+    ? undefined : await readSnapshot(db, graph.investigation.id, expectedPredecessor)
+  if (previous === undefined) assertFirstVersion(graph, reEvaluationAudit)
+  else assertVersionDiff(previous, graph, reEvaluationAudit)
   assertCommittable(graph, assessment)
   const captured = structuredClone(graph)
   await db.query('BEGIN')
@@ -207,7 +266,8 @@ export async function commitNextVersion(db: SnapshotDatabase, options: CommitVer
     if (actual !== expectedPredecessor) throw new VersionConflict(expectedPredecessor, actual)
     if (!isDeepStrictEqual(graph, captured)) throw new Error('Candidate changed after assessment')
     assertCommittable(graph, assessment)
-    assertVersionDiff(previous, graph, reEvaluationAudit)
+    if (previous === undefined) assertFirstVersion(graph, reEvaluationAudit)
+    else assertVersionDiff(previous, graph, reEvaluationAudit)
     const run = (await db.query(`SELECT id,status FROM execution_runs WHERE id=$1 AND investigation_id=$2
       AND committed_version IS NULL AND status IN ('COMPLETED','CAPABILITY_BLOCKED') FOR UPDATE`,
       [executionRunId, graph.investigation.id])).rows
@@ -239,8 +299,19 @@ export async function commitNextVersion(db: SnapshotDatabase, options: CommitVer
       WHERE id=$3 AND committed_version IS NULL RETURNING id`,
       [graph.version.version, graduation.assessmentIndex, executionRunId])).rows
     if (linked.length !== 1) throw new Error('Execution run link failed')
-    const moved = (await db.query(`UPDATE investigations SET latest_committed_version=$1
-      WHERE id=$2 AND latest_committed_version=$3 RETURNING id`, [graph.version.version, graph.investigation.id, expectedPredecessor])).rows
+    /*
+     * `latest_committed_version = NULL` never matches in SQL, so the first
+     * version needs `IS NULL` rather than an equality against null. The race
+     * it guards is the same one: the pointer must still be where the caller
+     * expected when it moves.
+     */
+    const moved = (expectedPredecessor === null
+      ? await db.query(`UPDATE investigations SET latest_committed_version=$1
+          WHERE id=$2 AND latest_committed_version IS NULL RETURNING id`,
+      [graph.version.version, graph.investigation.id])
+      : await db.query(`UPDATE investigations SET latest_committed_version=$1
+          WHERE id=$2 AND latest_committed_version=$3 RETURNING id`,
+      [graph.version.version, graph.investigation.id, expectedPredecessor])).rows
     if (moved.length !== 1) throw new VersionConflict(expectedPredecessor, actual)
     // Only now: the pointer has moved, so 10a's acceptance trigger can see the
     // version as committed. Its four conditions still apply in full.

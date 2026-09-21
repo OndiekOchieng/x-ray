@@ -1,0 +1,83 @@
+=== pnpm check:first-version ===
+ok    1 · the configured reviewer is asked during the initial REVIEW gate
+ok    2 · the review survives a durable checkpoint and readback
+ok    3 · graduation reuses that review without a second reviewer call
+ok    4 · a mutated candidate forces a fresh review
+ok    5 · the first candidate becomes an immutable version 1
+ok    6 · no reviewer yields BLOCKED, never PASS
+ok    7 · a refusing reviewer keeps the asked checks unevaluated
+ok    8 · a reviewer outage leaves no eligible graduation and no review
+ok    9 · the reviewer never reaches a research stage
+ok    10 · the first-version rule accepts the canonical v1 and rejects a successor shape
+ok    11 · the first-version rule refuses every incoherent v1
+
+11/11 first-version checks passed
+
+=== earlier gates ===
+check:providers                        22/22 provider composition checks passed
+check:anthropic-adapters               Every call went to 127.0.0.1. No request left this machine.
+check:anthropic-retrieval              Every call went to 127.0.0.1. No request left this machine.
+check:live-runtime                     Every call went to 127.0.0.1. No civic URL was used.
+check:review                           Capability: 11 deterministic evaluated, 6 model-assisted NOT_EVA
+check:acceptance                       Canonical benchmark verdict: BLOCKED (0 reason(s) against the gr
+check:ati-research                     35/35 ATI research checks passed
+check:persistence-durable-integration  7d-d: restart → resume → gates → audit → graduation → commit; fa
+
+=== the five seams, as found ===
+1 runPipeline REVIEW      run.ts, after the VALIDATE gate. Called
+                          reviewXRayGraph(graph, { validation, reviewedAt }) —
+                          pure and synchronous. RunOptions carried NEITHER a
+                          reviewer NOR judgments, so the gate never asked
+                          anything and every model-assisted check was
+                          NOT_EVALUATED in every run. Journals a REVIEW gate
+                          whose result REFERENCES the round by index.
+2 durable reviewHistory   execution-audit.ts already persists rounds, checks the
+                          REVIEW gate's roundIndex against them, and is
+                          append-only (refuses a shrunk or divergent prefix).
+                          A review was already durable and readable back — what
+                          was missing was a review to persist.
+3 GraduationService       promote (version envelope from predecessor+candidate),
+                          assess (collect judgments -> assessGraduation),
+                          commit (latest assessment + checkpoint ->
+                          commitNextVersion). All three called by exactly one
+                          production caller: ATIResearchBridge.processIntake.
+4 commitNextVersion       Strong and entirely predecessor-shaped. Six specific
+                          obstacles to a first version, all listed in the report.
+5 first-version           writeInitialSnapshot exists and inserts a v1 with NO
+  persistence             assessment, NO graduation audit and NO execution-run
+                          link. A seeding path, not a graduation path — using it
+                          for a live v1 would be the parallel ad-hoc system.
+
+=== what changed ===
+RunOptions.reviewer          the REVIEW gate's reviewer. NOT in StageAdapters.
+run.ts REVIEW gate           collectModelJudgments -> judgments as data -> pure
+                             reviewXRayGraph. An outage journals REVIEW SKIPPED
+                             with the reason and ends GATE_BLOCKED; no round is
+                             appended, so nothing is fabricated.
+inline-execution             resolves the host seam and passes it to runPipeline.
+GraduationOptions.review     a review already performed on THIS graph, with the
+                             fingerprint checked inside assessGraduation.
+GraduationService.assess     reuses the durable round whose fingerprint matches
+                             the candidate; asks afresh when it does not.
+commitNextVersion            expectedPredecessor: number | null.
+assertFirstVersion           v1, supersedes nothing, adds every Source and
+                             Evidence, re-evaluates nothing.
+pointer advance              IS NULL for the first version, since NULL never
+                             equals NULL in SQL.
+promote                      null predecessor -> v1, no supersedesVersion,
+                             everything added, reEvaluatedClaimIds [].
+graduateRun                  the application step that had no production path.
+POST /api/investigations/{id}/versions   the route. expectedPredecessor comes
+                             from storage, never from the request.
+
+=== negative controls (each verified to apply, then reverted) ===
+BA the runtime stops passing the reviewer      -> FAIL 1, 3, 7, 8
+BB the REVIEW gate stops collecting judgments  -> FAIL 1, 3, 7, 8, 9
+BC review reuse ignores the fingerprint        -> FAIL 4
+     caught by assessGraduation's own guard: "The supplied review concerns
+     graph xrg_4b70fcb3_304, not xrg_6c29e8b6_304"
+BD graduation never reuses the recorded review -> FAIL 3
+     "graduation asked 30 more question(s)"
+BE a first version may supersede something     -> FAIL 11
+     passed the whole gate until check 11 existed; promote never produces that
+     shape, so the branch was unreachable through the application path

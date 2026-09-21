@@ -122,6 +122,20 @@ export interface GraduationOptions {
    * model again.
    */
   judgments?: ModelJudgmentSet
+  /**
+   * A review already performed on **this** graph.
+   *
+   * Supplied when the pipeline's REVIEW gate has already asked the reviewer
+   * about this exact candidate. Reusing it is not an optimisation for its own
+   * sake: asking the same model the same questions about the same graph twice
+   * costs money, takes minutes, and — because a model is not a function — can
+   * return a *different* answer, which would make "the review that authorised
+   * this version" ambiguous.
+   *
+   * The fingerprint is checked, so a review of a different graph cannot be
+   * passed off as this one's.
+   */
+  review?: ReviewResult
   assessedAt?: string
   /** Run-level capability gaps remain separate from ResearchStop (D23). */
   capabilityGaps?: readonly CapabilityUnavailable[]
@@ -135,7 +149,15 @@ export function assessGraduation(
 ): GraduationResult {
   const assessedAt = options.assessedAt ?? '1970-01-01T00:00:00Z'
   const validation = validateXRayGraph(graph)
-  const review = reviewXRayGraph(graph, {
+  const fingerprint = fingerprintGraph(graph)
+  if (options.review !== undefined
+    && options.review.graphFingerprint !== fingerprint) {
+    throw new Error(
+      `The supplied review concerns graph ${options.review.graphFingerprint},`
+      + ` not ${fingerprint}. A review authorises the graph it inspected.`,
+    )
+  }
+  const review = options.review ?? reviewXRayGraph(graph, {
     validation,
     model: options.model,
     ...(options.judgments === undefined ? {} : { judgments: options.judgments }),

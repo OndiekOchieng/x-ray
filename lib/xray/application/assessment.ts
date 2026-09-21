@@ -27,8 +27,10 @@
  */
 
 import type { ReviewerModel } from '@/lib/xray/review'
+import type { AcceptanceBehavior } from '@/lib/xray/acceptance'
 import type { GraduationAuditRecord } from '@/lib/xray/persistence/graduation-audit'
 import type { AssessOptions, GraduationService } from './graduation-service'
+import { GraduationNotEligible } from './graduation-service'
 import { getReviewerModel } from './runtime'
 
 /**
@@ -50,4 +52,81 @@ export async function assessCandidate(
     ...options,
     ...(model === undefined ? {} : { model }),
   })
+}
+
+/** What graduating a finished run produced. */
+export type GraduationOutcome =
+  | { readonly result: 'COMMITTED'; readonly version: number }
+  | {
+    readonly result: 'NOT_ELIGIBLE'
+    readonly verdict: string
+    /** Why, in the assessment's own words. Safe to show. */
+    readonly reasons: readonly string[]
+    readonly blockers: readonly string[]
+  }
+
+/**
+ * Take a finished run's candidate to an immutable version.
+ *
+ * The step that had no production path. `promote` builds the version envelope,
+ * `assessCandidate` records an assessment with whatever reviewer the host
+ * configured, and `commit` writes it — the same three calls #10's ATI bridge
+ * makes, with the predecessor generalised so `null` means "this is the first".
+ *
+ * It refuses rather than forcing. An assessment that is not eligible is
+ * returned as `NOT_ELIGIBLE` with its reasons, because a version that
+ * committed anyway would be a version nothing authorised — and `PROVENANCE`
+ * reporting a capability gap is exactly the case where that temptation
+ * appears.
+ */
+export async function graduateRun(
+  graduation: GraduationService,
+  investigationId: string,
+  executionRunId: string,
+  options: {
+    readonly expectedPredecessor: number | null
+    readonly createdAt: string
+    readonly behaviors?: readonly AcceptanceBehavior[]
+    readonly requiredReviewChecks?: readonly string[]
+  },
+): Promise<GraduationOutcome> {
+  await graduation.promote(investigationId, executionRunId, {
+    expectedPredecessor: options.expectedPredecessor,
+    trigger: options.expectedPredecessor === null ? 'INITIAL_RESEARCH' : 'RE_EVALUATION',
+    createdAt: options.createdAt,
+  })
+
+  const audit = await assessCandidate(graduation, investigationId, executionRunId, {
+    ...(options.behaviors === undefined ? {} : { behaviors: options.behaviors }),
+    ...(options.requiredReviewChecks === undefined
+      ? {} : { requiredReviewChecks: options.requiredReviewChecks }),
+  })
+
+  try {
+    const { version } = await graduation.commit(investigationId, executionRunId, {
+      expectedPredecessor: options.expectedPredecessor,
+      reEvaluationAudit: [],
+    })
+    return { result: 'COMMITTED', version }
+  } catch (error) {
+    /*
+     * `commitNextVersion` is the authority on eligibility and it throws rather
+     * than returning. A refusal is a normal outcome for a first light run —
+     * PROVENANCE alone can make a candidate ineligible — so it is reported
+     * with the assessment's own reasons instead of surfacing as a crash.
+     */
+    if (error instanceof GraduationNotEligible || error instanceof Error) {
+      return {
+        result: 'NOT_ELIGIBLE',
+        verdict: audit.result.verdict,
+        reasons: [
+          ...audit.result.reasons.map((reason) => `${reason.ref}: ${reason.message}`),
+          ...(audit.result.verdict === 'PASS' ? [] : [`commit refused: ${error.message}`]),
+        ],
+        blockers: audit.result.blockers.map((blocker) =>
+          `${blocker.ref}: ${blocker.reason}`),
+      }
+    }
+    throw error
+  }
 }

@@ -30,10 +30,13 @@
 import type { ClaimId, InvestigationVersionTrigger } from '@/lib/xray/domain'
 import { createXRayGraph, type XRayGraph } from '@/lib/xray/selectors'
 import { assessGraduation, type AcceptanceBehavior, type GraduationResult } from '@/lib/xray/acceptance'
-import { collectModelJudgments, type ReviewerModel } from '@/lib/xray/review'
+import {
+  collectModelJudgments, fingerprintGraph, type ReviewerModel,
+} from '@/lib/xray/review'
 import { GraphAccumulator } from '@/lib/xray/pipeline/accumulator'
 import { appendGraduationAudit, readLatestGraduation, type GraduationAuditRecord } from '@/lib/xray/persistence/graduation-audit'
 import { readSnapshot, type SnapshotDatabase } from '@/lib/xray/persistence/snapshot'
+import { readExecutionAudit } from '@/lib/xray/persistence/execution-audit'
 import {
   changedClaimIds, commitNextVersion,
   type IntakeSourceAcceptance, type ReEvaluationAudit,
@@ -48,7 +51,7 @@ export class GraduationNotEligible extends Error {
 }
 
 export interface PromoteOptions {
-  expectedPredecessor: number
+  expectedPredecessor: number | null
   trigger: InvestigationVersionTrigger
   createdAt: string
 }
@@ -81,9 +84,17 @@ export class GraduationService {
     if (checkpoint.investigationId !== investigationId)
       throw new GraduationNotEligible('Execution run belongs to a different investigation')
 
-    const previous = await readSnapshot(this.db, investigationId, options.expectedPredecessor)
+    /*
+     * `null` is the first version: there is nothing to inherit from, so every
+     * artifact the candidate holds is one this version adds and nothing has
+     * been re-evaluated. The envelope is computed the same way either side of
+     * that — `inherited` against an empty predecessor is the whole list.
+     */
+    const previous = options.expectedPredecessor === null
+      ? undefined
+      : await readSnapshot(this.db, investigationId, options.expectedPredecessor)
     const candidate = checkpoint.accumulator.rebuild()
-    const next = options.expectedPredecessor + 1
+    const next = options.expectedPredecessor === null ? 1 : options.expectedPredecessor + 1
 
     const inherited = <T extends { id: string }>(before: readonly T[], after: readonly T[]) => {
       const known = new Set(before.map((item) => item.id))
@@ -105,10 +116,13 @@ export class GraduationService {
         version: next,
         createdAt: options.createdAt,
         trigger: options.trigger,
-        supersedesVersion: options.expectedPredecessor,
-        addedSourceIds: inherited(previous.sources, candidate.sources),
-        addedEvidenceIds: inherited(previous.evidence, candidate.evidence),
-        reEvaluatedClaimIds: [...changedClaimIds(previous, candidate)] as ClaimId[],
+        // Absent, not zero: a first version supersedes nothing.
+        ...(previous === undefined
+          ? {} : { supersedesVersion: options.expectedPredecessor as number }),
+        addedSourceIds: inherited(previous?.sources ?? [], candidate.sources),
+        addedEvidenceIds: inherited(previous?.evidence ?? [], candidate.evidence),
+        reEvaluatedClaimIds: previous === undefined
+          ? [] : [...changedClaimIds(previous, candidate)] as ClaimId[],
         findingIds: candidate.findings.map((finding) => finding.id),
         gapIds: candidate.gaps.map((gap) => gap.id),
         // What the run itself recorded. Absent stays absent.
@@ -151,7 +165,27 @@ export class GraduationService {
      * then never appended, so `commit` refuses for want of one rather than
      * committing an unreviewed candidate.
      */
-    const judgments = options.model === undefined
+    /*
+     * Reuse the review the pipeline already recorded for this exact candidate.
+     *
+     * The REVIEW gate asks the reviewer about the graph it inspected and the
+     * execution audit keeps the round durably. If the candidate has not
+     * changed since, that review *is* the review of this graph, and asking
+     * again would pay for a second round of the same questions — and a model
+     * is not a function, so the second answer could differ and leave "the
+     * review that authorised this version" ambiguous.
+     *
+     * A changed candidate invalidates it: the fingerprint no longer matches,
+     * so the reviewer is asked afresh. `assessGraduation` checks the
+     * fingerprint again, so a stale review cannot be passed off as this one's.
+     */
+    const fingerprint = fingerprintGraph(candidate)
+    const recorded = await readExecutionAudit(this.db, executionRunId)
+    const reusable = (recorded?.reviewHistory.rounds ?? [])
+      .map((round) => round.result)
+      .findLast((review) => review.graphFingerprint === fingerprint)
+
+    const judgments = reusable !== undefined || options.model === undefined
       ? undefined
       : await collectModelJudgments(candidate, options.model)
 
@@ -159,6 +193,7 @@ export class GraduationService {
       behaviors: options.behaviors ?? [],
       ...(options.requiredReviewChecks ? { requiredReviewChecks: options.requiredReviewChecks } : {}),
       ...(options.model ? { model: options.model } : {}),
+      ...(reusable === undefined ? {} : { review: reusable }),
       ...(judgments === undefined ? {} : { judgments }),
       assessedAt: this.clock(),
     })
@@ -178,7 +213,7 @@ export class GraduationService {
    * the pieces and hands them over.
    */
   async commit(investigationId: string, executionRunId: string, options: {
-    expectedPredecessor: number
+    expectedPredecessor: number | null
     reEvaluationAudit: readonly ReEvaluationAudit[]
     /**
      * Links to write inside the same commit transaction.
@@ -206,6 +241,6 @@ export class GraduationService {
       ...(options.intakeAcceptances
         ? { intakeAcceptances: options.intakeAcceptances } : {}),
     })
-    return { version: options.expectedPredecessor + 1 }
+    return { version: options.expectedPredecessor === null ? 1 : options.expectedPredecessor + 1 }
   }
 }

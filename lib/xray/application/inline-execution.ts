@@ -19,6 +19,7 @@ import {
 import { VersionConflict } from '@/lib/xray/persistence/version-commit'
 import { InvestigationService, type ExecutionStatusDto, type SubmissionMetadata,
   InvestigationResourceNotFound } from './investigation-service'
+import { getReviewerModel } from './runtime'
 
 export interface ExecutionPlan {
   stages: readonly StageDefinition[]
@@ -161,9 +162,13 @@ export class InlineExecutionService {
     const journal = new RunJournal(investigationId), ledger = new CorrelationLedger()
     await saveCandidateCheckpoint(this.db, { executionRunId, investigationId, startedAt, updatedAt: startedAt,
       status: 'PENDING', artifactVersion: 0, accumulator, journal, ledger })
+    const reviewer = await getReviewerModel()
     await runPipeline({ investigation: plan.investigation, stages: plan.stages,
       adapters: plan.adapters, stopEvidence: plan.stopEvidence, maxAttempts: plan.maxAttempts,
       resume: { accumulator, journal, ledger }, clock: this.clock,
+      // The REVIEW gate's reviewer, from the host seam. Never in `adapters`:
+      // a research stage must not receive one.
+      ...(reviewer === undefined ? {} : { reviewer }),
       onBoundary: (boundary) => this.checkpoint(executionRunId, startedAt, boundary) })
     return this.read.getExecutionStatus(investigationId, executionRunId)
   }

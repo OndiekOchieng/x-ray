@@ -909,6 +909,8 @@ async function main(): Promise<void> {
       { cwd: repository, encoding: 'utf8' }).split('\n').filter(Boolean)
     for (const file of tracked) {
       if (file.startsWith('lib/xray/providers/')) continue
+      // Verification runners compose providers on purpose; see check 13.
+      if (file.startsWith('verification/')) continue
       if (/providers\/anthropic/.test(stripComments(readFileSync(join(repository, file), 'utf8'))))
         return `${file} imports the Anthropic provider`
     }

@@ -1,0 +1,203 @@
+=== typecheck ===
+tsc: clean
+
+=== check:first-version ===
+ok    11 · the first-version rule refuses every incoherent v1
+
+11/11 first-version checks passed
+
+=== check:providers ===
+ok    stop line · prompts stay inside the prompt module
+
+22/22 provider composition checks passed
+
+=== check:anthropic-adapters ===
+
+32/32 Anthropic adapter checks passed
+Every call went to 127.0.0.1. No request left this machine.
+
+=== check:anthropic-retrieval ===
+
+29/29 Anthropic retrieval checks passed
+Every call went to 127.0.0.1. No request left this machine.
+
+=== check:live-runtime ===
+
+35/35 live runtime checks passed
+Every call went to 127.0.0.1. No civic URL was used.
+
+=== check:fixtures ===
+Seam: 30 model queries raised by the canonical graph, 6 port-dependent checks, 2 capability gap(s) journalled in the blocked run
+
+6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+
+=== check:adapters ===
+
+Seam: 30 model queries raised by the canonical graph, 6 port-dependent checks, 2 capability gap(s) journalled in the blocked run
+
+
+=== check:pipeline ===
+
+Replay: 10 stage run(s), 2 gate run(s), final artifact revision 10, investigation version 1 (untouched)
+
+
+=== check:validation ===
+  XR-INV-011  PARTIAL        Synthesis Cannot Mutate Evidence
+  XR-INV-012  DETERMINISTIC  Discovered Claims Are Separate
+
+
+=== check:review ===
+
+Capability: 11 deterministic evaluated, 6 model-assisted NOT_EVALUATED (port unwired, #6).
+
+
+=== check:acceptance ===
+
+Canonical benchmark verdict: BLOCKED (0 reason(s) against the graph, 6 capability blocker(s))
+
+
+=== check:query ===
+==================================================================================
+56/56 passed
+
+
+=== check:replay ===
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/fixtures/xray-ke-001/replay-checks.ts
+6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+
+=== check:persistence-roundtrip ===
+15b: reconstructed v0.3 FULL validation PASS
+15b: v0.3 SourcePosition/KnowledgeBasis and four independent layers round-trip PASS
+15b: explicitly present empty membership round-trip PASS
+
+=== check:persistence-versioning ===
+7c: deferred FK failure leaves no v2/audit/pointer change PASS
+7c: v2 deep-equal; v1 unchanged; supersession, additions, reasons PASS
+7c: stale expected predecessor conflicts without overwrite PASS
+
+=== check:persistence-workspace ===
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/workspace-checks.ts
+7d-a: checkpoint reload preserves canonical state, ownership, revision, ledger, journal, stale/capability/stop PASS
+7d-a: resumed run skips success, retains failure, clears stale/capability/stop, preserves identities; no version PASS
+
+=== check:persistence-audit ===
+7d-b: failing FULL validation persists; REVIEW remains SKIPPED without fabricated result PASS
+7d-b: five journal kinds, failed attempts, STOP/RESUME, invalidation, two immutable review rounds PASS
+7d-b: missing ReviewerModel remains NOT_EVALUATED and capability-incomplete PASS
+
+=== check:persistence-ati ===
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/ati-boundary-checks.ts
+7d-d ATI: version-scoped eligible origin, invalid references, lifecycle isolation PASS
+
+=== check:persistence-durable-integration ===
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/persistence/durable-integration-checks.ts
+7d-d: restart → resume → gates → audit → graduation → commit; failed run stays uncommitted PASS
+
+=== check:persistence-graduation ===
+7c: deferred FK failure leaves no v2/audit/pointer change PASS
+7c: v2 deep-equal; v1 unchanged; supersession, additions, reasons PASS
+7c: stale expected predecessor conflicts without overwrite PASS
+
+=== check:investigation-service ===
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/investigation-service-checks.ts
+8a: two distinct URL submissions retained; zero graph/run/version rows; typed input/ID errors PASS
+8a: owner-scoped run/candidate reads; exact v1/v2 snapshots; ordered history/latest pointer PASS
+
+=== check:inline-execution ===
+8b: completed run reopens only by revision, never by bare resume PASS
+8b: submitted URL alone creates no Source, Evidence or version row PASS
+8b: the surface Source appears only from actual INGEST output PASS
+
+=== check:api-routes ===
+
+30 route responses inspected for leakage.
+
+
+=== check:lifecycle ===
+
+24 route responses inspected for leakage.
+
+
+=== check:ati-lifecycle ===
+Status, draftedAt, submittedAt, respondedAt and receivedSourceIds are all
+derived; the superseded columns were never written.
+
+
+=== check:ati-commands ===
+ok    26 · the command boundary emits XR-INV-009's own violation codes
+
+32/32 ATI command checks passed
+
+=== check:ati-responses ===
+ok    D3 · a stated digest is never silently upgraded, and a wrong one is refused
+
+25/25 ATI response checks passed
+
+=== check:ati-research ===
+ok    D4 · a generic non-ATI re-evaluation gets the same treatment, across a restart
+
+35/35 ATI research checks passed
+
+=== check:ati-surface ===
+ok    a11y · the ATI controls are labelled, reachable and not colour-only
+
+18/18 ATI surface checks passed
+
+=== check:publication ===
+outcome (one slug, one event, one typed refusal) but NOT native row-lock behaviour.
+Simultaneous first publication on native PostgreSQL is unproven and is not claimed.
+
+
+=== check:public-resolver ===
+Canonical reads stayed at zero for every NOT_PUBLIC outcome and for
+COMPELLED, PRIVACY_HARM and ERRONEOUS tombstones.
+
+
+=== check:public-routes ===
+40 public responses inspected. The projection cache was a
+permanent memo throughout: withdrawal still took effect on the next request.
+
+
+=== check:public-library ===
+Drafts and withdrawn heads caused zero canonical reads. The projection cache
+was a permanent memo throughout: discovery still changed on the next request.
+
+
+=== check:version-lineage ===
+Unpublished versions caused zero version reads. The v2 document was
+byte-identical across the publication of v3.
+
+
+=== check:legibility ===
+ok    23/24 · canonical counts, findings, gap statuses and paths are unchanged
+
+20/20 legibility checks passed
+
+=== check:source-position ===
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/source-position-checks.ts
+14a: historical graph and Evidence optionality PASS
+14a: contextual positions, T1/T2, Evidence basis and orthogonal provenance PASS
+
+=== check:source-position-pipeline ===
+14b: v0.3 FULL basis requirement and historical/STAGED compatibility PASS
+14b: SourcePosition referential and basis violations PASS
+14b: TRACE retry identity, PROVENANCE revision, orthogonal lineage PASS
+
+=== check:source-position-review ===
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/source-position-review-checks.ts
+14c: historical unchanged; clean characterization and T1/T2 pass
+14c: characterization, agency, retrospective intent, falsifier, and revision history pass
+
+=== check:persistence-schema ===
+foreign_keys 77
+PASS no publication or derived count columns
+failure_count 0
+
+=== check:source-position-schema ===
+PASS immutable membership presence
+PASS complete immutability/uncommitted trigger catalog
+15a schema: 29/29 checks passed
+
+=== check:benchmark-corpus ===
+$ node scripts/check-benchmark-corpus.mjs
+benchmark corpus: 12 cases, 1 executable fixture(s), registry integrity PASS

@@ -47,7 +47,10 @@ import {
   appendReviewRound,
   emptyReviewHistory,
   fingerprintGraph,
+  collectModelJudgments,
   reviewXRayGraph,
+  type ModelJudgmentSet,
+  type ReviewerModel,
   type ReviewHistory,
   type ReviewResult,
 } from '@/lib/xray/review'
@@ -125,6 +128,23 @@ export interface RunOptions {
   revision?: RevisionRequest
   /** Prior rounds are retained across revisions. */
   reviewHistory?: ReviewHistory
+
+  /**
+   * The reviewer the REVIEW gate asks. Absent means model-assisted checks stay
+   * NOT_EVALUATED, which is #4's promise rather than a defect.
+   *
+   * Deliberately **not** in `StageAdapters`. A research stage must never
+   * receive a reviewer: `ctx.adapters` carries `{ model?, research? }` and
+   * nothing else, so a stage cannot ask for a judgment about the graph it is
+   * building. The reviewer arrives here, is used by the gate, and is never put
+   * anywhere a stage can reach.
+   *
+   * First light showed why this field has to exist: `RunOptions` carried
+   * neither a reviewer nor judgments, so the gate called the synchronous
+   * `reviewXRayGraph` and every model-assisted check was NOT_EVALUATED in
+   * every run — live reviewer or not.
+   */
+  reviewer?: ReviewerModel
   /** Awaited after each durable stage attempt/gate and before returning. */
   onBoundary?: (boundary: PipelineBoundary) => Promise<void>
 }
@@ -570,7 +590,54 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
     }
   }
 
-  const review = reviewXRayGraph(graph, { validation, reviewedAt: clock() })
+  /*
+   * Ask the reviewer, then review as a pure function of the graph and the
+   * answers. `collectModelJudgments` is the only thing that talks to a model;
+   * `reviewXRayGraph` stays pure, so a recorded review can be reproduced from
+   * its judgments rather than by asking again.
+   *
+   * An outage is not caught. `collectModelJudgments` documents why: swallowing
+   * it would report an outage as a capability gap an operator cannot act on.
+   * What must not happen is a *fabricated* review, so the gate is journalled
+   * SKIPPED with the reason and the run ends GATE_BLOCKED — no round is
+   * appended, and graduation therefore has nothing eligible to commit.
+   */
+  let judgments: ModelJudgmentSet | undefined
+  if (options.reviewer !== undefined) {
+    try {
+      judgments = await collectModelJudgments(graph, options.reviewer)
+    } catch (error) {
+      appendGate(journal, investigation, {
+        gate: 'REVIEW',
+        investigationId,
+        inspectedArtifactVersion: artifactVersion,
+        outcome: 'SKIPPED',
+        clock,
+        error: `The reviewer could not be reached: ${
+          error instanceof Error ? error.message : String(error)}`,
+      })
+      await boundary('REVIEW', 'RUNNING', validation)
+      await boundary('TERMINAL', 'GATE_BLOCKED', validation)
+      return {
+        investigationId,
+        status: 'GATE_BLOCKED',
+        journal,
+        accumulator,
+        graph,
+        artifactVersion,
+        validation,
+        capabilityGaps: journal.activeCapabilityEntries().map((entry) => entry.unavailable),
+        ledger,
+      }
+    }
+  }
+
+  const review = reviewXRayGraph(graph, {
+    validation,
+    ...(options.reviewer === undefined ? {} : { model: options.reviewer }),
+    ...(judgments === undefined ? {} : { judgments }),
+    reviewedAt: clock(),
+  })
   const reviewHistory = appendReviewRound(options.reviewHistory ?? emptyReviewHistory(investigationId), review)
 
   appendGate(journal, investigation, {

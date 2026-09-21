@@ -1403,6 +1403,18 @@ check('20b · the seam is consumed by an application path, not just installed', 
    * application function reads the seam, the service does not, and the
    * production caller goes through that function.
    */
+  /*
+   * Two readers, both orchestration boundaries, and each supplies a different
+   * consumer:
+   *
+   *   assessment.ts       -> GraduationService, for the graduation assessment
+   *   inline-execution.ts -> runPipeline, for the REVIEW gate
+   *
+   * The second was added for Finding 5: the pipeline's REVIEW gate had no
+   * reviewer at all, so every model-assisted check was NOT_EVALUATED in every
+   * run. Both hand the reviewer *in*; neither service reaches for a global,
+   * which is the property this check exists to hold.
+   */
   const readers = ['assessment.ts', 'ati-routes.ts', 'investigation-service.ts',
     'graduation-service.ts', 'inline-execution.ts', 'ati-research-bridge.ts']
     .filter((file) => {
@@ -1410,8 +1422,10 @@ check('20b · the seam is consumed by an application path, not just installed', 
         return /getReviewerModel/.test(stripComments(read(`lib/xray/application/${file}`)))
       } catch { return false }
     })
-  if (JSON.stringify(readers) !== JSON.stringify(['assessment.ts']))
-    return `the seam is read by ${JSON.stringify(readers)}, expected only assessment.ts`
+    .sort()
+  if (JSON.stringify(readers)
+    !== JSON.stringify(['assessment.ts', 'inline-execution.ts']))
+    return `the seam is read by ${JSON.stringify(readers)}`
 
   // GraduationService never reaches for a global: it receives a reviewer.
   const service = stripComments(read('lib/xray/application/graduation-service.ts'))
