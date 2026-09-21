@@ -1,0 +1,27 @@
+Adversarial runs — evidence that the 11c legibility gate bites.
+Each variant makes one wording or axis change the release forbids.
+
+### W1 · flatten origin into vague 'sources' everywhere
+FAIL  1 · no demo-facing copy says "provenance" where "origin" says it — the origin panel no longer names itself for a reader
+FAIL  3 · C001 names both axes rather than stacking two bare numbers — lineage label "Sources — 8 records traced · 3 of them repeat another record"
+18/20 legibility checks passed
+
+### W2 · collapse traced publications and independent origins into one count
+FAIL  5 · C002 remains correct and reads coherently — C002 labels do not carry its own numbers
+19/20 legibility checks passed
+
+### W3 · finding copy says X-Ray confirms the claim
+FAIL  16 · a finding reads as reversible, not as a verdict — note "X-Ray confirms this claim."
+19/20 legibility checks passed
+
+### W4 · missing-evidence copy says no evidence exists
+FAIL  11 · missing evidence is shown as missing, never as absent — search note "X-Ray looked in 5 places without locating it. No evidence exists for this."
+19/20 legibility checks passed
+
+### W5 · WAIT_FOR_RECORD offers a records request
+FAIL  19/20 · only a public-record gap offers a records request — the waiting gap offers a request
+19/20 legibility checks passed
+
+### W6 · the selected claim becomes a second page-level h1
+FAIL  14/15 · the explorer has exactly one h1, and the claim is subordinate — 1 h1 element(s) in the finding panel
+19/20 legibility checks passed

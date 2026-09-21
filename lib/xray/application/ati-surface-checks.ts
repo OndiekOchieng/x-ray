@@ -169,10 +169,21 @@ async function main(): Promise<void> {
       if (notDraftable !== null)
         return `${waiting.resolutionPath} offered an information request`
       // The two gaps visibly take different actions, not the same one greyed.
-      const detail = readFileSync(
-        new URL('../../../components/investigations/gap-detail.tsx', import.meta.url), 'utf8')
-      return /waiting rather than requesting|not appropriate yet/.test(detail)
-        ? null : 'the non-ATI path does not state a different next step'
+      // 11c moved this copy into `gapView.nextStep`, authored per resolution
+      // path, so the assertion is now over the rendered strings rather than
+      // over one hand-written sentence in the component.
+      const eligibleView = gapView(v2, eligible)
+      const waitingView = gapView(v2, waiting)
+      if (!eligibleView.offersRecordsRequest)
+        return 'the eligible gap does not offer a records request'
+      if (waitingView.offersRecordsRequest)
+        return `${waiting.resolutionPath} offers a records request`
+      if (eligibleView.nextStep === waitingView.nextStep)
+        return 'both paths state the same next step'
+      if (/request/i.test(waitingView.nextStep) && !/nothing to request/i.test(waitingView.nextStep))
+        return `the waiting path's next step reads as a request: "${waitingView.nextStep}"`
+      return /can be requested/i.test(eligibleView.nextStep)
+        ? null : `the eligible path's next step does not offer a request: "${eligibleView.nextStep}"`
     })
 
     // -- the loop, through the routes ---------------------------------------

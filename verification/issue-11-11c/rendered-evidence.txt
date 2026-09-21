@@ -1,0 +1,62 @@
+11c rendered evidence — production build against the seeded PostgreSQL.
+Captured 2026-09-21T11:18:49Z. Text extracted from the served HTML.
+
+=== 1 · landing / featured card ===
+    ok   present: See what a civic claim is standing on
+    ok   present: Origin
+    ok   present: Featured Investigation
+    ok   absent : provenance
+
+=== 2 · explorer opening state (h1 count and claim subordination) ===
+    h1 elements: 1
+    h1 text:     Inside Ruto&#x27;s five-day tour of Kisumu, Siaya, Migori and Homa Bay
+    ok   present: Observation
+    ok   present: not a reading of what it means
+    ok   absent : provenance
+
+=== 3 · repetition / independence panel, both axes named ===
+    ok   present: Evidence origin
+    ok   present: Repetition is not corroboration
+    ok   present: Document lineage — 8 records traced · 3 of them repeat another record
+    ok   present: Evidence origin — 8 independent originating observations for this claim
+
+=== 4 · measurement / scope discrepancy ===
+    ok   present: Discrepancies around this claim
+    ok   present: Different scope
+
+=== 5 · reversible finding ===
+    ok   present: Where the evidence stands
+    ok   present: not a verdict
+    ok   present: What would change this finding
+    ok   absent : X-Ray confirms
+    ok   absent : truth score
+
+=== 6 · evidentiary reach on receipts ===
+    ok   present: reporting on a record rather than the record itself
+
+=== 7 · GAP-001, the unresolved financial bridge ===
+    ok   present: 16.7 billion
+    ok   present: What would settle it
+    ok   present: Not finding a record is not evidence that it does not exist
+    ok   present: can be requested
+
+=== 8 · WAIT_FOR_RECORD takes a different action (GAP-003) ===
+    ok   present: nothing to request
+    ok   present: waiting for the record
+    ok   absent : Draft records request
+
+=== 9 · public exact version preserves the evidence story ===
+    ok   present: Claims examined
+    ok   present: Records traced
+    ok   present: Independent origins
+    ok   present: Open gaps
+    ok   present: repetition is not corroboration
+    ok   present: Cite this exact version
+    ok   absent : Draft records request
+    ok   absent : custody
+
+=== calibration identifiers never rendered ===
+    ex.html    0 occurrence(s)
+    g1.html    0 occurrence(s)
+    g3.html    0 occurrence(s)
+    pv.html    0 occurrence(s)

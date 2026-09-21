@@ -1,0 +1,69 @@
+=== 11c gate ===
+ok    1 · no demo-facing copy says "provenance" where "origin" says it
+ok    2 · internal provenance terminology is untouched
+ok    3 · C001 names both axes rather than stacking two bare numbers
+ok    4 · C001 traced, repeating and independent counts are unchanged
+ok    5 · C002 remains correct and reads coherently
+ok    6 · repetition and evidence origin are visibly distinct concepts
+ok    7 · layer separation is explained where a claim is shown
+ok    8 · a measurement or scope mismatch is shown as a classification
+ok    9 · repetition is shown as repetition, not as corroboration
+ok    10 · every record is shown at its actual evidentiary reach
+ok    11 · missing evidence is shown as missing, never as absent
+ok    12 · the unresolved financial bridge states what would settle it
+ok    13 · no surface displays a calibration identifier
+ok    14/15 · the explorer has exactly one h1, and the claim is subordinate
+ok    16 · a finding reads as reversible, not as a verdict
+ok    17/18 · a material gap states what is missing and what would settle it
+ok    19/20 · only a public-record gap offers a records request
+ok    21 · the public version keeps claim, origin, finding and gap distinct
+ok    22 · the public version embeds no mutable ATI state or action control
+ok    23/24 · canonical counts, findings, gap statuses and paths are unchanged
+20/20 legibility checks passed
+
+=== 11b gate ===
+15/15 demo host checks passed
+
+=== #6-#10 regression sweep ===
+check:fixtures                             PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:validation                           PASS  52/52 passed
+check:query                                PASS  56/56 passed
+check:review                               PASS  32/32 passed
+check:acceptance                           PASS  32/32 passed
+check:pipeline                             PASS  58/58 passed
+check:adapters                             PASS  45/45 passed
+check:replay                               PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:source-position                      PASS  14a: contextual positions, T1/T2, Evidence basis and orthogonal pr
+check:source-position-pipeline             PASS  14b: TRACE retry identity, PROVENANCE revision, orthogonal lineage
+check:source-position-review               PASS  14c: characterization, agency, retrospective intent, falsifier, an
+check:persistence-schema                   PASS  
+check:source-position-schema               PASS  15a schema: 29/29 checks passed
+check:persistence-roundtrip                PASS  15b: explicitly present empty membership round-trip PASS
+check:persistence-versioning               PASS  7c: stale expected predecessor conflicts without overwrite PASS
+check:source-position-versioning           PASS  15c: stale predecessor rejects without partial v2 change PASS
+check:persistence-workspace                PASS  7d-a: resumed run skips success, retains failure, clears stale/cap
+check:persistence-audit                    PASS  7d-b: missing ReviewerModel remains NOT_EVALUATED and capability-i
+check:persistence-ati                      PASS  7d-d ATI: version-scoped eligible origin, invalid references, life
+check:persistence-durable-integration      PASS  7d-d: restart → resume → gates → audit → graduation → co
+check:persistence-graduation               PASS  7c: stale expected predecessor conflicts without overwrite PASS
+check:investigation-service                PASS  8a: owner-scoped run/candidate reads; exact v1/v2 snapshots; order
+check:inline-execution                     PASS  8b: the surface Source appears only from actual INGEST output PASS
+check:api-routes                           PASS  23/23 passed
+check:lifecycle                            PASS  21/21 passed
+check:publication                          PASS  26/26 passed
+check:public-resolver                      PASS  25/25 passed
+check:public-routes                        PASS  31/31 passed
+check:public-library                       PASS  25/25 passed
+check:version-lineage                      PASS  15/15 passed
+check:ati-lifecycle                        PASS  28/28 passed
+check:ati-commands                         PASS  
+check:ati-responses                        PASS  
+check:ati-research                         PASS  
+check:ati-surface                          PASS  
+check:benchmark-corpus                     PASS  benchmark corpus: 12 cases, 1 executable fixture(s), registry inte
+
+=== tsc + build ===
+tsc clean
+◐  (Partial Prerender)  prerendered as static HTML with dynamic server-streamed content
+ƒ  (Dynamic)            server-rendered on demand
+
