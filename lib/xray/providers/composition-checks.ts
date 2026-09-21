@@ -590,12 +590,27 @@ async function main(): Promise<void> {
     const repository = root('').replace(/\/$/, '')
     const tracked = execFileSync('git', ['ls-files', '*.ts', '*.tsx', '*.mjs'],
       { cwd: repository, encoding: 'utf8' }).split('\n').filter(Boolean)
+    /*
+     * The composition area, and the one host entry point.
+     *
+     * `instrumentation.ts` is where a host registers itself — that is the
+     * whole reason it exists — so it may reach the provider layer. Nothing
+     * else outside `providers/` and `host/` may.
+     */
     const composition = /^lib\/xray\/(providers|host)\//
+    const hostEntryPoint = 'instrumentation.ts'
 
     for (const file of tracked) {
-      if (composition.test(file)) continue
+      if (composition.test(file) || file === hostEntryPoint) continue
       const source = stripComments(readFileSync(join(repository, file), 'utf8'))
-      if (/from '@\/lib\/xray\/providers\//.test(source) || /providers\/(config|registry)'/.test(source))
+      /*
+       * Static *and* dynamic imports. An earlier version matched only
+       * `from '…'`, so `await import('@/lib/xray/providers/…')` slipped
+       * through — which is exactly the form a host registration uses.
+       */
+      if (/from '@\/lib\/xray\/providers\//.test(source)
+        || /import\(\s*'@\/lib\/xray\/providers\//.test(source)
+        || /providers\/(config|registry)'/.test(source))
         return `${file} imports the provider layer`
       for (const variable of Object.values(PROVIDER_ENV)) {
         if (source.includes(variable)) return `${file} reads ${variable}`
@@ -650,17 +665,60 @@ async function main(): Promise<void> {
 
   // === nothing registered yet ==========================================
 
-  check('15 · 20a registers no execution runtime, so the unconfigured path stands', () => {
+  check('15 · the live runtime is registered only when fully configured', () => {
+    /*
+     * 20a asserted that nothing registered a runtime. 20d registers one, so
+     * the assertion is re-aimed at the property that still has to hold: a
+     * partial configuration registers **nothing**, leaving the unconfigured
+     * runtime in place — which is the behaviour every #6–#11 gate is written
+     * against.
+     */
     const instrumentation = stripComments(read('instrumentation.ts'))
-    if (/providers\//.test(instrumentation))
-      return 'instrumentation already composes providers'
-    if (/setExecutionRuntimeProvider/.test(instrumentation))
-      return 'instrumentation already registers an execution runtime'
-    // The default runtime is still what an unconfigured deployment gets.
+    if (!/registerLiveRuntime/.test(instrumentation))
+      return 'instrumentation no longer registers a live runtime'
+    if (!/setExecutionRuntimeProvider/.test(instrumentation))
+      return 'instrumentation does not pass the runtime seam'
+
+    // The conditional lives in `registerLiveRuntime`, and it is the only path
+    // that calls the seam.
+    const live = stripComments(read('lib/xray/providers/live-runtime.ts'))
+    if (!/if \(composition\.status !== 'COMPOSED'\) return composition/.test(live))
+      return 'registration is not conditional on a complete composition'
+    const calls = live.match(/setProvider\(/g) ?? []
+    if (calls.length !== 1) return `setProvider is called ${calls.length} times`
+
+    // A composition with any slot unavailable reports the slots, never a
+    // partial runtime.
+    if (!/status: 'INCOMPLETE'/.test(live)) return 'there is no incomplete outcome'
+    if (/\?\?\s*unconfigured|fallback/i.test(live))
+      return 'the live runtime falls back to something'
+
+    // And the unconfigured runtime is still what an unconfigured deployment
+    // gets, from the application layer that knows nothing about providers.
     const runtime = stripComments(read('lib/xray/application/runtime.ts'))
     if (!/unconfiguredResearchRuntime/.test(runtime))
       return 'the unconfigured runtime is gone'
-    return /providers\//.test(runtime) ? 'the application runtime imports the provider layer' : null
+    return /from '@\/lib\/xray\/providers\//.test(runtime)
+      ? 'the application runtime imports the provider layer' : null
+  })
+
+  check('15b · the provider layer has two tiers, and they do not mix', () => {
+    /*
+     * `providers/anthropic/**` is provider-specific. `live-stages.ts`,
+     * `material.ts` and `live-runtime.ts` are provider-neutral composition
+     * over #6's ports. The neutral tier must not import the specific one, or
+     * "swapping a provider changes only composition" stops being true.
+     */
+    const neutral = ['live-stages.ts', 'material.ts', 'live-runtime.ts']
+    for (const file of neutral) {
+      const source = stripComments(read(`lib/xray/providers/${file}`))
+      if (/anthropic/i.test(source)) return `${file} mentions a specific provider`
+    }
+    // And the stages reach the ports, not a vendor.
+    const stages = stripComments(read('lib/xray/providers/live-stages.ts'))
+    if (!/ctx\.adapters\.model/.test(stages) || !/ctx\.adapters\.research/.test(stages))
+      return 'the stages do not read the ports from the stage context'
+    return null
   })
 
   check('14/§5 · no provider secret can be committed, and none has been', () => {
@@ -743,16 +801,30 @@ async function main(): Promise<void> {
       return `files naming a server-tool version: ${JSON.stringify(toolFiles)}`
     }
 
-    // No provider file constructs canonical graph state. Proposals and
-    // material are the only things that cross.
+    /*
+     * No **vendor** file constructs canonical graph state. Proposals and
+     * material are the only things that cross out of `anthropic/`.
+     *
+     * Scoped to the vendor tier deliberately: `live-stages.ts` builds
+     * canonical artifacts, because that is what a stage does. The boundary is
+     * that a provider adapter may not, and 20d's stage layer is not a provider
+     * adapter — check 15b holds the two tiers apart.
+     */
     for (const file of implementation) {
-      const source = stripComments(readFileSync(file, 'utf8'))
       const relative = file.slice(file.indexOf('lib/xray'))
+      if (!relative.startsWith('lib/xray/providers/anthropic/')) continue
+      const source = stripComments(readFileSync(file, 'utf8'))
       const canonical = /\b(?:Evidence|Source|Finding|Claim|Gap)\b(?!Proposal|Ref|Refs|Class|Position|Accessibility|Layer|Type|Status|Relationship|Strength|Judgment|Id|Ids)\s*=\s*\{/
         .exec(source)
       if (canonical !== null) return `${relative} builds a canonical ${canonical[0]}`
       if (/from '@\/lib\/xray\/persistence/.test(source))
         return `${relative} reaches persistence`
+    }
+
+    // And nothing in the layer, either tier, reaches persistence.
+    for (const file of implementation) {
+      if (/from '@\/lib\/xray\/persistence/.test(stripComments(readFileSync(file, 'utf8'))))
+        return `${file.slice(file.indexOf('lib/xray'))} reaches persistence`
     }
     return null
   })

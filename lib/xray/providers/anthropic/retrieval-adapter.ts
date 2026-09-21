@@ -31,8 +31,8 @@ import type {
   RetrievedDocument,
 } from '@/lib/xray/pipeline/retrieval-port'
 import {
-  decodeFetch, decodeSearch, fetchOutcomeFor, fetchOutcomeNote, normalizeLocator,
-  retrievalCapability, unobtained,
+  decodeFetch, decodeSearch, fetchOutcomeFor, fetchOutcomeNote, hasFetchResult,
+  normalizeLocator, retrievalCapability, unobtained,
 } from './retrieval-decode'
 import { fetchTool, searchTool } from './retrieval-contract'
 import { callServerTools, type CallDiagnostics } from './transport'
@@ -118,23 +118,17 @@ export class AnthropicResearchAdapter implements ResearchAdapter {
     if (outcome.kind === 'CAPABILITY') return outcome.value
     this.calls.push(outcome.value.diagnostics)
 
-    if (outcome.value.stopReason === 'pause_turn') {
-      /*
-       * A placeholder, and honest about being one. Continuation is not retry:
-       * the correct handling resends this paused assistant message unchanged
-       * to resume the same turn, and belongs at this provider's transport /
-       * session boundary rather than in pipeline retry logic. See
-       * `retrieval-contract.ts`, which records the decision for 20d.
-       *
-       * Until then `TRANSIENT` re-drives the stage, which discards searches
-       * the provider already ran. Wasteful and visible, rather than wrong and
-       * quiet.
-       */
-      throw new AdapterFailure(operation, 'TRANSIENT',
-        'Anthropic paused the search turn before it completed. Continuing a paused'
-        + ' turn is not implemented in 20c, so the stage will be re-driven; the'
-        + ' searches already run are discarded.')
-    }
+    /*
+     * A paused turn has already been continued by the transport — that is
+     * 20d's implementation of 20c's recorded decision. What can still arrive
+     * here is a turn that was *still* paused at the continuation limit, and
+     * the results gathered before that point are real.
+     *
+     * So this is not a failure. It is "we stopped continuing", which is the
+     * same kind of fact as `max_uses_exceeded` and gets the same treatment:
+     * keep what was found and say more may exist.
+     */
+    const stoppedEarly = outcome.value.continuationLimitReached === true
 
     const decoded = decodeSearch(operation, outcome.value.blocks)
 
@@ -178,6 +172,11 @@ export class AnthropicResearchAdapter implements ResearchAdapter {
     const note = [
       decoded.queriesRun.length === 0
         ? 'the provider ran no search' : `queries run: ${decoded.queriesRun.length}`,
+      outcome.value.continuations > 0
+        ? `turn continued ${outcome.value.continuations} time(s)` : undefined,
+      stoppedEarly
+        ? 'the turn was still paused at the continuation limit, so more material may exist'
+        : undefined,
       decoded.duplicatesDropped > 0
         ? `${decoded.duplicatesDropped} duplicate result(s) dropped` : undefined,
       decoded.resultsRejected > 0
@@ -199,7 +198,9 @@ export class AnthropicResearchAdapter implements ResearchAdapter {
     return available({
       query,
       documents: decoded.documents,
-      // Absent means unknown. Only `max_uses_exceeded` positively reports a cap.
+      // Absent means unknown. `true` is claimed only when the provider or the
+      // continuation bound positively reports that we stopped early.
+      ...(stoppedEarly ? { moreAvailable: true } : {}),
       diagnostics: { provider: 'anthropic', note },
     })
   }
@@ -230,11 +231,17 @@ export class AnthropicResearchAdapter implements ResearchAdapter {
     if (outcome.kind === 'CAPABILITY') return outcome.value
     this.calls.push(outcome.value.diagnostics)
 
-    if (outcome.value.stopReason === 'pause_turn') {
-      // Same placeholder, same reasoning as `search`.
+    /*
+     * One fetch is one tool call, so a paused turn here means the provider had
+     * not finished the *turn* — and unlike search, a partial turn may carry no
+     * fetch result at all. If the continuation bound was reached without one,
+     * that is transient: another attempt gets a fresh bound.
+     */
+    if (outcome.value.continuationLimitReached === true
+      && !hasFetchResult(outcome.value.blocks)) {
       throw new AdapterFailure(operation, 'TRANSIENT',
-        'Anthropic paused the fetch turn before it completed. Continuing a paused'
-        + ' turn is not implemented in 20c, so the stage will be re-driven.')
+        'Anthropic was still pausing the fetch turn at the continuation limit and'
+        + ' returned no fetch result. Another attempt may complete it.')
     }
 
     const decoded = decodeFetch(operation, outcome.value.blocks, normalized)

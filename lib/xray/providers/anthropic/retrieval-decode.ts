@@ -296,6 +296,10 @@ export interface DecodedFetch {
   readonly document: RetrievedDocument
 }
 
+/** Whether any fetch result block arrived, error or not. */
+export const hasFetchResult = (blocks: readonly unknown[]): boolean =>
+  blocksOfType(blocks, BLOCK.fetchResultBlock).length > 0
+
 /**
  * Harvest one fetch result.
  *

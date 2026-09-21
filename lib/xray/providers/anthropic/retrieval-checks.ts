@@ -1113,7 +1113,7 @@ check('25 · diagnostics stay off the document and off the graph', async () => {
   return null
 })
 
-check('26 · the adapter never retries; the pipeline owns that', async () => {
+check('26 · the adapter never retries a failed request', async () => {
   stub.script(
     { status: 429, body: { error: { type: 'rate_limit_error' } } },
     { status: 429, body: { error: { type: 'rate_limit_error' } } },
@@ -1122,43 +1122,118 @@ check('26 · the adapter never retries; the pipeline owns that', async () => {
   if (stub.received.length !== 1)
     return `one search produced ${stub.received.length} requests`
 
-  // A paused turn is reported as retryable rather than continued here: the
-  // documented continuation needs the assistant message sent back, and this
-  // adapter is single-shot by design.
-  stub.script(envelope([searchUse('q')], { stop_reason: 'pause_turn' }))
-  const paused = await failure(() => adapter().search(QUERY))
-  if (paused?.disposition !== 'TRANSIENT')
-    return `a paused turn gave ${String(paused?.disposition)}`
-  if (stub.received.length !== 1)
+  /*
+   * `runPipeline` re-attempts TRANSIENT and stops on PERMANENT. A retry loop
+   * here would multiply with that one and hide how transient a provider is.
+   *
+   * Continuation is a different thing and is checked separately: resuming a
+   * paused turn is not re-sending a failed request. The scan below therefore
+   * looks for a *retry* — a second send of the same request after a failure —
+   * rather than for any loop, since the continuation loop is legitimate.
+   */
+  const transport = stripComments(read('lib/xray/providers/anthropic/transport.ts'))
+  const requests = transport.match(/\bfetch\s*\(/g) ?? []
+  if (requests.length !== 1) return `the transport has ${requests.length} request sites`
+  return /setTimeout|setInterval|\bbackoff\b|\bretr(?:y|ies)\b\s*[:=]/i.test(transport)
+    ? 'the transport schedules or counts a retry' : null
+})
+
+check('26b · a paused turn is continued, not restarted', async () => {
+  /*
+   * 20c recorded the decision; 20d implements it. The assertions that matter
+   * are about what a continuation must *not* do: it must not re-send the
+   * original request, and it must not lose the results gathered before the
+   * pause. Both are visible in what the stub received.
+   */
+  stub.script(
+    envelope([
+      searchUse('kisumu roads'),
+      searchResults([result('https://example.invalid/first')]),
+    ], { stop_reason: 'pause_turn' }),
+    envelope([
+      searchUse('kisumu roads audit'),
+      searchResults([result('https://example.invalid/second')]),
+    ]),
+  )
+  const outcome = await adapter().search(QUERY)
+  if (!isAvailable(outcome)) return `resolved ${outcome.kind}`
+
+  if (stub.received.length !== 2)
     return `a paused turn produced ${stub.received.length} requests`
-  // The placeholder says it is one, so a re-driven stage is not mistaken for
-  // a completed search.
-  if (!/not implemented in 20c/.test(paused.message))
-    return `the paused message does not disclose the gap: "${paused.message}"`
+
+  // The first result survived the pause: the turn was resumed, not restarted.
+  const locators = outcome.value.documents.map((document) => document.locator)
+  if (JSON.stringify(locators) !== JSON.stringify([
+    'https://example.invalid/first', 'https://example.invalid/second',
+  ])) return `kept ${JSON.stringify(locators)}`
+
+  // The continuation resent the paused assistant message unchanged, appended
+  // to the original user turn — not a fresh search request.
+  const resumed = stub.received[1]!.parsed.messages ?? []
+  if (resumed.length !== 2) return `the continuation sent ${resumed.length} message(s)`
+  if (resumed[0]?.role !== 'user') return `first message is ${String(resumed[0]?.role)}`
+  if (resumed[1]?.role !== 'assistant')
+    return `second message is ${String(resumed[1]?.role)}`
+
+  const paused = (stub.received[0]!.parsed as { messages?: unknown[] })
+  void paused
+  const sentBack = JSON.parse(stub.received[1]!.body) as {
+    messages: { role: string; content: unknown }[]
+  }
+  const assistant = sentBack.messages[1]!.content as { type: string }[]
+  if (!Array.isArray(assistant)) return 'the assistant content was not sent back as blocks'
+  // Unchanged: every block, including the opaque encrypted_content the API
+  // decrypts to restore what was already gathered.
+  const serialized = JSON.stringify(assistant)
+  if (!serialized.includes('web_search_tool_result'))
+    return 'the paused tool results were not sent back'
+  if (!serialized.includes('encrypted_content'))
+    return 'encrypted_content was dropped from the resumed message'
+  if (!serialized.includes('example.invalid/first'))
+    return 'the first turn\'s results were not sent back'
+
+  // And the user turn was sent once. A restart would repeat it as a new turn.
+  if (JSON.stringify(sentBack.messages[0]) !== JSON.stringify({
+    role: 'user', content: (stub.received[0]!.parsed.messages ?? [])[0]?.content,
+  })) return 'the original request was altered on continuation'
+
+  const note = outcome.value.diagnostics?.note ?? ''
+  if (!/turn continued 1 time\(s\)/.test(note)) return `note is "${note}"`
+  // A completed continuation is not "we stopped early".
+  return outcome.value.moreAvailable === undefined
+    ? null : `a completed turn claimed moreAvailable ${String(outcome.value.moreAvailable)}`
+})
+
+check('26c · continuation is bounded, and the bound is disclosed', async () => {
+  // Five paused turns against a limit of four continuations.
+  stub.script(...Array.from({ length: 6 }, (unused, index) => {
+    void unused
+    return envelope([
+      searchUse(`q${index}`),
+      searchResults([result(`https://example.invalid/r${index}`)]),
+    ], { stop_reason: 'pause_turn' })
+  }))
+  const outcome = await adapter().search(QUERY)
+  if (!isAvailable(outcome)) return `resolved ${outcome.kind}`
+
+  // One initial request plus four continuations, then it stops.
+  if (stub.received.length !== 5)
+    return `an endlessly paused turn produced ${stub.received.length} requests`
+
+  // Everything gathered up to the bound is kept — those searches really ran.
+  if (outcome.value.documents.length !== 5)
+    return `${outcome.value.documents.length} documents kept, expected 5`
 
   /*
-   * And the decision is recorded where the next slice will look: continuation
-   * is not retry, it resends the paused message unchanged, and it belongs at
-   * this provider's transport boundary rather than in pipeline retry logic.
+   * And stopping early is reported as stopping early. This is the same
+   * distinction `max_uses_exceeded` carries: "we stopped looking" is not
+   * "there was nothing left", and 6c's stop assessment depends on it.
    */
-  /*
-   * Comment prefixes and line wrapping are normalised away before matching.
-   * An earlier version tested the raw text and failed on a phrase that
-   * happened to wrap across two lines — an assertion about prose has to be
-   * robust to how the prose is formatted, or it tests the formatting.
-   */
-  const contract = read('lib/xray/providers/anthropic/retrieval-contract.ts')
-    .replace(/^\s*\*+/gm, ' ').replace(/[*`]/g, '').replace(/\s+/g, ' ')
-  for (const recorded of [
-    /continuation, not retry/i,
-    /resending the paused assistant message unchanged/i,
-    /transport\/session boundary/i,
-    /not in generic pipeline retry logic/i,
-  ]) {
-    if (!recorded.test(contract))
-      return `the pause_turn decision is not recorded: ${String(recorded)}`
-  }
-  return null
+  if (outcome.value.moreAvailable !== true)
+    return 'hitting the continuation bound did not report that more may exist'
+  const note = outcome.value.diagnostics?.note ?? ''
+  return /still paused at the continuation limit/.test(note)
+    ? null : `the note does not disclose the bound: "${note}"`
 })
 
 // ---------------------------------------------------------------------------

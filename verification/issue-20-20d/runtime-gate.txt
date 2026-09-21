@@ -1,0 +1,77 @@
+=== pnpm check:live-runtime ===
+ok    1 · an unconfigured environment composes nothing and says which slots
+ok    2 · a partial configuration composes nothing — no silent fallback
+ok    3 · a complete configuration composes, and registration is conditional
+ok    4 · re-evaluation is not planned by the live runtime
+ok    5 · discovery is followed by retrieval, in that order
+ok    6 · a record that could not be obtained stays unreadable, and stays
+ok    7 · search-only material is never readable to TRACE
+ok    8 · the composed runtime drives every stage end to end
+ok    9 · the stage owns every canonical decision
+ok    10 · a handle the stage never issued is ignored
+ok    11 · PROVENANCE reports a gap rather than deciding lineage
+ok    12 · a blocked stage is a gap, not a failure, and not an empty success
+ok    13 · no submitted URL blocks every stage with a reason
+ok    14 · a paused search turn continues and completes, without restarting
+ok    15 · a continued search feeds the composed runtime as material
+ok    16 · the continuation bound stops the turn and says so
+ok    17 · the stage layer is provider-neutral and the pipeline is untouched
+ok    18 · review stays out of the pipeline adapters
+ok    19 · no secret reaches a composed runtime, a plan, or a graph
+
+19/19 live runtime checks passed
+Every call went to 127.0.0.1. No civic URL was used.
+
+=== earlier gates, re-aimed for 20d ===
+
+22/22 provider composition checks passed
+28/28 Anthropic adapter checks passed
+29/29 Anthropic retrieval checks passed
+
+=== composition semantics ===
+every slot AVAILABLE            -> COMPOSED; runtime registered; summary logged (names only)
+any slot not AVAILABLE          -> INCOMPLETE; nothing registered; each missing slot named
+                                   with its reason. getExecutionRuntime() keeps returning
+                                   unconfiguredResearchRuntime, so a fresh run ends
+                                   CAPABILITY_BLOCKED exactly as every #6-#11 gate expects.
+no submitted URL                -> all ten stages report one capability gap each
+reevaluation                    -> deliberately not implemented; startReevaluation says a
+                                   re-evaluation cannot be planned rather than re-researching
+                                   the original URL and calling it a successor version
+
+=== search -> retrieve sequencing ===
+search returns NOT_RETRIEVED results with no extract (20c).
+gatherMaterial then fetches each discovered locator, keeping the SEARCH handle.
+  obtained     -> RETRIEVED / PARTIAL with an extract; isInspectable true
+  unobtainable -> kept in the material, no extract; isInspectable false
+Unobtained records are kept, not dropped: a record that was found and could not be
+read is a research fact, and dropping it would make the search look narrower than
+it was. XR-INV-006 turns on the extent of the search.
+
+TRACE refuses to mint evidence from a non-inspectable document, and throws rather
+than dropping the proposition, because StageOutcome is a contribution OR a gap and
+never both -- so a stage that kept its other work could not report the refusal.
+Defence in depth: with that guard removed, STAGED validation still catches it as
+XR-INV-006/EVIDENCE_FROM_UNOBTAINED_SOURCE (verified, see report).
+
+=== pause_turn continuation ===
+Implemented at the Anthropic server-tool transport boundary, as 20c recorded.
+  one user message, sent once; each continuation appends the paused assistant
+  message unchanged, including every encrypted_content
+  blocks accumulate across turns, so earlier results are never discarded
+  bound: 4 continuations (5 requests). At the bound the gathered results are
+  returned with moreAvailable: true and a note saying the turn was still paused.
+
+=== negative controls (each verified to apply, then reverted) ===
+W  composes despite missing slots                    -> FAIL 1, 2, 3
+X  registration no longer conditional                -> FAIL 3  ("an incomplete composition registered a runtime")
+Y  search results passed through without retrieval   -> FAIL 5, 6, 8, 15
+Z  unobtained records dropped after retrieval        -> FAIL 6, 7
+     first attempt at this control edited the wrong branch and passed 19/19
+     without testing anything; corrected and re-run
+AA TRACE accepts evidence from an unobtained record  -> FAIL 7
+     and the recorded reason changes: the STAGED validator catches it as
+     XR-INV-006/EVIDENCE_FROM_UNOBTAINED_SOURCE instead of the stage naming
+     the provider. Verified directly, not assumed.
+AB INGEST asserts originStatus before PROVENANCE     -> FAIL 9
+AC continuation restarts instead of resuming         -> FAIL 14 ("request 2 carried 1 messages, expected 2")

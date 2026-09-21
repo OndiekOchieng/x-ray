@@ -90,6 +90,8 @@ export interface MessagesRequest extends CallBase {
 export interface ServerToolRequest extends CallBase {
   /** Documented server-tool definitions, passed through verbatim. */
   readonly tools: readonly Readonly<Record<string, unknown>>[]
+  /** How many times a paused turn may be resumed. See `callServerTools`. */
+  readonly maxContinuations?: number
 }
 
 /**
@@ -212,65 +214,152 @@ export async function callMessages(request: MessagesRequest): Promise<MessagesOu
 
 /** What a server-tool call produced: the content blocks, unread. */
 export interface ServerToolSuccess {
-  /** The assistant content blocks exactly as they arrived. */
+  /**
+   * Every assistant content block from the whole turn, in arrival order.
+   *
+   * Accumulated across continuations. A paused turn's blocks already contain
+   * the tool results gathered before the pause, and they are kept — resuming
+   * a turn must not discard the searches that were already run and paid for.
+   */
   readonly blocks: readonly unknown[]
   readonly stopReason?: string
   readonly diagnostics: CallDiagnostics
-  /** `usage.server_tool_use`, for cost accounting outside the graph. */
+  /** `usage.server_tool_use`, summed across continuations. */
   readonly serverToolUse?: Readonly<Record<string, number>>
+  /** How many times the paused turn had to be resumed. 0 for an unpaused turn. */
+  readonly continuations: number
+  /**
+   * True when the turn was still paused at the continuation limit.
+   *
+   * The caller has whatever was gathered up to that point, and knows it
+   * stopped early — "we stopped looking" rather than "there was nothing left".
+   */
+  readonly continuationLimitReached?: boolean
 }
 
 export type ServerToolOutcome =
   | { readonly kind: 'BLOCKS'; readonly value: ServerToolSuccess }
   | { readonly kind: 'CAPABILITY'; readonly value: CapabilityUnavailable }
 
+/** How many times one paused turn may be resumed before we stop. */
+export const DEFAULT_MAX_CONTINUATIONS = 4
+
 /**
- * Enable server tools and return the content blocks.
+ * Enable server tools, continuing a paused turn, and return the blocks.
  *
  * Nothing here interprets a block. That matters more than it looks: the model
  * also writes prose about what it found, and that prose is where an
  * evidentiary conclusion would live. Handing back unread blocks is what lets
  * `retrieval-decode.ts` read the tool results and ignore the narration.
+ *
+ * CONTINUATION IS NOT RETRY
+ * =========================
+ * `stop_reason: "pause_turn"` means one provider turn is still in progress.
+ * The documented resumption is to send the paused assistant message back
+ * **unchanged** — every block, every `encrypted_content` — so the API can
+ * decrypt it and restore the results already gathered. Modifying or dropping
+ * any of it is a documented 400.
+ *
+ * So this loop lives here, at the provider's transport boundary, and not in
+ * `runPipeline`. The pipeline's retry re-drives a whole stage from its prior
+ * state; that would discard every search this turn already ran and pay for
+ * them again, and it would require the pipeline to understand a
+ * provider-specific protocol. This is the decision 20c recorded in
+ * `retrieval-contract.ts`, implemented.
+ *
+ * The loop is bounded, and when the bound is hit the caller is told: what was
+ * gathered is returned with `continuationLimitReached`, so "we stopped
+ * continuing" never reads as "the search finished".
  */
 export async function callServerTools(
   request: ServerToolRequest,
 ): Promise<ServerToolOutcome> {
-  const sent = await send(request, {
-    model: request.modelId,
-    max_tokens: request.maxTokens,
-    system: request.system,
-    messages: [{ role: 'user', content: request.userContent }],
-    tools: request.tools,
-  })
-  if (sent.kind === 'CAPABILITY') return sent
+  const limit = request.maxContinuations ?? DEFAULT_MAX_CONTINUATIONS
+  const messages: unknown[] = [{ role: 'user', content: request.userContent }]
+  const blocks: unknown[] = []
+  const serverToolUse: Record<string, number> = {}
 
-  const message = sent.envelope as {
-    content?: unknown
-    stop_reason?: unknown
-    usage?: { input_tokens?: unknown; output_tokens?: unknown; server_tool_use?: unknown }
+  let continuations = 0
+  let lastRequestId: string | undefined
+  let totalLatency = 0
+  let inputTokens = 0
+  let outputTokens = 0
+  let sawTokens = false
+  let stopReason: string | undefined
+
+  for (;;) {
+    const sent = await send(request, {
+      model: request.modelId,
+      max_tokens: request.maxTokens,
+      system: request.system,
+      messages,
+      tools: request.tools,
+    })
+    if (sent.kind === 'CAPABILITY') return sent
+
+    const message = sent.envelope as {
+      content?: unknown
+      stop_reason?: unknown
+      usage?: { input_tokens?: unknown; output_tokens?: unknown; server_tool_use?: unknown }
+    }
+    const turnBlocks = Array.isArray(message.content) ? message.content : []
+    stopReason = typeof message.stop_reason === 'string' ? message.stop_reason : undefined
+
+    blocks.push(...turnBlocks)
+    lastRequestId = sent.requestId ?? lastRequestId
+    totalLatency += sent.latencyMs
+    if (typeof message.usage?.input_tokens === 'number') {
+      inputTokens += message.usage.input_tokens
+      sawTokens = true
+    }
+    if (typeof message.usage?.output_tokens === 'number') {
+      outputTokens += message.usage.output_tokens
+      sawTokens = true
+    }
+    if (isCountRecord(message.usage?.server_tool_use)) {
+      for (const [name, count] of Object.entries(message.usage.server_tool_use)) {
+        serverToolUse[name] = (serverToolUse[name] ?? 0) + count
+      }
+    }
+
+    if (stopReason !== 'pause_turn') break
+
+    if (continuations >= limit) {
+      // Stop, and say so. The blocks gathered so far are real results.
+      return {
+        kind: 'BLOCKS',
+        value: success(true),
+      }
+    }
+
+    /*
+     * Resume by appending the paused assistant message **unchanged**. The
+     * blocks are pushed by reference, exactly as they arrived, so no
+     * `encrypted_content` is reserialised through a lossy path.
+     */
+    messages.push({ role: 'assistant', content: turnBlocks })
+    continuations += 1
   }
-  const stopReason = typeof message.stop_reason === 'string' ? message.stop_reason : undefined
 
-  return {
-    kind: 'BLOCKS',
-    value: {
-      blocks: Array.isArray(message.content) ? message.content : [],
+  return { kind: 'BLOCKS', value: success(false) }
+
+  function success(limitReached: boolean): ServerToolSuccess {
+    return {
+      blocks,
       ...(stopReason === undefined ? {} : { stopReason }),
       diagnostics: {
         provider: 'anthropic',
         modelId: request.modelId,
         operation: request.operation,
-        ...(sent.requestId === undefined ? {} : { requestId: sent.requestId }),
+        ...(lastRequestId === undefined ? {} : { requestId: lastRequestId }),
         ...(stopReason === undefined ? {} : { stopReason }),
-        ...(typeof message.usage?.input_tokens === 'number'
-          ? { inputTokens: message.usage.input_tokens } : {}),
-        ...(typeof message.usage?.output_tokens === 'number'
-          ? { outputTokens: message.usage.output_tokens } : {}),
-        latencyMs: sent.latencyMs,
+        ...(sawTokens ? { inputTokens, outputTokens } : {}),
+        latencyMs: totalLatency,
       },
-      ...(isCountRecord(message.usage?.server_tool_use)
-        ? { serverToolUse: message.usage.server_tool_use } : {}),
-    },
+      ...(Object.keys(serverToolUse).length === 0 ? {} : { serverToolUse }),
+      continuations,
+      ...(limitReached ? { continuationLimitReached: true } : {}),
+    }
   }
 }
 
