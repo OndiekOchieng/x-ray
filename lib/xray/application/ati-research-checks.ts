@@ -13,12 +13,14 @@
  * The stages are deterministic stubs which make the canonical decisions
  * themselves, because that boundary is what is under test.
  *
- * ONE BLOCKED GROUP
- * =================
- * The `B` checks record, rather than describe, a blocker found while building
- * this: new evidence bearing on an already-graded claim cannot cross a stage
- * boundary. See the 10d report. Those checks assert the current failure exactly
- * so that the remediation, when authorised, has something to flip.
+ * THE `E` GROUP
+ * =============
+ * Building this found a blocker generic to all successor-version
+ * re-evaluation: new evidence bearing on an already-graded claim could not
+ * cross a stage boundary, because no pre-`GRADE` stage owns `findings`. The
+ * approved fix permits exactly that mismatch as explicit staged debt, bounded
+ * on every side. The `E` checks hold those bounds shut — each one asserts the
+ * exemption is *unavailable* somewhere it must not apply.
  *
  * HONEST LIMITATION
  * =================
@@ -34,7 +36,9 @@ import { createHash } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
 
 import { XRAY_KE_001_ACCEPTANCE } from '@/lib/xray/fixtures/xray-ke-001/acceptance'
-import type { XRayGraph } from '@/lib/xray/selectors'
+import { createXRayGraph, type XRayGraph } from '@/lib/xray/selectors'
+import { validateXRayGraph } from '@/lib/xray/validation'
+import { runPipeline } from '@/lib/xray/pipeline/run'
 import { readSnapshot } from '@/lib/xray/persistence/snapshot'
 import {
   AT, ATI_MIGRATIONS, MIGRATIONS, commitFurtherVersion, seedLineage,
@@ -658,7 +662,8 @@ async function main(): Promise<void> {
         [{ describedAs: 'Award notice', material: RECORD }])
       const retryId = retried.intakeIds[0]
       currentMaterial = material(retryId)
-      // A run that cannot reach a committable state.
+      // A run that cannot reach a committable state: it incurs the staged debt
+      // and then GRADE declines to repair the finding, so GRADE fails.
       planOptions = { sources: 1, bearOnExistingClaim: true, ran: [] }
       const failedRun = await bridge.processIntake({
         intakeId: retryId, material: currentMaterial, behaviors: XRAY_KE_001_ACCEPTANCE })
@@ -707,61 +712,181 @@ async function main(): Promise<void> {
       return null
     })
 
-    // === the blocked group ================================================
+    // === the re-graded path, now that the exemption is bounded ============
 
-    await check('B1 · BLOCKED: new evidence on an already-graded claim fails at the stage boundary', async () => {
-      const probe = await filedWithRecords('ATI-D-BLOCKED',
-        [{ describedAs: 'Award notice', material: RECORD }])
+    await check('17/20/21 · a re-graded existing claim is recorded with its exact response cause', async () => {
+      const probe = await filedWithRecords('ATI-D-REGRADE',
+        [{ describedAs: 'Award notice bearing on a graded claim', material: RECORD }])
       const probeId = probe.intakeIds[0]
       currentMaterial = material(probeId)
-      planOptions = { sources: 1, bearOnExistingClaim: true, ran: [] }
+      // Evidence bearing on C001, which the predecessor already graded. Before
+      // the staged-debt exemption this could not cross the TRACE boundary.
+      planOptions = { sources: 1, bearOnExistingClaim: true, regradeExisting: true, ran: [] }
+      const before = (await db.query<{ v: number }>(
+        'SELECT latest_committed_version AS v FROM investigations WHERE id=$1', [INV])).rows[0].v
+
       const outcome = await bridge.processIntake({
-        intakeId: probeId, material: currentMaterial, behaviors: XRAY_KE_001_ACCEPTANCE })
-      if (outcome.result !== 'NOT_COMMITTABLE') return `result ${outcome.result}`
-      const audit = await readExecutionAudit(db, outcome.executionRunId)
-      const failure = audit.journal.entries
+        intakeId: probeId, material: currentMaterial, behaviors: XRAY_KE_001_ACCEPTANCE,
+        detail: 'Re-graded against a record released under an information request.',
+      })
+      if (outcome.result !== 'COMMITTED') {
+        const audit = await readExecutionAudit(db, outcome.executionRunId)
+        const failed = audit.journal.entries
+          .map((entry) => (entry as { run?: { stage?: string; error?: string } }).run)
+          .filter((run) => run?.error !== undefined)
+        return `result ${outcome.result}: ${JSON.stringify(failed)}`
+      }
+      if (outcome.version !== before + 1) return `version ${outcome.version}`
+
+      // 17 — the changed claim is recorded. C001 is NOT in the origin gap's
+      // claim list, so this is also the "outside the origin gap" case.
+      if (!outcome.reEvaluatedClaimIds.includes(EXISTING_CLAIM))
+        return `re-evaluated ${JSON.stringify(outcome.reEvaluatedClaimIds)}`
+      const gapClaims = gapRow.claim_ids ?? []
+      const outsideGap = !gapClaims.includes(EXISTING_CLAIM)
+
+      // 20/21 — through the pipeline this time, not the persistence layer.
+      const audit = await readReEvaluationAudit(db, INV, outcome.version)
+      const row = audit.find((entry) => entry.claimId === EXISTING_CLAIM)
+      if (!row) return `no audit row for ${EXISTING_CLAIM}`
+      if (row.reason !== 'EXTERNAL_RECORD_RESPONSE') return `reason ${row.reason}`
+      const cause = row.causes?.[0]
+      if (!cause || cause.kind !== 'ATI_RESPONSE'
+        || cause.id !== `ATI_RESPONSE:${probe.intakeIds[0].split('/')[0]}:1`)
+        return `cause ${JSON.stringify(cause)}`
+      // Every listed claim has exactly one reason record; #7 checks that too.
+      if (audit.length !== outcome.reEvaluatedClaimIds.length)
+        return `${audit.length} audit rows for ${outcome.reEvaluatedClaimIds.length} claims`
+      // And the finding really was repaired: it now names the new evidence.
+      const committedGraph = await readSnapshot(db, INV, outcome.version)
+      const finding = committedGraph.findings.find(
+        (item) => item.claimId === EXISTING_CLAIM)!
+      const added = committedGraph.evidence.filter(
+        (item) => outcome.addedSourceIds.includes(item.sourceId))
+      if (added.length === 0) return 'no evidence came from the added source'
+      if (!added.every((item) => finding.supportingEvidenceIds.includes(item.id)))
+        return 'GRADE did not repair the finding it owed'
+      return outsideGap ? null : `${EXISTING_CLAIM} is in the origin gap, so 17 proves less`
+    })
+
+    // === the eight bounds on the exemption ================================
+
+    await check('E1 · the exemption is unavailable outside a successor re-evaluation', async () => {
+      // The same stages, the same evidence, run WITHOUT the successor flag.
+      const seed = await readSnapshot(db, INV, 2)
+      const { index: _index, version: _version, investigation, ...collections } = seed
+      const result = await runPipeline({
+        investigation: { ...investigation, status: 'RUNNING', stageRuns: [] },
+        seed: JSON.parse(JSON.stringify(collections)) as never,
+        stages: atiStagePlan({ sources: 1, bearOnExistingClaim: true, regradeExisting: true }),
+        adapters: { research: intakeResearchAdapter(material('x'), ATI_PROPOSAL) },
+        stopEvidence: { saturationObserved: true }, clock: () => AT,
+      })
+      if (result.status !== 'STAGE_FAILED') return `status ${result.status}`
+      const failure = result.journal.entries
         .map((entry) => (entry as { run?: { stage?: string; error?: string } }).run)
         .find((run) => run?.error !== undefined)
-      if (!failure) return 'the run failed without a journalled stage error'
-      if (failure.stage !== 'TRACE') return `failed at ${String(failure.stage)}`
+      return failure?.stage === 'TRACE'
+        && failure.error?.includes('XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH')
+        ? null : `failed as ${JSON.stringify(failure)}`
+    })
+
+    await check('E2 · the debt ends at GRADE: a GRADE that does not repair it fails', async () => {
+      const seed = await readSnapshot(db, INV, 2)
+      const { index: _index, version: _version, investigation, ...collections } = seed
+      const result = await runPipeline({
+        investigation: { ...investigation, status: 'RUNNING', stageRuns: [] },
+        seed: JSON.parse(JSON.stringify(collections)) as never,
+        // GRADE is scheduled, so the debt is permitted — and then GRADE
+        // declines to repair the finding it owes.
+        stages: atiStagePlan({ sources: 1, bearOnExistingClaim: true }),
+        adapters: { research: intakeResearchAdapter(material('x'), ATI_PROPOSAL) },
+        stopEvidence: { saturationObserved: true }, clock: () => AT,
+        successorReevaluation: true,
+      })
+      if (result.status !== 'STAGE_FAILED') return `status ${result.status}`
+      const failure = result.journal.entries
+        .map((entry) => (entry as { run?: { stage?: string; error?: string } }).run)
+        .find((run) => run?.error !== undefined)
+      if (failure?.stage !== 'GRADE') return `failed at ${String(failure?.stage)}`
       return failure.error?.includes('XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH')
-        ? null : `failed with: ${String(failure.error)}`
+        ? null : `GRADE failed with: ${String(failure.error)}`
     })
 
-    await check('B2 · BLOCKED: TRACE cannot repair the mismatch, because it does not own findings', async () => {
-      const probe = await filedWithRecords('ATI-D-BLOCKED-2',
-        [{ describedAs: 'Award notice', material: RECORD }])
-      const probeId = probe.intakeIds[0]
-      currentMaterial = material(probeId)
-      planOptions = { sources: 1, bearOnExistingClaim: true, traceWritesFinding: true, ran: [] }
-      const outcome = await bridge.processIntake({
-        intakeId: probeId, material: currentMaterial, behaviors: XRAY_KE_001_ACCEPTANCE })
-      if (outcome.result !== 'NOT_COMMITTABLE') return `result ${outcome.result}`
-      const audit = await readExecutionAudit(db, outcome.executionRunId)
-      const failure = audit.journal.entries
+    await check('E3 · no GRADE in the plan means no exemption at all', async () => {
+      const seed = await readSnapshot(db, INV, 2)
+      const { index: _index, version: _version, investigation, ...collections } = seed
+      const withoutGrade = atiStagePlan({ sources: 1, bearOnExistingClaim: true })
+        .filter((stage) => stage.stage !== 'GRADE')
+      const result = await runPipeline({
+        investigation: { ...investigation, status: 'RUNNING', stageRuns: [] },
+        seed: JSON.parse(JSON.stringify(collections)) as never,
+        stages: withoutGrade,
+        adapters: { research: intakeResearchAdapter(material('x'), ATI_PROPOSAL) },
+        stopEvidence: { saturationObserved: true }, clock: () => AT,
+        successorReevaluation: true,
+      })
+      if (result.status !== 'STAGE_FAILED') return `status ${result.status}`
+      const failure = result.journal.entries
         .map((entry) => (entry as { run?: { stage?: string; error?: string } }).run)
         .find((run) => run?.error !== undefined)
-      return failure?.error?.includes("wrote 'findings', which it does not own")
-        ? null : `failed with: ${String(failure?.error)}`
+      // Nothing will repair it, so it is a defect rather than debt, and it
+      // fails at the stage that created it.
+      return failure?.stage === 'TRACE'
+        && failure.error?.includes('XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH')
+        ? null : `failed as ${JSON.stringify(failure)}`
     })
 
-    await check('B3 · BLOCKED: so the evidence-driven audit set is provably empty, not merely absent', async () => {
-      // The consequence, stated exactly. The only currently representable
-      // committed path adds evidence on newly discovered claims, and
-      // changedClaimIds correctly filters those out — so no run can yet produce
-      // an EXTERNAL_RECORD_RESPONSE audit row through the pipeline.
-      const reEvaluated = committed?.result === 'COMMITTED' ? committed.reEvaluatedClaimIds : ['?']
-      if (reEvaluated.length !== 0) return `re-evaluated ${JSON.stringify(reEvaluated)}`
-      const rows = (await db.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM claim_reevaluation_audit
-          WHERE investigation_id=$1 AND version_number=3`, [INV])).rows
-      if (rows[0].n !== 0) return `${rows[0].n} audit rows at the ATI-committed version`
-      // And the existing claim is genuinely present and graded, so the empty
-      // set is the blocker's consequence rather than a missing fixture.
-      const v3 = await readSnapshot(db, INV, 3)
-      return v3.claims.some((claim) => claim.id === EXISTING_CLAIM)
-        && v3.findings.some((finding) => finding.claimId === EXISTING_CLAIM)
-        ? null : `${EXISTING_CLAIM} is not a graded claim at v3`
+    await check('E4 · PROVENANCE survives the inherited mismatch one stage later', async () => {
+      // The subtlety a TRACE-only exemption would have missed: the mismatch is
+      // still there when the next stage's boundary is checked.
+      const probeRan: string[] = []
+      const seed = await readSnapshot(db, INV, 2)
+      const { index: _index, version: _version, investigation, ...collections } = seed
+      const result = await runPipeline({
+        investigation: { ...investigation, status: 'RUNNING', stageRuns: [] },
+        seed: JSON.parse(JSON.stringify(collections)) as never,
+        stages: atiStagePlan({ sources: 1, bearOnExistingClaim: true,
+          regradeExisting: true, ran: probeRan }),
+        adapters: { research: intakeResearchAdapter(material('x'), ATI_PROPOSAL) },
+        stopEvidence: { saturationObserved: true }, clock: () => AT,
+        successorReevaluation: true,
+      })
+      if (result.status !== 'COMPLETED') return `status ${result.status}`
+      for (const between of ['PROVENANCE', 'DISCONFIRM', 'RECONCILE']) {
+        if (!probeRan.includes(between)) return `${between} did not run`
+      }
+      return result.validation?.valid === true
+        ? null : 'the FULL gate rejected the repaired graph'
+    })
+
+    await check('E5 · no validator was weakened: both modes still report the mismatch', async () => {
+      // The exemption is a rule about when a transition is acceptable, not
+      // about what is valid. Build the exact intermediate state the debt
+      // describes and check it directly.
+      const seed = await readSnapshot(db, INV, 2)
+      const bearing = seed.evidence.find(
+        (item) => item.claimIds.includes(EXISTING_CLAIM as never))!
+      const withUnmirrored = createXRayGraph({
+        ...(graphOf(seed) as unknown as Parameters<typeof createXRayGraph>[0]),
+        evidence: [...seed.evidence, { ...bearing, id: 'EV-DEBT-PROBE' }],
+      })
+      for (const mode of ['STAGED', 'FULL'] as const) {
+        const reported = validateXRayGraph(withUnmirrored, { mode }).violations
+          .filter((violation) => violation.code === 'XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH')
+        if (reported.length === 0) return `${mode} no longer reports the mismatch`
+        if (reported.some((violation) => violation.severity !== 'ERROR'))
+          return `${mode} downgraded the mismatch below ERROR`
+      }
+      // And the exemption is stated once, for one code, in one place.
+      const runSource = stripComments(
+        readFileSync(new URL('../pipeline/run.ts', import.meta.url), 'utf8'))
+      const occurrences = runSource.split('FINDING_EVIDENCE_LIST_MISMATCH').length - 1
+      if (occurrences !== 1) return `${occurrences} references to the exempted code`
+      const guards = ['successorReevaluation === true', "byStage.has('GRADE')",
+        "!alreadyDone.has('GRADE')", "RESEARCH_STAGES.indexOf('GRADE')"]
+      const missing = guards.filter((guard) => !runSource.includes(guard))
+      return missing.length === 0 ? null : `the exemption lacks: ${missing.join(', ')}`
     })
 
     void seeded

@@ -395,12 +395,14 @@ happens to look like one. Newly discovered claims receive their first
 evaluation and are not listed as re-evaluated; `changedClaimIds` already filters
 to claims present in the predecessor.
 
-> **Known blocker, recorded 2026-09-21.** New evidence bearing on an
-> already-graded claim cannot currently cross a stage boundary: `TRACE` trips
-> `XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH` because the finding cannot mirror
-> evidence that appeared after it was graded, and `TRACE` cannot repair that
-> because it does not own `findings`. This affects every re-evaluation trigger,
-> not only ATI. See `verification/issue-10-10d/report.md`.
+Re-grading an existing claim on new evidence needs one more thing to be
+possible at all: a pre-`GRADE` stage that adds such evidence leaves the
+inherited finding no longer mirroring `Evidence.relationship`, and cannot repair
+it because it does not own `findings`. `runPipeline` therefore permits exactly
+that mismatch as bounded staged debt until `GRADE` takes its turn — see the
+XR-INV-007 amendment in
+[validation-and-invariants.md](validation-and-invariants.md#xr-inv-007--findings-must-be-reversible).
+The rule is generic to all successor re-evaluation, not ATI-specific.
 
 ---
 

@@ -1,0 +1,39 @@
+Adversarial runs — evidence that each bound on the staged-debt exemption is
+load-bearing. Each variant widens the exemption by exactly one bound in
+lib/xray/pipeline/run.ts and re-runs the 10d gate.
+
+########################################################################
+# W1 · drop the successor-re-evaluation bound
+#   (any run may carry the debt, including a first research run)
+########################################################################
+FAIL  E1 · the exemption is unavailable outside a successor re-evaluation — status COMPLETED
+FAIL  E5 · no validator was weakened: both modes still report the mismatch — the exemption lacks: successorReevaluation === true
+29/31 ATI research checks passed
+
+########################################################################
+# W2 · drop the before-GRADE bound (the debt would survive GRADE itself)
+########################################################################
+FAIL  E2 · the debt ends at GRADE: a GRADE that does not repair it fails — status GATE_BLOCKED
+FAIL  E5 · no validator was weakened: both modes still report the mismatch — the exemption lacks: RESEARCH_STAGES.indexOf('GRADE')
+29/31 ATI research checks passed
+
+########################################################################
+# W3 · drop the GRADE-is-scheduled bound (debt nothing will ever repair)
+########################################################################
+FAIL  E3 · no GRADE in the plan means no exemption at all — failed as {"id":"SR-006","investigationId":"XRAY-ATI-RESEARCH","stage":"GAPS","status":"FAILED","inputArtifactVersion":5,"startedAt":"2026-09-20T12:00:00Z","completedAt":"2026-09-20T12:00:00Z","error":"stage GAPS introduced 1 validation error(s): XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH"}
+FAIL  E5 · no validator was weakened: both modes still report the mismatch — the exemption lacks: byStage.has('GRADE'), !alreadyDone.has('GRADE')
+29/31 ATI research checks passed
+
+########################################################################
+# W4 · widen from one code to every XR-INV-007 violation
+########################################################################
+FAIL  E5 · no validator was weakened: both modes still report the mismatch — 0 references to the exempted code
+30/31 ATI research checks passed
+
+########################################################################
+# R1 · remove the exemption entirely (the state before the decision)
+########################################################################
+FAIL  17/20/21 · a re-graded existing claim is recorded with its exact response cause — result NOT_COMMITTABLE: [{"id":"SR-002","investigationId":"XRAY-ATI-RESEARCH","stage":"TRACE","status":"FAILED","inputArtifactVersion":1,"startedAt":"2026-09-20T12:00:00Z","completedAt":"2026-09-20T12:00:00Z","error":"stage TRACE introduced 1 validation error(s): XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH"}]
+FAIL  E2 · the debt ends at GRADE: a GRADE that does not repair it fails — failed at TRACE
+FAIL  E4 · PROVENANCE survives the inherited mismatch one stage later — status STAGE_FAILED
+28/31 ATI research checks passed

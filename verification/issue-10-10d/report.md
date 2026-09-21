@@ -1,80 +1,96 @@
 # Slice 10d — research bridge from ATI intake to immutable successor version
 
-**Released from:** `25e26c7`
-**Commits:** `5df8944` persistence → `75f2635` execution primitive → `6cf3357` bridge → `bc04331` gate → `docs(ati)`
-**Gate:** `pnpm check:ati-research` — **28/28**
+**Released from:** `25e26c7` · **blocker decided, remediated**
+**Commits:** `5df8944` persistence → `75f2635` execution primitive → `6cf3357` bridge → `bc04331` gate → `bdbeb65` docs → `feat(pipeline)` staged debt + `test(ati)` bounds
+**Gate:** `pnpm check:ati-research` — **31/31**
 **Migration:** `0013_ati_response_identity_and_execution_cause`
 
 ---
 
-## Read this first — one blocker, proven three ways
+## The blocker, and its approved resolution
 
-**New evidence bearing on an already-graded claim cannot cross a stage
-boundary.** Found while building this slice, and it blocks the release's own
-central acceptance rule (§K/§M items 17, 20, 21).
-
-The pipeline validates the graph after every stage and fails the stage on any
-error it introduced. When `TRACE` adds evidence bearing on a claim the
-predecessor already graded, the inherited finding no longer mirrors
-`Evidence.relationship`, so:
+**Found:** new evidence bearing on an already-graded claim could not cross a
+stage boundary. A successor candidate is seeded with the predecessor's graded
+findings; the moment a pre-`GRADE` stage adds evidence on one of those claims
+the inherited finding stops mirroring `Evidence.relationship`, and no stage
+before `GRADE` can repair it because `STAGE_OUTPUTS` gives `findings` to `GRADE`
+and `GAPS` only. Generic to every re-evaluation trigger, not ATI-specific.
 
 ```text
 stage TRACE introduced 1 validation error(s): XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH
-```
-
-`TRACE` cannot repair it, because `STAGE_OUTPUTS` does not give it `findings`:
-
-```text
 stage TRACE wrote 'findings', which it does not own
   (owns: claims, sources, evidence, sourcePositions)
 ```
 
-And only `TRACE` and `DISCONFIRM` may write evidence; neither may write
-findings. So **no single stage can add evidence to a graded claim and leave the
-mirror true**, and the run never reaches `GRADE`, which is the stage that would
-fix it.
+**Decided:** the mismatch is permitted as explicit staged debt during a
+successor-version re-evaluation, from the first pre-`GRADE` evidence change
+until `GRADE` takes its turn. Implemented as `isStagedDebt` in
+`pipeline/run.ts`, beside the `GRADE`/`GAPS` exemption 6a already put there —
+both say the same thing: a stage may not be failed for debt the stage that will
+pay it has not yet had a turn to pay.
 
-Checks **B1**, **B2** and **B3** assert exactly this. B3 also asserts that the
-claim in question really is present and graded at the committed version, so the
-empty audit set is the blocker's consequence and not a missing fixture.
+**The decision widened the fix I had proposed, and correctly.** I had suggested
+a `TRACE`-only exemption. That would have failed one stage later:
+`PROVENANCE`'s own boundary check sees the same inherited mismatch, because
+nothing between `TRACE` and `GRADE` repairs it. Check **E4** exists for exactly
+that, and asserts `PROVENANCE`, `DISCONFIRM` and `RECONCILE` all pass through
+before `GRADE` repays.
 
-**Why it never appeared before.** On a first research run there are no findings
-when `TRACE` runs, so the mirror check has nothing to check. It only bites on a
-run seeded from a *graded predecessor* — which is what a re-evaluation is, and
-which nothing before 10d did. **It therefore affects every re-evaluation
-trigger**, not only `ATI_RESPONSE_RECEIVED`: `NEW_SOURCE_RECEIVED` has the same
-problem.
+### Each bound, and the check that holds it shut
 
-**What I did not do.** The remediation is one more narrow `STAGED` exemption in
-`pipeline/run.ts`, beside the one 6a already added there:
+| Bound | Check | What it asserts |
+| --- | --- | --- |
+| successor re-evaluation only | **E1** | the same stages and evidence without the flag still fail at `TRACE` |
+| before `GRADE` only; debt ends at `GRADE` | **E2** | a `GRADE` that declines to repair the finding fails, at `GRADE` |
+| `GRADE` scheduled and still to run | **E3** | with `GRADE` removed from the plan, `TRACE` fails as before |
+| one code only; `FULL` untouched | **E5** | both `STAGED` and `FULL` still report the mismatch as `ERROR`; the code appears once in `run.ts`; all four guards present |
+| nothing before `GRADE` fails on inherited debt | **E4** | `PROVENANCE`/`DISCONFIRM`/`RECONCILE` pass, and the FULL gate accepts the repaired graph |
 
-```ts
-// existing, 6a
-stage === 'GRADE' && journal.staleStages().includes('GAPS')
-  && v.code === 'XR-INV-008/UNRESOLVED_FINDING_WITHOUT_GAP'
+`FULL` is untouched in the strongest sense: **no validator changed at all.**
+E5 constructs the exact intermediate state and asserts `validateXRayGraph`
+reports the mismatch as an `ERROR` in *both* modes. The exemption is a rule
+about when a transition is acceptable, not about what is valid, and the
+`VALIDATE` gate's FULL pass sees the final state with no exemption.
 
-// proposed shape, same reasoning: the stage that will fix it has not run yet
-stage === 'TRACE' && /* GRADE still pending in this pass */
-  && v.code === 'XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH'
-```
+### The bounds are load-bearing, not decorative
 
-That is #6's validation transition rule, not 10d's, and the same kind of
-decision as D15 and the rejected `GRADE`/`GAPS` reordering. I have not changed
-it. Everything not downstream of it is delivered and proven below.
+`verification/issue-10-10d/exemption-bounds.txt` widens the exemption by one
+bound at a time:
 
-### What this costs, precisely
-
-| Released item | Status |
+| Variant | Result |
 | --- | --- |
-| 17 · changed claim outside origin gap included | **unprovable today** — no run can change an existing claim |
-| 20 · re-evaluated claim gets `EXTERNAL_RECORD_RESPONSE` | proven at the **persistence** layer (check 20/21/22), vacuous through the pipeline |
-| 21 · cause references the exact durable response | same |
-| 16, 18, 19 · gap claims not used; unchanged gap claim absent; discovered claim not re-evaluated | **proven** — and strongly, because the gap names claims and the recorded set is empty |
+| **W1** drop the successor bound | E1 fails — a first research run carries the debt |
+| **W2** drop the before-`GRADE` bound | E2 fails — the run reaches `GATE_BLOCKED`, so FULL catches what the transition let through |
+| **W3** drop the scheduled-`GRADE` bound | E3 fails — the failure merely moves to `GAPS` |
+| **W4** widen to all `XR-INV-007` codes | E5 fails |
+| **R1** remove the exemption entirely | 17/20/21, E2 and E4 fail — the pre-decision state |
 
-The committed happy path works: a received record becomes a canonical `Source`,
-a new version commits with `ATI_RESPONSE_RECEIVED`, and the acceptance mapping
-is written inside the commit. What it cannot yet do is re-grade a claim that
-already had a grade.
+**One honest limitation.** W4 is caught by the **structural** assertion in E5
+only, not behaviourally: no other `XR-INV-007` violation arises in these runs,
+so widening the code match is invisible to the run outcomes. The check asserts
+the single code appears exactly once in `run.ts` and that all four guards are
+present, which is a claim about the code rather than about behaviour.
+
+### What the decision unblocked
+
+| Released item | Before | Now |
+| --- | --- | --- |
+| 17 · changed claim outside origin gap included | unprovable | **proven** through the pipeline |
+| 20 · re-evaluated claim gets `EXTERNAL_RECORD_RESPONSE` | persistence layer only | **proven** through the pipeline |
+| 21 · cause references the exact durable response | persistence layer only | **proven** through the pipeline |
+
+Check **17/20/21** now drives the whole path: evidence bearing on `C001`, which
+v2 already graded; `GRADE` repairs the finding; the successor commits; `C001`
+appears in `reEvaluatedClaimIds` with reason `EXTERNAL_RECORD_RESPONSE` and
+cause `{ATI_RESPONSE, ATI_RESPONSE:ATI-D-REGRADE:1}`. It also asserts `C001` is
+**not** in the origin gap's claim list, so this is simultaneously the
+"outside the origin gap" case, and that the committed finding really does name
+the evidence that arrived — `GRADE` paid the debt rather than the check merely
+tolerating it.
+
+Checks 16/18/19 still prove the converse on the discovered-claim path: the gap
+names claims, none changed, the recorded set is empty, and the newly discovered
+claim is absent from it.
 
 ---
 
@@ -281,11 +297,11 @@ exactly one committed.
 | 14 | required downstream stages run | 14 |
 | 15 | Source ids from stage output | 15 |
 | 16 | origin gap claim ids not used | 16/18/19 |
-| 17 | changed claim outside origin gap included | **BLOCKED** — B1/B2/B3 |
+| 17 | changed claim outside origin gap included | 17/20/21 |
 | 18 | unchanged origin-gap claim absent | 16/18/19 |
 | 19 | discovered claim not marked re-evaluated | 16/18/19 |
-| 20 | re-evaluated claim gets EXTERNAL_RECORD_RESPONSE | 20/21/22 (persistence layer) |
-| 21 | cause references exact durable response | 20/21/22 |
+| 20 | re-evaluated claim gets EXTERNAL_RECORD_RESPONSE | 17/20/21 (pipeline) and 20/21/22 (persistence) |
+| 21 | cause references exact durable response | 17/20/21 and 20/21/22 |
 | 22 | cause has relational integrity | 20/21/22 |
 | 23 | trigger is ATI_RESPONSE_RECEIVED | 23 |
 | 24 | VALIDATE runs | 14 |
@@ -312,10 +328,16 @@ exactly one committed.
 
 ## Changes to existing green gates
 
-One, mechanical: `commitFurtherVersion` in `publication-check-support.ts` takes
-an optional `reEvaluationAudit` override, so a gate can exercise a specific
-reason and cause. The claim ids must still match what the candidate changed;
-`commitNextVersion` checks that itself.
+Two.
+
+1. `pipeline/run.ts` — the approved staged-debt exemption. The two existing
+   exemptions now live in one documented predicate, `isStagedDebt`, instead of
+   an inline condition. `check:pipeline` 54/54 and `check:validation` 52/52
+   after it, and no validator was modified.
+2. `commitFurtherVersion` in `publication-check-support.ts` takes an optional
+   `reEvaluationAudit` override, so a gate can exercise a specific reason and
+   cause. The claim ids must still match what the candidate changed;
+   `commitNextVersion` checks that itself.
 
 ## Stop line (release §W) — nothing added
 
@@ -324,7 +346,6 @@ notification delivery, no publication changes, no demo workflow.
 
 ## Carried forward
 
-- **The stage-boundary blocker above.** Needs a #6 decision.
 - Native PostgreSQL concurrent commit remains unproven —
   `check:persistence-postgres-concurrency` is recorded **NOT RUN**.
   Predecessor conflict is proven deterministically by committing a competing
@@ -333,5 +354,6 @@ notification delivery, no publication changes, no demo workflow.
 
 ## Files
 
+- `verification/issue-10-10d/exemption-bounds.txt` — five runs widening or removing the staged-debt exemption
 - `verification/issue-10-10d/gate-bites.txt` — three adversarial runs, one per released constraint
-- `verification/issue-10-10d/final-gate.txt` — 28/28 plus the full sweep
+- `verification/issue-10-10d/final-gate.txt` — 31/31 plus the full sweep

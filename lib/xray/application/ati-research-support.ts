@@ -36,10 +36,19 @@ export interface AtiStagePlanOptions {
   /**
    * Bear the new evidence on an already-graded claim.
    *
-   * Currently unrepresentable — see the blocker recorded in the 10d report.
-   * Kept so the gate can prove the failure rather than describe it.
+   * This is the case the staged-debt exemption exists for: the inherited
+   * finding stops mirroring `Evidence.relationship` the moment `TRACE` adds
+   * the evidence, and only `GRADE` can repair it.
    */
   bearOnExistingClaim?: boolean
+
+  /**
+   * `GRADE` repairs the finding it owes.
+   *
+   * Left off deliberately in one check, so the gate can prove `GRADE` fails
+   * when it declines to pay the debt.
+   */
+  regradeExisting?: boolean
   /** TRACE also writes a finding, which it does not own. For the same reason. */
   traceWritesFinding?: boolean
   /** Collects what each stage did, so a gate can assert the stages ran. */
@@ -204,12 +213,39 @@ export function atiStagePlan(options: AtiStagePlanOptions = {}): readonly StageD
       stage: 'GRADE',
       run(ctx) {
         note('GRADE')
-        if (discovered.length === 0) return {}
-        // Each discovered claim gets its FIRST evaluation. Re-grading an
-        // existing claim on the new evidence is what the blocker prevents.
+        const repaired: Finding[] = []
+
+        // Pay the staged debt: re-mirror the inherited finding against the
+        // evidence that arrived before this stage. If this is skipped, GRADE's
+        // own boundary fails, which is what bounds the exemption.
+        if (options.regradeExisting) {
+          const existing = ctx.graph.findings.find(
+            (finding) => finding.claimId === EXISTING_CLAIM)
+          if (existing) {
+            const bearing = ctx.graph.evidence
+              .filter((item) => item.claimIds.includes(EXISTING_CLAIM as never))
+            repaired.push({
+              ...existing,
+              supportingEvidenceIds: bearing
+                .filter((item) => item.relationship === 'SUPPORTS').map((item) => item.id),
+              challengingEvidenceIds: bearing
+                .filter((item) => item.relationship === 'CHALLENGES'
+                  || item.relationship === 'CONTRADICTS').map((item) => item.id),
+              contextualEvidenceIds: bearing
+                .filter((item) => item.relationship === 'CONTEXTUALIZES').map((item) => item.id),
+              rationale: `${existing.rationale} A record released under an information request was considered.`,
+            })
+          }
+        }
+
+        if (discovered.length === 0) {
+          return repaired.length > 0 ? { findings: repaired } : {}
+        }
+        // Each discovered claim gets its FIRST evaluation, never a
+        // re-evaluation: a claim the article never made had no prior grade.
         const template = ctx.graph.findings[0] as Finding
         return {
-          findings: discovered.map((claimId) => {
+          findings: [...repaired, ...discovered.map((claimId) => {
             const bearing = ctx.graph.evidence
               .filter((item) => item.claimIds.includes(claimId as never))
             return {
@@ -225,7 +261,7 @@ export function atiStagePlan(options: AtiStagePlanOptions = {}): readonly StageD
               gapIds: [],
               rationale: 'The released record is the only record bearing on this claim.',
             }
-          }),
+          })],
         }
       },
     },

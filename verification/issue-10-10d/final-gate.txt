@@ -1,4 +1,4 @@
-Slice 10d final gate.
+Slice 10d final gate — after the approved staged-debt exemption.
 
 === pnpm check:ati-research (10d) ===
 ok    1 · an unknown intake is rejected before any run exists
@@ -26,11 +26,14 @@ ok    35 · an intake already accepted is not researched a second time
 ok    36 · an uncommitted prior run leaves the intake processable
 ok    37 · the run's execution audit stays restart and resume compatible
 ok    39 · research changed no ATI action-lifecycle row
-ok    B1 · BLOCKED: new evidence on an already-graded claim fails at the stage boundary
-ok    B2 · BLOCKED: TRACE cannot repair the mismatch, because it does not own findings
-ok    B3 · BLOCKED: so the evidence-driven audit set is provably empty, not merely absent
+ok    17/20/21 · a re-graded existing claim is recorded with its exact response cause
+ok    E1 · the exemption is unavailable outside a successor re-evaluation
+ok    E2 · the debt ends at GRADE: a GRADE that does not repair it fails
+ok    E3 · no GRADE in the plan means no exemption at all
+ok    E4 · PROVENANCE survives the inherited mismatch one stage later
+ok    E5 · no validator was weakened: both modes still report the mismatch
 
-28/28 ATI research checks passed
+31/31 ATI research checks passed
 
 === the ATI slices ===
 check:ati-lifecycle        28/28 passed
