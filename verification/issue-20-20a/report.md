@@ -6,7 +6,7 @@ Composition only. No provider network call exists, because no factory exists.
 > **Amendment (review response).** The factory configuration boundary is
 > narrowed, the resolution slot now uses `ProviderSlot` and preserves the exact
 > absent slot, and the "Five states" comment says six. See *Amendment* below.
-> First submission `6d9b01d`; amendment ``a4e2b51``.
+> First submission `6d9b01d`; amendment on top of it (this branch head).
 
 ## What was added
 
