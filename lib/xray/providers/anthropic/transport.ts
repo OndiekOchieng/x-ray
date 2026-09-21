@@ -27,9 +27,10 @@
  * CLASSIFICATION READS TYPES AND HEADERS, NOT PROSE
  * ================================================
  * `classifyHttpFailure` prefers the HTTP status, the documented `error.type`,
- * and documented headers. A message is prose that can quote the request, and
- * the request carries the material under investigation — so exactly one
- * condition reads one, under two guards. See `isSpendLimit`.
+ * and what documented headers positively state. A message is prose that can
+ * quote the request, and the request carries the material under investigation
+ * — so exactly one condition reads one, under two guards. See `isSpendLimit`.
+ * And no header's absence is ever read as a diagnosis.
  *
  * NO RETRY HERE
  * =============
@@ -287,10 +288,15 @@ const RESOLVE_BILLING =
  *
  *   1. HTTP status, where the status alone is decisive (401, 402, 403, 404, 413).
  *   2. The documented `error.type`.
- *   3. Documented headers — `retry-after` is what separates ordinary rate
- *      limiting from a spend cap, because both carry `rate_limit_error`.
+ *   3. Documented headers, for what they positively state. A header's
+ *      *absence* is not a signal: it can be stripped by a proxy or unset by
+ *      the edge that answered, so nothing is diagnosed from it.
  *   4. The `error.message`, and only when it is demonstrably the provider
  *      speaking rather than our own request echoed back.
+ *
+ * `EXHAUSTED` therefore requires a *positive* billing signal — 402 /
+ * `billing_error`, or a trusted spend-limit statement — never an inference
+ * from something that was not there.
  *
  * And the three destinations:
  *
@@ -348,32 +354,35 @@ function classifyHttpFailure(
       'Reduce the material offered to this stage, or split the work.')
   }
 
-  // --- 2. rate limiting, split on the documented header ------------------
+  // --- 2. rate limiting ---------------------------------------------------
 
   /*
-   * Both forms carry `rate_limit_error`, so the type cannot separate them.
-   * Ordinary rate limiting is documented as carrying `retry-after`; the
-   * usage-tier / monthly spend-cap form is documented as lacking it and as
-   * continuing to fail until access resumes.
+   * Both forms of 429 are retryable as far as this layer can tell.
    *
-   * So a 429 without `retry-after` is treated as a spend cap. The tradeoff is
-   * stated in the report: a proxy that strips the header downgrades a
-   * retryable limit to a disclosed capability gap, which is recoverable and
-   * visible. The opposite mistake — retrying a spend cap until the stage
-   * exhausts its attempts — reports a billing state as a broken investigation.
+   * Anthropic documents that a usage-tier spend-cap 429 carries no
+   * `retry-after`. That does not establish the converse: a 429 lacking the
+   * header is not thereby a spend cap. A header can be absent because a proxy
+   * stripped it, because the edge that answered did not set it, or for reasons
+   * this layer has no view of — and converting an absence into a positive
+   * billing diagnosis would report a billing state X-Ray has no evidence for.
+   *
+   * So both forms are `TRANSIENT`, and the header-less form says what it is
+   * uncertain about instead of deciding. `EXHAUSTED` requires a positive
+   * signal: 402 / `billing_error`, or a trusted spend-limit statement.
    */
   if (status === 429 || error.type === 'rate_limit_error') {
     const retryAfter = response.headers.get('retry-after')
-    if (retryAfter !== null && retryAfter.trim() !== '') {
+    const stated = retryAfter === null ? '' : retryAfter.trim()
+    if (stated !== '') {
       throw new AdapterFailure(request.operation, 'TRANSIENT',
         `Anthropic rate-limited this request (${label})${where}.`
-        + ` It may succeed after ${retryAfter.trim()} seconds.`)
+        + ` It may succeed after ${stated} seconds.`)
     }
-    return capability('EXHAUSTED',
-      `Anthropic returned a rate limit with no retry-after (${label})${where},`
-      + ' which is the documented shape of a usage-tier or spend cap rather than'
-      + ' ordinary rate limiting.',
-      RESOLVE_BILLING)
+    throw new AdapterFailure(request.operation, 'TRANSIENT',
+      `Anthropic rate-limited this request with no retry-after (${label})${where}.`
+      + ' It may succeed on another attempt. Anthropic also documents this shape'
+      + ' for usage-tier and monthly spend caps, so if it keeps failing, check the'
+      + " account's credit and its organization/workspace spend limits.")
   }
 
   // --- 3. retryable service failures -------------------------------------

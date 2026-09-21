@@ -10,7 +10,8 @@ ok    8 · a handle the stage did not offer is rejected
 ok    9 · no canonical id ever reaches the provider
 ok    10 · a provider cannot assert what a stage owns
 ok    11 · HTTP failures map onto the documented error semantics
-ok    11b · the two forms of 429 are told apart by retry-after
+ok    11b · both forms of 429 are transient, and neither diagnoses billing
+ok    11b2 · a missing header alone can never produce EXHAUSTED
 ok    11c · a 400 spend limit is EXHAUSTED; an ordinary 400 is PERMANENT
 ok    11d · investigated material cannot make a failure look like a spend limit
 ok    11e · classification never reads the raw body, only typed fields
@@ -27,7 +28,7 @@ ok    21 · every reviewer query kind has an authored question
 ok    22 · the request is a forced tool call carrying the cutoff
 ok    23 · an unobtained document is presented as unobtained
 
-27/27 Anthropic adapter checks passed
+28/28 Anthropic adapter checks passed
 Every call went to 127.0.0.1. No request left this machine.
 
 === pnpm check:providers ===
@@ -35,7 +36,7 @@ ok    stop line · prompts stay inside the prompt module
 
 20/20 provider composition checks passed
 
-=== failure mapping, as the gate exercises it (amended) ===
+=== failure mapping (final) ===
 signal read                                     outcome                  reason / disposition
 ----------------------------------------------  -----------------------  --------------------
 401  |  authentication_error                    CapabilityUnavailable    NOT_CONFIGURED
@@ -44,10 +45,10 @@ signal read                                     outcome                  reason 
 402  |  billing_error                           CapabilityUnavailable    EXHAUSTED
 413  |  request_too_large                       CapabilityUnavailable    REFUSED_FOR_INPUT
        stop_reason: refusal                     CapabilityUnavailable    REFUSED_FOR_INPUT
-429 rate_limit_error  WITH retry-after          AdapterFailure           TRANSIENT
-429 rate_limit_error  WITHOUT retry-after       CapabilityUnavailable    EXHAUSTED  (documented spend-cap shape)
 400 invalid_request_error + trusted spend msg   CapabilityUnavailable    EXHAUSTED
 400 invalid_request_error, anything else        AdapterFailure           PERMANENT
+429 rate_limit_error  WITH retry-after          AdapterFailure           TRANSIENT  (+ the stated delay)
+429 rate_limit_error  WITHOUT retry-after       AdapterFailure           TRANSIENT  (+ what to check if it persists)
 408, 409                                        AdapterFailure           TRANSIENT
 500, 502, 503, 504, 529  |  api_error,
   overloaded_error, timeout_error               AdapterFailure           TRANSIENT
@@ -58,29 +59,39 @@ any other 4xx                                   AdapterFailure           PERMANE
 malformed or invalid structured answer          AdapterFailure           PERMANENT
 a handle that was not offered                   AdapterFailure           PERMANENT
 
-Signals are read in order of how much they can be trusted:
+Signals are read in order of how far they can be trusted:
   1. HTTP status, where it decides alone            (401, 402, 403, 404, 413)
   2. the documented error.type, filtered to a closed vocabulary
-  3. documented headers   (retry-after separates the two forms of 429)
+  3. documented headers, for what they POSITIVELY state. A header's absence is
+     never read as a diagnosis: it can be stripped by a proxy or unset by the
+     edge that answered.
   4. error.message — ONE condition only (400 spend limit), under two guards:
        the message must be <= 400 characters, and must contain no 24-character
        run that also appears in the request we sent.
 
+EXHAUSTED requires a POSITIVE billing signal — 402 / billing_error, or a
+trusted spend-limit statement. It is never inferred from something absent.
+
 === negative controls (each reverted immediately) ===
-All re-run against the amended classifier, not carried forward. The original
-control C ("a rate limit stops being transient") edited a branch the amendment
-replaced, so it is superseded by G rather than restated.
+All re-run against the final classifier. Control C (an earlier "a rate limit
+stops being transient") and control G ("every 429 treated as ordinary rate
+limiting") are both retired: G describes what the code now correctly does, so
+it can no longer be a control. J replaces them.
 
 A  presentClaim leaks the canonical id                → FAIL 9   (classify: a canonical id was sent to the provider)
 B  the decoder stops checking the offered scope       → FAIL 8   (an invented claim handle: was accepted)
 D  the key is put in the prompt                       → FAIL 15  (the key was in the request body)
 E  a reviewer may target an artifact it was not shown → FAIL 19  (an id that was not in the query: was accepted)
-
-amendment controls:
 F  back to phrase-matching the whole response body    → FAIL 11c, 11d, 11e
      11c  a genuine spend message was missed entirely
-     11d  "an echoed 400 did not fail"  — the defect this amendment closes
+     11d  "an echoed 400 did not fail"
      11e  "classification still reads the raw body"
-G  every 429 treated as ordinary rate limiting        → FAIL 11b
-H  the 402 billing branch removed                     → FAIL 11  (402 became PERMANENT)
+H  the 402 billing branch removed                     → FAIL 11, 11b2
+     11   402 became PERMANENT
+     11b2 a 429 carrying billing_error stopped being EXHAUSTED — which is the
+          positive-signal path doing the work, not the header
 I  the echo guard removed                             → FAIL 11d ("an echoed 400 did not fail")
+J  a missing retry-after inferred to be a spend cap   → FAIL 11b, 11b2
+     11b   "no retry-after: did not fail"
+     11b2  "bare 429: produced EXHAUSTED from no positive signal"
+     J is the defect this final amendment removes.

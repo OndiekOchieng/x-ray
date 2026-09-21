@@ -5,13 +5,15 @@ Both model adapters are implemented. **No retrieval, no runtime registration,
 no live URL.** Every 20a boundary is preserved; three 20a checks were re-aimed
 rather than relaxed (see *The 20a gate*).
 
-> **Amendment (review response).** Failure classification now reads HTTP
-> status, the documented `error.type` and documented headers, in that order of
-> trust. 402 `billing_error` and the documented retry-after-less 429 spend-cap
-> shape become `EXHAUSTED`; the two forms of 429 are told apart by
-> `retry-after`; and exactly one condition reads `error.message`, under two
-> guards, so investigated material echoed back by the provider can no longer
-> steer classification. See *Amendment* below. First submission `1e9b11c`.
+> **Amendment (review response), in two rounds.** Failure classification reads
+> HTTP status, the documented `error.type`, and what documented headers
+> *positively state* — in that order of trust. 402 `billing_error` and a
+> trusted 400 spend-limit statement are `EXHAUSTED`. **Both forms of 429 are
+> `TRANSIENT`**: a missing `retry-after` is not a positive signal of anything.
+> Exactly one condition reads `error.message`, under two guards, so
+> investigated material echoed back by the provider cannot steer
+> classification. See *Amendment* below. First submission `1e9b11c`;
+> classification round one `847bd3c`.
 
 ## What was added
 
@@ -115,7 +117,7 @@ phrase list.
 ```
 1. HTTP status, where it decides alone            401, 402, 403, 404, 413
 2. the documented error.type                      filtered to a closed vocabulary
-3. documented headers                             retry-after separates the two 429s
+3. documented headers                             for what they POSITIVELY state
 4. error.message                                  ONE condition, under two guards
 ```
 
@@ -130,8 +132,8 @@ than as something to branch on.
 | **402 / `billing_error`** | **`EXHAUSTED`** |
 | 413 / `request_too_large` | `REFUSED_FOR_INPUT` |
 | `stop_reason: refusal` | `REFUSED_FOR_INPUT` |
-| **429 `rate_limit_error` *with* `retry-after`** | **`TRANSIENT`** (value reported to the operator) |
-| **429 `rate_limit_error` *without* `retry-after`** | **`EXHAUSTED`** — documented spend-cap shape |
+| **429 `rate_limit_error` *with* `retry-after`** | **`TRANSIENT`** — the stated delay is reported to the operator |
+| **429 `rate_limit_error` *without* `retry-after`** | **`TRANSIENT`** — and the message says what to check if it persists |
 | **400 `invalid_request_error` + a trusted spend message** | **`EXHAUSTED`** |
 | 400 `invalid_request_error`, anything else | `PERMANENT` |
 | 408, 409, 5xx, `api_error`, `overloaded_error`, `timeout_error` | `TRANSIENT` |
@@ -164,14 +166,47 @@ body at all. It asserts no `test(body)` / `body.includes` remains, that the body
 is still *parsed*, and that the error type is filtered against the closed
 vocabulary.
 
-### The tradeoff I am taking, stated plainly
+### Round two: I had inferred the converse
 
-A 429 without `retry-after` is treated as a spend cap. If a proxy strips the
-header, an ordinary rate limit is downgraded to a disclosed capability gap —
-recoverable, visible, and actionable (`resolvedBy` names the spend limit). The
-opposite mistake is worse: retrying a spend cap until the stage exhausts its
-attempts reports a billing state as a broken investigation. I have taken the
-recoverable error, but it is a judgement, not a derivation.
+Round one treated a 429 without `retry-after` as a spend cap, on the grounds
+that Anthropic documents the spend-cap form as lacking the header. That is the
+converse of what the documentation establishes, and it does not follow: a
+header can be absent because a proxy stripped it, because the edge that
+answered did not set it, or for reasons this layer has no view of.
+
+Converting an absence into a positive billing diagnosis means reporting a
+state about someone's account that X-Ray has no evidence for. I framed round
+one as "a judgement, not a derivation" and took the tradeoff myself; the
+correct answer was that the inference should not be made at all.
+
+**Both forms of 429 are now `TRANSIENT`.** The header-less form says what it is
+uncertain about instead of deciding:
+
+```
+Anthropic rate-limited this request with no retry-after (HTTP 429
+(rate_limit_error)) (request …). It may succeed on another attempt. Anthropic
+also documents this shape for usage-tier and monthly spend caps, so if it keeps
+failing, check the account's credit and its organization/workspace spend limits.
+```
+
+That raises the possibility for an operator without asserting it — and check
+**11b** holds the line in both directions: the message must say it is
+retryable, must name what to check, and must **not** contain a phrase
+diagnosing the cause.
+
+`EXHAUSTED` now requires a **positive** signal: 402 / `billing_error`, or a
+trusted spend-limit statement. Check **11b2** drives six 429 shapes that carry
+no positive signal — bare, typed, unrecognised type, empty body, unrelated
+message, retry-mentioning message — and asserts none produces a capability gap
+of any kind. It then asserts a 429 carrying `billing_error` *is* still
+`EXHAUSTED`, because the signal is the type; and it asserts structurally that
+the rate-limit branch cannot reach `EXHAUSTED` at all.
+
+Control **J** is the proof it is not vacuous: reinstating the inference fails
+11b and 11b2 with *"bare 429: produced EXHAUSTED from no positive signal"*.
+Controls C and G both retire — G ("every 429 treated as ordinary rate
+limiting") now describes what the code correctly does, so it can no longer
+serve as a control.
 
 ### Negative controls
 
@@ -186,15 +221,25 @@ restating it.
 | D · the key is put in the prompt | FAIL 15 |
 | E · a reviewer may target an unshown artifact | FAIL 19 |
 | **F · back to phrase-matching the whole body** | **FAIL 11c, 11d, 11e** |
-| **G · every 429 treated as ordinary rate limiting** | **FAIL 11b** |
-| **H · the 402 billing branch removed** | **FAIL 11** (402 became `PERMANENT`) |
+| **H · the 402 billing branch removed** | **FAIL 11, 11b2** |
 | **I · the echo guard removed** | **FAIL 11d** — "an echoed 400 did not fail" |
+| **J · a missing retry-after inferred to be a spend cap** | **FAIL 11b, 11b2** |
+
+Control H is informative twice over: removing the 402 / `billing_error` branch
+also makes a 429 carrying `billing_error` fall through to the rate-limit
+branch, which is the positive-signal path doing the work rather than the
+header.
 
 Control F is worth reading twice: reverting to the old code fails **three**
 checks, because the old narrow phrase list also *missed* three of the four
 genuine spend messages. The amendment improved coverage as well as safety.
 
-### One defect in my own gate
+### Two defects in my own gate
+
+Check 11b2's structural assertion bounded its source slice on a `// ---`
+comment divider — which `stripComments` had already removed, so the slice ran
+to the end of the file and picked up a later branch's `EXHAUSTED`. It now
+bounds on code, and asserts it located the right block before testing it.
 
 Check 14 asserted "the transport contains no loop" by scanning the whole file,
 which tripped on the character loop inside `echoesRequest` — a loop over a
@@ -270,7 +315,7 @@ judgment fails; an honest `flagged: false` survives.
 
 ## Gate
 
-`pnpm check:anthropic-adapters` — **27/27**, in `adapter-gate.txt`. Every call
+`pnpm check:anthropic-adapters` — **28/28**, in `adapter-gate.txt`. Every call
 goes to a stub on `127.0.0.1`, reached through the `ANTHROPIC_BASE_URL` the
 registry entry declares. **No request left this machine.**
 
@@ -347,8 +392,12 @@ check:acceptance Canonical benchmark verdict: BLOCKED (0 reason(s) against the g
   signal. It is guarded by length and by the echo check, and if Anthropic
   rewords the statement the case degrades to `PERMANENT` — visible, not silent.
   402 `billing_error` and the retry-after-less 429 need no message at all.
-- **A stripped `retry-after` downgrades an ordinary rate limit** to a disclosed
-  `EXHAUSTED` capability gap. Deliberate; see the tradeoff under *Amendment*.
+- **A positively-signalled spend condition arriving as a 429 with a message
+  rather than a `billing_error` type would now be `TRANSIENT`.** The stage
+  would retry it to its attempt limit and report a stage failure. Extending the
+  trusted-message path to 429 was not asked for and would add a new judgement
+  surface immediately after one was removed, so it is noted rather than built.
+  A 429 carrying `billing_error` is already `EXHAUSTED`.
 - **`max_tokens` is treated as transient.** The same request can complete, but
   if a stage's material genuinely exceeds the budget it will retry and fail
   again. Per-operation `maxTokens` constants are authored, not configurable.

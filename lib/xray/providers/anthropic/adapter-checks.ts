@@ -641,13 +641,13 @@ check('11 · HTTP failures map onto the documented error semantics', async () =>
   return null
 })
 
-check('11b · the two forms of 429 are told apart by retry-after', async () => {
+check('11b · both forms of 429 are transient, and neither diagnoses billing', async () => {
   /*
-   * Both carry `rate_limit_error`, so the type cannot separate them. Ordinary
-   * rate limiting is documented as carrying `retry-after`; the usage-tier /
-   * spend-cap form is documented as lacking it and as continuing to fail until
-   * access resumes. Retrying the second until a stage exhausts its attempts
-   * would report a billing state as a broken investigation.
+   * Anthropic documents that a usage-tier spend-cap 429 carries no
+   * `retry-after`. The converse does not follow: a 429 lacking the header is
+   * not thereby a spend cap — a proxy can strip it, or the answering edge can
+   * simply not set it. So both forms are retryable, and the header-less form
+   * says what it is uncertain about rather than deciding.
    */
   const research = model()
   const act = () => research.decompose(DECOMPOSE_INPUT)
@@ -664,21 +664,93 @@ check('11b · the two forms of 429 are told apart by retry-after', async () => {
   if (!limited.message.includes('30'))
     return 'the retry-after value was not reported to the operator'
 
-  stub.script({ status: 429, body: { error: { type: 'rate_limit_error' } } })
-  const capped = gapOf(await act())
-  if (capped === undefined) return 'a 429 with no retry-after was not a capability gap'
-  if (capped.reason !== 'EXHAUSTED') return `spend cap gave ${capped.reason}, expected EXHAUSTED`
-  if (!/spend limit/i.test(capped.resolvedBy))
-    return 'the spend cap did not tell the operator to raise a limit'
+  // Missing, blank, and header-absent-entirely all behave the same way.
+  for (const [label, reply] of [
+    ['no retry-after', { status: 429, body: { error: { type: 'rate_limit_error' } } }],
+    ['a blank retry-after', {
+      status: 429, headers: { 'retry-after': '   ' },
+      body: { error: { type: 'rate_limit_error' } },
+    }],
+    ['rate_limit_error at another status', {
+      status: 400, body: { error: { type: 'rate_limit_error' } },
+    }],
+  ] as [string, Reply][]) {
+    stub.script(reply)
+    const outcome = await failure(act)
+    if (outcome === undefined) return `${label}: did not fail`
+    if (outcome.disposition !== 'TRANSIENT')
+      return `${label}: ${outcome.disposition}, expected TRANSIENT`
+  }
 
-  // A blank header is not a header.
-  stub.script({
-    status: 429, headers: { 'retry-after': '   ' },
-    body: { error: { type: 'rate_limit_error' } },
-  })
-  const blank = gapOf(await act())
-  return blank?.reason === 'EXHAUSTED'
-    ? null : `a blank retry-after gave ${String(blank?.reason)}`
+  // The header-less message may raise the possibility without asserting it.
+  stub.script({ status: 429, body: { error: { type: 'rate_limit_error' } } })
+  const headerless = await failure(act)
+  const message = headerless?.message ?? ''
+  if (!/may succeed on another attempt/.test(message))
+    return 'the header-less 429 did not say it is retryable'
+  if (!/spend limit/i.test(message))
+    return 'the header-less 429 did not mention what to check if it persists'
+  // Raised as a possibility, not stated as the cause.
+  if (/\b(?:is|was) (?:a|the) (?:spend cap|spend limit)/i.test(message))
+    return `the message diagnoses billing: "${message}"`
+  return null
+})
+
+check('11b2 · a missing header alone can never produce EXHAUSTED', async () => {
+  /*
+   * The control the review asked for, as a check rather than a one-off run.
+   * Every 429 shape that lacks a positive billing signal is driven, and none
+   * may come back as a capability gap of any kind: absence of a header is not
+   * evidence of anything, and EXHAUSTED is a claim about an account.
+   */
+  const research = model()
+  const act = () => research.decompose(DECOMPOSE_INPUT)
+
+  const withoutPositiveSignal: [string, Reply][] = [
+    ['bare 429', { status: 429, body: {} }],
+    ['429 rate_limit_error', { status: 429, body: { error: { type: 'rate_limit_error' } } }],
+    ['429 with an unrecognised type', { status: 429, body: { error: { type: 'mystery' } } }],
+    ['429 with no body at all', { status: 429, body: '' }],
+    ['429 with an unrelated message', {
+      status: 429,
+      body: { error: { type: 'rate_limit_error', message: 'Number of requests too high.' } },
+    }],
+    ['429 whose message mentions retrying', {
+      status: 429,
+      body: { error: { type: 'rate_limit_error', message: 'Please retry shortly.' } },
+    }],
+  ]
+  for (const [label, reply] of withoutPositiveSignal) {
+    stub.script(reply)
+    const capability = gapOf(await (async () => {
+      try { return await act() } catch { return { kind: 'AVAILABLE', value: null } as never }
+    })())
+    if (capability !== undefined)
+      return `${label}: produced ${capability.reason} from no positive signal`
+  }
+
+  // And a 429 that DOES carry a positive signal in its type is still EXHAUSTED,
+  // because the signal is the type and not the missing header.
+  stub.script({ status: 429, body: { error: { type: 'billing_error' } } })
+  const positive = gapOf(await act())
+  if (positive?.reason !== 'EXHAUSTED')
+    return `a 429 billing_error gave ${String(positive?.reason)}, expected EXHAUSTED`
+
+  /*
+   * Structural: no branch reads a header's absence to reach EXHAUSTED.
+   *
+   * Bounded on code, not on a comment divider — an earlier version bounded on
+   * `// ---`, which `stripComments` had already removed, so the slice ran to
+   * the end of the file and picked up a later branch's EXHAUSTED.
+   */
+  const transport = stripComments(read('lib/xray/providers/anthropic/transport.ts'))
+  const start = transport.indexOf("if (status === 429")
+  const end = transport.indexOf('if (status >= 500', start)
+  if (start < 0 || end < 0 || end <= start) return 'the rate-limit branch was not located'
+  const block = transport.slice(start, end)
+  if (!/retry-after/.test(block)) return 'the located block is not the rate-limit branch'
+  return /EXHAUSTED/.test(block)
+    ? 'the rate-limit branch can still reach EXHAUSTED' : null
 })
 
 check('11c · a 400 spend limit is EXHAUSTED; an ordinary 400 is PERMANENT', async () => {
