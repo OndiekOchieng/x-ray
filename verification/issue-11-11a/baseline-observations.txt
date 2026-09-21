@@ -1,0 +1,83 @@
+11a baseline observations — production build (pnpm build && pnpm start), no host wiring.
+Captured 2026-09-21T10:01:46Z. No database and no execution runtime provider are
+registered anywhere in app/, so this is what a deployed build does today.
+
+=== route status ===
+/                                  200  7166 bytes  hero rendered: 0
+/about                             200  10611 bytes
+/library                           200  7546 bytes
+/investigations/XRAY-KE-001        200  316880 bytes
+/investigation/XRAY-KE-001         200  60660 bytes
+/investigations/NOPE               200  8210 bytes
+/gap/GAP-001                       200  28255 bytes
+/gap/NOPE                          200  8064 bytes
+/xray/anything                     503  37 bytes
+/xray/anything/v1                  503  37 bytes
+/xray/anything/history             503  37 bytes
+
+=== API status ===
+POST /api/investigations                                       503  {"error":{"code":"SERVICE_UNAVAILABLE","message":"This deployment cannot serve investigation data."}}
+GET  /api/investigations/XRAY-KE-001/versions                  503  {"error":{"code":"SERVICE_UNAVAILABLE","message":"This deployment cannot serve investigation data."}}
+GET  /api/investigations/XRAY-KE-001/ati/requests              503  {"error":{"code":"SERVICE_UNAVAILABLE","message":"This deployment cannot serve investigation data."}}
+
+=== public surface body ===
+/xray/anything                     This page is temporarily unavailable.
+
+=== server errors observed while serving / and /library ===
+  13 HostNotConfigured: No database is configured for this build
+
+=== headings, /investigations/XRAY-KE-001 ===
+  h1: Inside Ruto's five-day tour of Kisumu, Siaya, Migori and Homa Bay
+  h1: The principal/main road corridor is approximately 63 km in length.
+  h2: What this finding is standing on
+  h2: Repetition is not corroboration
+  h2: Discrepancies around this claim
+  h3: Different scope
+  h2: An official scope schedule giving each lot's main-carriageway length and its feeder, spur and servic
+
+=== independence panel numbers, per claim (projection truth) ===
+  C001 | traced 8 | repeating 3 | independent 8 | resolved true
+  C002 | traced 9 | repeating 5 | independent 4 | resolved true
+  C003 | traced 7 | repeating 5 | independent 4 | resolved false
+  C004 | traced 1 | repeating 1 | independent 0 | resolved false
+  DC001 | traced 4 | repeating 2 | independent 3 | resolved false
+  DC002 | traced 4 | repeating 2 | independent 4 | resolved true
+
+=== corpus shape ===
+  xray-ke-001        id=XRAY-KE-001 claims 6 sources 22 evidence 38 positions 0 gaps 6 discrepancies 4
+  kenyatta-maralal   id=XRAY-KE-001 claims 7 sources 23 evidence 39 positions 2 gaps 6 discrepancies 4
+
+=== calibration binding ===
+  CAL-001 bound: C003, DC001, FND-C003, FND-DC001, DISC-003, GAP-002, GAP-005, DCF-003
+  CAL-002 bound: C001, FND-C001, DISC-001, GAP-004, DCF-001, SRC-009
+  CAL-003 bound: SRC-017, SRC-018, SRC-019, SRC-020, SD-001, SD-002, SD-003, GAP-005
+  CAL-004 bound: GAP-001, SRC-009, SRC-011, SRC-015, SRC-017, FND-C002, DCF-002
+  CAL-005 bound: C004, FND-C004, GAP-003, DCF-004, SRC-001, EV-033, EV-034
+  CAL-006 bound: C002, FND-C002, DISC-002, GAP-001, DCF-002, EV-010, EV-011, EV-012, EV-013
+  CAL-007 NO fixtureIds
+  CAL-008 NO fixtureIds
+  CAL-009 NO fixtureIds
+  CAL-010 NO fixtureIds
+  CAL-011 NO fixtureIds
+  CAL-012 NO fixtureIds
+  CAL-013 NO fixtureIds
+  CAL-014 NO fixtureIds
+  CAL-015 NO fixtureIds
+  CAL-016 NO fixtureIds
+
+=== a11y primitives, by file count across components/ ===
+  focus:ring             1 files
+  focus-visible          1 files
+  sr-only                1 files
+  role="status"          1 files
+  aria-label             5 files
+  aria-labelledby        1 files
+  aria-describedby       2 files
+  aria-expanded          4 files
+  onMouseEnter           0 files
+  onMouseOver            0 files
+
+=== unprefixed multi-column grids (narrow-viewport risk) ===
+  components/investigations/cached-xray-card.tsx  grid-cols-3
+  components/investigations/completion-state.tsx  grid-cols-2
+  components/investigations/receipt-drawer.tsx  grid-cols-2
