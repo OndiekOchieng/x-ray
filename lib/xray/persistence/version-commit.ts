@@ -151,18 +151,51 @@ export async function readReEvaluationAudit(db: SnapshotDatabase, investigationI
   return result
 }
 
+/**
+ * One intake→Source link to write inside this commit.
+ *
+ * Declarative rather than a callback on purpose. A post-commit hook that took
+ * code would let any caller mutate canonical state inside #7's transaction;
+ * this lets a caller state a link and nothing else, and the link is still
+ * checked here and by 10a's acceptance trigger before it is written.
+ *
+ * Every `sourceId` must be one this version added. An acceptance against an
+ * inherited source would manufacture causality between a response and a record
+ * that predates it, which is what migration 0011 exists to refuse.
+ */
+export interface IntakeSourceAcceptance {
+  intakeId: string
+  sourceId: string
+  acceptedAt: string
+}
+
 export interface CommitVersionOptions {
   expectedPredecessor: number
   graph: XRayGraph
   assessment: GraduationResult
   reEvaluationAudit: readonly ReEvaluationAudit[]
   executionRunId: string
+  /**
+   * Links to write once this version is committed, in the same transaction.
+   *
+   * Written after the committed pointer advances, because 10a's acceptance
+   * trigger requires `latest_committed_version >= committed_version` — so
+   * inside one transaction the order is load-bearing, not cosmetic. Nothing is
+   * written if the commit rolls back, which closes the window where an
+   * acceptance could outlive the version it points at (#10 slice 10d §R/§S).
+   */
+  intakeAcceptances?: readonly IntakeSourceAcceptance[]
 }
 
 /** Commit one assessed next version. Caller must re-assess after VersionConflict. */
 export async function commitNextVersion(db: SnapshotDatabase, options: CommitVersionOptions): Promise<void> {
   const { graph, assessment, expectedPredecessor, reEvaluationAudit, executionRunId } = options
+  const acceptances = options.intakeAcceptances ?? []
   if (!graph.version || graph.version.version !== expectedPredecessor + 1) throw new Error('Wrong candidate version')
+  for (const acceptance of acceptances) {
+    if (!graph.version.addedSourceIds.includes(acceptance.sourceId))
+      throw new Error(`Acceptance names source ${acceptance.sourceId}, which this version did not add`)
+  }
   const previous = await readSnapshot(db, graph.investigation.id, expectedPredecessor)
   assertVersionDiff(previous, graph, reEvaluationAudit)
   assertCommittable(graph, assessment)
@@ -209,6 +242,17 @@ export async function commitNextVersion(db: SnapshotDatabase, options: CommitVer
     const moved = (await db.query(`UPDATE investigations SET latest_committed_version=$1
       WHERE id=$2 AND latest_committed_version=$3 RETURNING id`, [graph.version.version, graph.investigation.id, expectedPredecessor])).rows
     if (moved.length !== 1) throw new VersionConflict(expectedPredecessor, actual)
+    // Only now: the pointer has moved, so 10a's acceptance trigger can see the
+    // version as committed. Its four conditions still apply in full.
+    for (const acceptance of acceptances) {
+      const ordinal = Number((await db.query(
+        'SELECT COALESCE(MAX(ordinal) + 1, 0) AS next FROM ati_intake_source_acceptances WHERE intake_id=$1',
+        [acceptance.intakeId])).rows[0].next)
+      await db.query(`INSERT INTO ati_intake_source_acceptances(intake_id, ordinal,
+        investigation_id, committed_version, source_id, accepted_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [acceptance.intakeId, ordinal, graph.investigation.id, graph.version.version,
+        acceptance.sourceId, acceptance.acceptedAt])
+    }
     await db.query('COMMIT')
   } catch (error) {
     await db.query('ROLLBACK')

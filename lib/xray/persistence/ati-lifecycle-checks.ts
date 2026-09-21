@@ -19,7 +19,7 @@ import {
   AT, ATI_MIGRATIONS, MIGRATIONS, commitFurtherVersion, seedLineage,
 } from './publication-check-support'
 import {
-  acceptIntakeSource, closeRequest, confirmSubmission, createRequest, deriveStatus,
+  acceptIntakeSource, atiResponseRef, closeRequest, confirmSubmission, createRequest, deriveStatus,
   readRequestLifecycle, readRequestsForGap, recordAcknowledgement, recordExport,
   recordResponse, reviseRequest, type RevisionContent,
 } from './ati-lifecycle'
@@ -511,9 +511,11 @@ async function main(): Promise<void> {
       const submitted = deriveStatus([ev('EXPORT', 1), ev('SUBMIT', 2)], [])
       const acked = deriveStatus([ev('EXPORT', 1), ev('SUBMIT', 2), ev('ACKNOWLEDGE', 3)], [])
       const responded = deriveStatus([ev('EXPORT', 1)],
-        [{ sequence: 1, receivedAt: at, completeness: 'UNSTATED', intakes: [] }])
+        [{ sequence: 1, id: atiResponseRef('ATI-1', 1), receivedAt: at,
+          completeness: 'UNSTATED', intakes: [] }])
       const closed = deriveStatus([ev('EXPORT', 1), ev('CLOSE', 2)],
-        [{ sequence: 1, receivedAt: at, completeness: 'FINAL', intakes: [] }])
+        [{ sequence: 1, id: atiResponseRef('ATI-1', 1), receivedAt: at,
+          completeness: 'FINAL', intakes: [] }])
       const observed = [none, exported, submitted, acked, responded, closed].join()
       return observed === 'DRAFT,EXPORTED,SUBMITTED,ACKNOWLEDGED,RESPONDED,CLOSED'
         ? null : observed

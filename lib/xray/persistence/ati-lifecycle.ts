@@ -50,6 +50,20 @@ export type HolderContextOrigin = 'ORIGIN_GAP' | 'HUMAN_SUPPLIED'
  */
 export type DigestOrigin = 'COMPUTED' | 'SUPPLIED'
 
+/**
+ * The durable identity of one response.
+ *
+ * `ati_responses` is keyed by `(request_id, sequence)` — position in an
+ * append-only history. A causal reference needs an identity, so the row also
+ * carries one, and this is how v0 mints it: deterministic, unambiguous, and
+ * reconstructable from the history it names (#10 slice 10d §G).
+ *
+ * The schema does not pin this form. Identity is the column; position is the
+ * key. An opaque id later changes this function and nothing else.
+ */
+export const atiResponseRef = (requestId: string, sequence: number): string =>
+  `ATI_RESPONSE:${requestId}:${sequence}`
+
 export class ATILifecycleError extends Error {
   constructor(message: string) {
     super(message)
@@ -278,10 +292,10 @@ export async function recordResponse(
   try {
     const sequence = await nextSequence(db, 'ati_responses', requestId)
     await db.query(
-      `INSERT INTO ati_responses(request_id, sequence, received_at, completeness, summary)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [requestId, sequence, response.receivedAt, response.completeness,
-        response.summary ?? null])
+      `INSERT INTO ati_responses(request_id, sequence, id, received_at, completeness, summary)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [requestId, sequence, atiResponseRef(requestId, sequence), response.receivedAt,
+        response.completeness, response.summary ?? null])
     for (const intake of response.intakes ?? []) {
       await db.query(
         `INSERT INTO ati_response_intakes(intake_id, request_id, response_sequence,
@@ -364,6 +378,8 @@ export interface EventRow {
 
 export interface ResponseRow {
   sequence: number
+  /** Durable identity, as a re-evaluation cause names it. */
+  id: string
   receivedAt: string
   completeness: ResponseCompleteness
   summary?: string
@@ -492,9 +508,10 @@ export async function readRequestLifecycle(
   }
 
   const responses: ResponseRow[] = (await db.query(
-    `SELECT sequence, received_at, completeness, summary FROM ati_responses
+    `SELECT sequence, id, received_at, completeness, summary FROM ati_responses
       WHERE request_id=$1 ORDER BY sequence`, [requestId])).rows.map((row) => ({
     sequence: row.sequence as number,
+    id: row.id as string,
     receivedAt: row.received_at as string,
     completeness: row.completeness as ResponseCompleteness,
     ...(row.summary === null ? {} : { summary: row.summary as string }),

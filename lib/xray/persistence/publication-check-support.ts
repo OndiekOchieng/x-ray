@@ -36,6 +36,7 @@ export const ATI_MIGRATIONS = [
   '0009_ati_lifecycle', '0010_ati_origin_and_acceptance',
   '0011_ati_acceptance_requires_added_source',
   '0012_ati_intake_digest_provenance',
+  '0013_ati_response_identity_and_execution_cause',
 ]
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
@@ -112,14 +113,23 @@ export async function seedLineage(db: PGlite, id: string, runId: string, verdict
   return { v1, candidate, assessment }
 }
 
-/** Commit a further assessed version on an existing lineage. */
+/**
+ * Commit a further assessed version on an existing lineage.
+ *
+ * `reEvaluationAudit` may be overridden so a gate can exercise a specific
+ * reason and cause — 10d uses it to write an `EXTERNAL_RECORD_RESPONSE` row
+ * with an exact ATI response cause. The claim ids must still match what the
+ * candidate actually changed; `commitNextVersion` checks that itself.
+ */
 export async function commitFurtherVersion(db: PGlite, id: string, runId: string,
-  predecessor: XRayGraph, version: number) {
+  predecessor: XRayGraph, version: number,
+  options: { reEvaluationAudit?: readonly ReEvaluationAudit[] } = {}) {
   const candidate = candidateNext(predecessor, version)
   const assessment = assessGraduation(candidate, { behaviors: XRAY_KE_001_ACCEPTANCE, assessedAt: AT })
   await prepareAssessedRun(db, runId, candidate, assessment, 'CAPABILITY_BLOCKED')
   await commitNextVersion(db, { expectedPredecessor: version - 1, graph: candidate,
-    assessment, reEvaluationAudit: reEvaluationAudit(version), executionRunId: runId })
+    assessment, reEvaluationAudit: options.reEvaluationAudit ?? reEvaluationAudit(version),
+    executionRunId: runId })
   return { candidate, assessment }
 }
 
