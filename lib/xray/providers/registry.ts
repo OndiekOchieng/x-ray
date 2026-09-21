@@ -16,7 +16,7 @@
  *
  * WHAT RESOLUTION MUST KEEP APART
  * ===============================
- * Five states, and the first four are all "no research capability here" rather
+ * Six states, and the first five are all "no research capability here" rather
  * than anything wrong with a graph:
  *
  *   NOT_SELECTED             the operator named no provider for this slot
@@ -28,7 +28,16 @@
  *
  * Collapsing any of them into "unavailable" would lose the only information an
  * operator can act on. `CONFIGURATION_INCOMPLETE` names the **variables** that
- * are absent and never their values.
+ * are absent and never their values. Every resolution carries its exact
+ * `ProviderSlot`, `NOT_SELECTED` included: "no research model" and "no
+ * reviewer model" are different facts about a deployment and a generic
+ * `MODEL` would erase the difference.
+
+ * WHAT A FACTORY RECEIVES
+ * =======================
+ * A `ProviderConfiguration` narrowed to the names its own entry declares, and
+ * nothing else. The environment is read while building that, never handed to
+ * a factory — see `narrowEnvironment`.
  *
  * NO SILENT FALLBACK
  * ==================
@@ -43,9 +52,10 @@ import type { ResearchAdapter } from '@/lib/xray/pipeline/retrieval-port'
 import type { ResearchModel } from '@/lib/xray/pipeline/model-port'
 import type { ReviewerModel } from '@/lib/xray/review'
 import {
-  readProviderSelections,
-  type Environment, type ModelProviderConfig, type ModelSelection,
-  type ProviderSelections, type RetrievalProviderConfig, type RetrievalSelection,
+  hostEnvironment, narrowEnvironment, readProviderSelections,
+  type Environment, type ModelProviderConfig, type ModelSelection, type ModelSlot,
+  type ProviderSelections, type ProviderSlot,
+  type RetrievalProviderConfig, type RetrievalSelection,
 } from './config'
 
 // ---------------------------------------------------------------------------
@@ -60,13 +70,27 @@ import {
  * mean or reading their values. `create` is absent for an entry that is
  * recognised but not yet implemented, which is how a reserved name says so
  * instead of faking capability.
+ *
+ * `requires` and `optional` together are the entry's **declaration**, and the
+ * declaration is exactly what the factory will be able to read. `requires`
+ * additionally gates resolution: an absent required name is
+ * `CONFIGURATION_INCOMPLETE`, while an absent optional one is simply absent.
+ * Widening what a provider can see means adding a name here, in the registry,
+ * where it is reviewable — not reaching around the boundary.
  */
 export interface ProviderEntry<Port, Config> {
   readonly provider: string
   /** Environment variable names this provider cannot work without. */
   readonly requires: readonly string[]
+  /** Further names it may read if set. Never gates resolution. */
+  readonly optional?: readonly string[]
   readonly create?: (config: Config) => Port | Promise<Port>
 }
+
+/** Everything an entry is allowed to read: its required and optional names. */
+export const declaredNames = (
+  entry: Pick<ProviderEntry<unknown, unknown>, 'requires' | 'optional'>,
+): readonly string[] => [...entry.requires, ...(entry.optional ?? [])]
 
 export type ResearchModelFactory = ProviderEntry<ResearchModel, ModelProviderConfig>
 export type ReviewerModelFactory = ProviderEntry<ReviewerModel, ModelProviderConfig>
@@ -111,20 +135,20 @@ export const DEFAULT_REGISTRY: ProviderRegistry = {
 // ---------------------------------------------------------------------------
 
 export type ProviderResolution<Port> =
-  | { status: 'NOT_SELECTED'; slot: string }
-  | { status: 'UNKNOWN_PROVIDER'; slot: string; requested: string; known: readonly string[] }
-  | { status: 'MODEL_ID_REQUIRED'; slot: string; provider: string; variable: string }
+  | { status: 'NOT_SELECTED'; slot: ProviderSlot }
+  | { status: 'UNKNOWN_PROVIDER'; slot: ProviderSlot; requested: string; known: readonly string[] }
+  | { status: 'MODEL_ID_REQUIRED'; slot: ModelSlot; provider: string; variable: string }
   | {
     status: 'CONFIGURATION_INCOMPLETE'
-    slot: string
+    slot: ProviderSlot
     provider: string
     /** Variable **names**. Never values. */
     missing: readonly string[]
   }
-  | { status: 'NOT_IMPLEMENTED'; slot: string; provider: string; modelId?: string }
+  | { status: 'NOT_IMPLEMENTED'; slot: ProviderSlot; provider: string; modelId?: string }
   | {
     status: 'AVAILABLE'
-    slot: string
+    slot: ProviderSlot
     provider: string
     modelId?: string
     /** Returns exactly the existing port. Nothing is called during resolution. */
@@ -146,24 +170,26 @@ export interface ComposedProviders {
  * a thunk, and calling it is the caller's decision. 20a never calls it.
  */
 export function composeProviders(
-  env: Environment = process.env,
+  env: Environment = hostEnvironment(),
   registry: ProviderRegistry = DEFAULT_REGISTRY,
 ): ComposedProviders {
   const selections = readProviderSelections(env)
   return {
-    research: resolveModel(selections.research, registry.researchModels, env),
-    reviewer: resolveModel(selections.reviewer, registry.reviewerModels, env),
+    research: resolveModel('RESEARCH_MODEL', selections.research, registry.researchModels, env),
+    reviewer: resolveModel('REVIEWER_MODEL', selections.reviewer, registry.reviewerModels, env),
     retrieval: resolveRetrieval(selections.retrieval, registry.retrieval, env),
     selections,
   }
 }
 
 function resolveModel<Port>(
+  /** The slot being resolved, passed in so an absent selection still names it. */
+  requestedSlot: ModelSlot,
   selection: ModelSelection | undefined,
   entries: readonly ProviderEntry<Port, ModelProviderConfig>[],
   env: Environment,
 ): ProviderResolution<Port> {
-  if (selection === undefined) return { status: 'NOT_SELECTED', slot: 'MODEL' }
+  if (selection === undefined) return { status: 'NOT_SELECTED', slot: requestedSlot }
   const slot = selection.slot
 
   const entry = entries.find((candidate) => candidate.provider === selection.provider)
@@ -196,8 +222,10 @@ function resolveModel<Port>(
     }
   }
 
+  // Narrowed here, once, from `env` — which is not captured by the result.
   const config: ModelProviderConfig = {
-    slot, provider: entry.provider, modelId: selection.modelId, env,
+    slot, provider: entry.provider, modelId: selection.modelId,
+    configuration: narrowEnvironment(env, declaredNames(entry)),
   }
   return {
     status: 'AVAILABLE', slot, provider: entry.provider, modelId: selection.modelId,
@@ -232,7 +260,10 @@ function resolveRetrieval(
     return { status: 'NOT_IMPLEMENTED', slot, provider: entry.provider }
   }
 
-  const config: RetrievalProviderConfig = { slot, provider: entry.provider, env }
+  const config: RetrievalProviderConfig = {
+    slot, provider: entry.provider,
+    configuration: narrowEnvironment(env, declaredNames(entry)),
+  }
   return {
     status: 'AVAILABLE', slot, provider: entry.provider,
     create: async () => entry.create!(config),

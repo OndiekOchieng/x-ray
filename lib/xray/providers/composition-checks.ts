@@ -21,20 +21,30 @@ import { join } from 'node:path'
 import type { ResearchAdapter } from '@/lib/xray/pipeline/retrieval-port'
 import type { ResearchModel } from '@/lib/xray/pipeline/model-port'
 import type { ReviewerModel } from '@/lib/xray/review'
-import { PROVIDER_ENV, readProviderSelections, type Environment } from './config'
 import {
-  composeProviders, describeResolution, fullyAvailable,
+  PROVIDER_ENV, narrowEnvironment,
+  type Environment, type ModelProviderConfig, type ProviderConfiguration,
+  type RetrievalProviderConfig,
+} from './config'
+import {
+  composeProviders, declaredNames, describeResolution, fullyAvailable,
   DEFAULT_REGISTRY, type ProviderRegistry,
 } from './registry'
 
-type Result = { name: string; ok: boolean; detail?: string }
-const results: Result[] = []
+type Check = { name: string; run: () => string | null | Promise<string | null> }
+const checks: Check[] = []
 
-function check(name: string, fn: () => string | null): void {
-  let detail: string | null
-  try { detail = fn() } catch (err) { detail = `threw: ${(err as Error).message}` }
-  results.push({ name, ok: detail === null, detail: detail ?? undefined })
-}
+function check(name: string, run: Check['run']): void { checks.push({ name, run }) }
+
+/*
+ * An unhandled rejection must fail the gate, not vanish. An earlier version of
+ * check 12c discarded the factory promise with `void`, so a factory that threw
+ * still reported ok and the process died after printing a pass.
+ */
+process.on('unhandledRejection', (reason) => {
+  console.error(`\nFAIL  an unhandled rejection escaped a check: ${String(reason)}`)
+  process.exit(1)
+})
 
 /*
  * A sentinel standing in for a secret value. It is deliberately NOT shaped
@@ -68,9 +78,7 @@ function sources(directory: string): string[] {
 const stripComments = (text: string): string =>
   text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
-main()
-
-function main(): void {
+async function main(): Promise<void> {
   // === parsing ==========================================================
 
   check('1 · an empty environment selects no provider', () => {
@@ -279,29 +287,16 @@ function main(): void {
      * return type were anything other than the existing port, this would not
      * typecheck — which is the strongest form the claim can take.
      */
-    const model: ResearchModel = {
-      name: 'test-research-model',
-      async decompose() { return unavailable() },
-      async classify() { return unavailable() },
-      async trace() { return unavailable() },
-      async disconfirm() { return unavailable() },
-      async reconcile() { return unavailable() },
-      async grade() { return unavailable() },
-      async identifyGaps() { return unavailable() },
-    }
-    const reviewer: ReviewerModel = {
-      name: 'test-reviewer-model',
-      async judge() { return unavailable() },
-    }
-    const adapter: ResearchAdapter = {
-      name: 'test-retrieval',
-      async search() { return unavailable() },
-      async retrieve() { return unavailable() },
-    }
     const registry: ProviderRegistry = {
-      researchModels: [{ provider: 'anthropic', requires: [], create: () => model }],
-      reviewerModels: [{ provider: 'anthropic', requires: [], create: () => reviewer }],
-      retrieval: [{ provider: 'anthropic', requires: [], create: () => adapter }],
+      researchModels: [{
+        provider: 'anthropic', requires: [], create: () => testResearchModel,
+      }],
+      reviewerModels: [{
+        provider: 'anthropic', requires: [], create: () => testReviewerModel,
+      }],
+      retrieval: [{
+        provider: 'anthropic', requires: [], create: () => testResearchAdapter,
+      }],
     }
     const composed = composeProviders({
       [PROVIDER_ENV.researchModel]: 'anthropic', [PROVIDER_ENV.researchModelId]: 'x',
@@ -322,6 +317,184 @@ function main(): void {
     ].filter((entry) => entry.create !== undefined)
     return implemented.length === 0
       ? null : `${implemented.length} default entr(ies) can already construct a provider`
+  })
+
+  check('12b · every resolution names its exact slot, absence included', () => {
+    // "No research model" and "no reviewer model" are different facts. A
+    // generic MODEL would erase the difference an operator needs.
+    const none = composeProviders({})
+    if (none.research.slot !== 'RESEARCH_MODEL') return `absent research slot ${none.research.slot}`
+    if (none.reviewer.slot !== 'REVIEWER_MODEL') return `absent reviewer slot ${none.reviewer.slot}`
+    if (none.retrieval.slot !== 'RETRIEVAL') return `absent retrieval slot ${none.retrieval.slot}`
+
+    // And in every other state, across all three slots.
+    const vocabulary = new Set(['RESEARCH_MODEL', 'REVIEWER_MODEL', 'RETRIEVAL'])
+    const environments: Environment[] = [
+      { [PROVIDER_ENV.researchModel]: 'mystery', [PROVIDER_ENV.reviewerModel]: 'mystery',
+        [PROVIDER_ENV.retrieval]: 'mystery' },
+      { [PROVIDER_ENV.researchModel]: 'anthropic', [PROVIDER_ENV.reviewerModel]: 'anthropic' },
+      { [PROVIDER_ENV.researchModel]: 'anthropic', [PROVIDER_ENV.researchModelId]: 'x',
+        [PROVIDER_ENV.reviewerModel]: 'openai', [PROVIDER_ENV.reviewerModelId]: 'y',
+        [PROVIDER_ENV.retrieval]: 'anthropic' },
+      { ...ANTHROPIC_CONFIGURED,
+        [PROVIDER_ENV.researchModel]: 'anthropic', [PROVIDER_ENV.researchModelId]: 'x',
+        [PROVIDER_ENV.reviewerModel]: 'anthropic', [PROVIDER_ENV.reviewerModelId]: 'y',
+        [PROVIDER_ENV.retrieval]: 'custom' },
+    ]
+    const seen = new Set<string>()
+    for (const env of environments) {
+      const composed = composeProviders(env)
+      for (const [slot, expected] of [
+        ['research', 'RESEARCH_MODEL'], ['reviewer', 'REVIEWER_MODEL'],
+        ['retrieval', 'RETRIEVAL'],
+      ] as const) {
+        const resolution = composed[slot]
+        if (!vocabulary.has(resolution.slot))
+          return `${resolution.status} carried slot "${resolution.slot}"`
+        if (resolution.slot !== expected)
+          return `the ${slot} slot reported ${resolution.slot} in ${resolution.status}`
+        seen.add(resolution.status)
+      }
+    }
+    // All six states were actually exercised above, not just the easy ones.
+    const states = ['NOT_SELECTED', 'UNKNOWN_PROVIDER', 'MODEL_ID_REQUIRED',
+      'CONFIGURATION_INCOMPLETE', 'NOT_IMPLEMENTED']
+    seen.add(none.research.status)
+    const unexercised = states.filter((state) => !seen.has(state))
+    return unexercised.length === 0 ? null : `never exercised: ${unexercised.join(', ')}`
+  })
+
+  check('12c · a factory sees only what its own entry declares', async () => {
+    /*
+     * The adversarial case. An Anthropic entry declaring ANTHROPIC_API_KEY is
+     * composed against an environment that also holds OPENAI_API_KEY, a
+     * database URL and an unrelated sentinel. The factory records everything
+     * it can reach; nothing foreign may be reachable.
+     */
+    const FOREIGN = {
+      OPENAI_API_KEY: 'FOREIGN-openai-value',
+      XRAY_POSTGRES_URL: 'postgres://FOREIGN-database-value/x',
+      XRAY_UNRELATED_SENTINEL: 'FOREIGN-unrelated-value',
+    }
+    const foreignValues = Object.values(FOREIGN)
+
+    let seen: ModelProviderConfig | undefined
+    let seenRetrieval: RetrievalProviderConfig | undefined
+    const registry: ProviderRegistry = {
+      researchModels: [{
+        provider: 'anthropic', requires: ['ANTHROPIC_API_KEY'],
+        create: (config) => { seen = config; return testResearchModel },
+      }],
+      reviewerModels: [],
+      retrieval: [{
+        provider: 'anthropic', requires: ['ANTHROPIC_API_KEY'],
+        create: (config) => { seenRetrieval = config; return testResearchAdapter },
+      }],
+    }
+
+    const composed = composeProviders({
+      ...FOREIGN, ANTHROPIC_API_KEY: SECRET,
+      [PROVIDER_ENV.researchModel]: 'anthropic', [PROVIDER_ENV.researchModelId]: 'a-model',
+      [PROVIDER_ENV.retrieval]: 'anthropic',
+    }, registry)
+    if (composed.research.status !== 'AVAILABLE') return `research ${composed.research.status}`
+
+    // Resolution alone must not have constructed anything.
+    if (seen !== undefined) return 'the factory ran during resolution'
+
+    // Calling the thunk is the only thing that reaches a factory. Awaited, so
+    // a factory that throws fails this check rather than escaping it.
+    const model = await composed.research.create()
+    if (model !== testResearchModel) return 'the factory did not return its port'
+    if (composed.retrieval.status !== 'AVAILABLE')
+      return `retrieval ${composed.retrieval.status}`
+    await composed.retrieval.create()
+    if (seen === undefined || seenRetrieval === undefined) return 'the factory never ran'
+
+    for (const [label, config] of [
+      ['research', seen as ModelProviderConfig],
+      ['retrieval', seenRetrieval as RetrievalProviderConfig],
+    ] as const) {
+      const configuration = config.configuration
+
+      // It got its own declared secret — the boundary narrows, not blinds.
+      if (configuration.require('ANTHROPIC_API_KEY') !== SECRET)
+        return `${label}: could not read its own declared key`
+      if (configuration.declaredNames.length !== 1)
+        return `${label}: declares ${JSON.stringify(configuration.declaredNames)}`
+
+      // Nothing foreign is present, by name...
+      for (const name of Object.keys(FOREIGN)) {
+        if (name in configuration.declared)
+          return `${label}: ${name} is present in declared configuration`
+        if (configuration.declared[name] !== undefined)
+          return `${label}: ${name} is readable`
+        let threw = false
+        try { configuration.require(name) } catch (err) {
+          threw = true
+          const message = (err as Error).message
+          for (const foreign of [...foreignValues, SECRET]) {
+            if (message.includes(foreign)) return `${label}: require(${name}) leaked a value`
+          }
+        }
+        if (!threw) return `${label}: require(${name}) did not throw`
+        let optionalThrew = false
+        try { configuration.optional(name) } catch { optionalThrew = true }
+        if (!optionalThrew) return `${label}: optional(${name}) did not throw`
+      }
+
+      // ...and not by value, anywhere reachable from the config object.
+      const reachable = collectStrings(config)
+      for (const foreign of foreignValues) {
+        if (reachable.some((text) => text.includes(foreign)))
+          return `${label}: a foreign value is reachable from the config object`
+      }
+      if (!reachable.some((text) => text.includes(SECRET)))
+        return `${label}: the declared key was not reachable, so the scan proves nothing`
+
+      // No prototype channel, and no environment handle by any name.
+      if (Object.getPrototypeOf(configuration.declared) !== null)
+        return `${label}: the declared record has a prototype`
+      if (!Object.isFrozen(configuration.declared) || !Object.isFrozen(configuration))
+        return `${label}: the configuration is mutable`
+      for (const key of Object.keys(config)) {
+        if (/^(env|environment|process|secrets)$/i.test(key))
+          return `${label}: the config exposes "${key}"`
+      }
+    }
+
+    // The declaration is the boundary: widening it is a registry edit.
+    const widened = narrowEnvironment(
+      { ...FOREIGN, ANTHROPIC_API_KEY: SECRET },
+      declaredNames({ requires: ['ANTHROPIC_API_KEY'], optional: ['XRAY_UNRELATED_SENTINEL'] }),
+    )
+    if (widened.optional('XRAY_UNRELATED_SENTINEL') !== FOREIGN.XRAY_UNRELATED_SENTINEL)
+      return 'an explicitly declared optional name was not readable'
+    if (widened.declared['OPENAI_API_KEY'] !== undefined)
+      return 'widening one name exposed another'
+
+    // An entry declaring nothing sees nothing.
+    const blind = narrowEnvironment({ ...FOREIGN, ANTHROPIC_API_KEY: SECRET }, [])
+    return Object.keys(blind.declared).length === 0 && blind.declaredNames.length === 0
+      ? null : 'an entry declaring nothing still received configuration'
+  })
+
+  check('12d · the type cannot carry an environment handle', () => {
+    // The runtime scan above proves this instance is clean; this proves the
+    // shape is, so 20b cannot re-add the handle without deleting this line.
+    const source = stripComments(read('lib/xray/providers/config.ts'))
+    const interfaces = source.match(
+      /export interface (?:Model|Retrieval)ProviderConfig \{[^}]*\}/g) ?? []
+    if (interfaces.length !== 2) return `found ${interfaces.length} config interfaces`
+    for (const shape of interfaces) {
+      if (/\benv\b\s*:/.test(shape)) return `a config interface still declares env: ${shape}`
+      if (/Environment/.test(shape)) return 'a config interface still carries an Environment'
+    }
+    // And narrowEnvironment is the only door.
+    const registry = stripComments(read('lib/xray/providers/registry.ts'))
+    const handedEnv = /create!?\([^)]*\benv\b/.test(registry)
+      || /configuration:\s*env\b/.test(registry)
+    return handedEnv ? 'the registry hands env to a factory' : null
   })
 
   // === isolation ========================================================
@@ -364,9 +537,16 @@ function main(): void {
     // And the provider layer never reaches back into a host or a runtime.
     for (const file of sources('lib/xray/providers')) {
       if (file.endsWith('composition-checks.ts')) continue
-      if (/setExecutionRuntimeProvider|setDatabaseProvider|hostConnection/
-        .test(stripComments(readFileSync(file, 'utf8'))))
-        return `${file.slice(file.indexOf('lib/xray'))} registers or opens a host resource`
+      const source = stripComments(readFileSync(file, 'utf8'))
+      const relative = file.slice(file.indexOf('lib/xray'))
+      if (/setExecutionRuntimeProvider|setDatabaseProvider|hostConnection/.test(source))
+        return `${relative} registers or opens a host resource`
+      // Inside the provider layer, only config.ts may name process.env. This
+      // is what stops a future adapter reading a secret directly instead of
+      // going through the configuration its entry declares — the narrowing
+      // boundary governs what is handed over, not what `process` holds.
+      if (!file.endsWith('providers/config.ts') && /process\.env/.test(source))
+        return `${relative} reads process.env directly`
     }
     return null
   })
@@ -464,7 +644,63 @@ function main(): void {
     return sdk.length === 0 ? null : `a provider SDK is installed: ${sdk.join(', ')}`
   })
 
-  report()
+  for (const { name, run } of checks) {
+    let detail: string | null
+    try { detail = await run() } catch (err) { detail = `threw: ${(err as Error).message}` }
+    console.log(`${detail === null ? 'ok  ' : 'FAIL'}  ${name}${detail === null ? '' : ` — ${detail}`}`)
+    if (detail !== null) failures += 1
+  }
+
+  console.log(`\n${checks.length - failures}/${checks.length} provider composition checks passed`)
+  if (failures > 0) process.exitCode = 1
+}
+
+let failures = 0
+
+/*
+ * The test ports. Real instances of the existing port types: that these
+ * satisfy `ResearchModel`, `ReviewerModel` and `ResearchAdapter` is checked by
+ * the compiler, which is what makes check 12 a proof rather than an assertion.
+ */
+const testResearchModel: ResearchModel = {
+  name: 'test-research-model',
+  async decompose() { return unavailable() },
+  async classify() { return unavailable() },
+  async trace() { return unavailable() },
+  async disconfirm() { return unavailable() },
+  async reconcile() { return unavailable() },
+  async grade() { return unavailable() },
+  async identifyGaps() { return unavailable() },
+}
+
+const testReviewerModel: ReviewerModel = {
+  name: 'test-reviewer-model',
+  async judge() { return unavailable() },
+}
+
+const testResearchAdapter: ResearchAdapter = {
+  name: 'test-retrieval',
+  async search() { return unavailable() },
+  async retrieve() { return unavailable() },
+}
+
+/**
+ * Every string reachable from a value, following plain objects and arrays.
+ *
+ * Used to prove a negative: that no foreign environment value is retrievable
+ * from a configuration object by any path, not merely absent from its keys.
+ */
+function collectStrings(value: unknown, depth = 0, seen = new Set<unknown>()): string[] {
+  if (depth > 8 || value === null || value === undefined) return []
+  if (typeof value === 'string') return [value]
+  if (typeof value !== 'object') return [String(value)]
+  if (seen.has(value)) return []
+  seen.add(value)
+  const out: string[] = []
+  for (const entry of Object.values(value as Record<string, unknown>)) {
+    out.push(...collectStrings(entry, depth + 1, seen))
+  }
+  return out
 }
 
 /** The one shape every test port returns: nothing is available in 20a. */
@@ -478,11 +714,10 @@ function unavailable() {
   }
 }
 
-function report(): void {
-  for (const result of results) {
-    console.log(`${result.ok ? 'ok  ' : 'FAIL'}  ${result.name}${result.detail ? ` — ${result.detail}` : ''}`)
-  }
-  const failed = results.filter((result) => !result.ok).length
-  console.log(`\n${results.length - failed}/${results.length} provider composition checks passed`)
-  if (failed > 0) process.exitCode = 1
-}
+// Invoked last, so the test ports below are initialised before any factory
+// runs: an earlier version called main() at the top and a factory hit the
+// temporal dead zone.
+main().catch((err: unknown) => {
+  console.error(`\nFAIL  the gate itself failed: ${String(err)}`)
+  process.exit(1)
+})

@@ -10,30 +10,55 @@ ok    10 · a missing secret is reported by name, never by value
 ok    10b · a present secret never appears in a result, description or error
 ok    11 · a provider that cannot be honoured never becomes another one
 ok    12 · factories return the existing ports and nothing else
+ok    12b · every resolution names its exact slot, absence included
+ok    12c · a factory sees only what its own entry declares
+ok    12d · the type cannot carry an environment handle
 ok    13 · no provider import or provider setting reaches any other layer
 ok    13b · provider selectors and model ids never enter canonical state
 ok    15 · 20a registers no execution runtime, so the unconfigured path stands
 ok    14/§5 · no provider secret can be committed, and none has been
 ok    stop line · no provider HTTP, SDK, prompt or model call exists yet
 
-16/16 provider composition checks passed
+19/19 provider composition checks passed
 
-=== resolution states, host boundary ===
+=== resolution states and the narrowed factory boundary ===
 
 this machine (process.env, unmodified)
-  research  NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
-  reviewer  NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
-  retrieval NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  RESEARCH_MODEL NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  REVIEWER_MODEL NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  RETRIEVAL      NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
   fully available: false
 
 a fully configured Anthropic deployment
-  research  NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
-  reviewer  NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
-  retrieval NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
+  RESEARCH_MODEL NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
+  REVIEWER_MODEL NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
+  RETRIEVAL      NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
   fully available: false
 
 the same, with the key removed
-  research  CONFIGURATION_INCOMPLETE  Provider "anthropic" is selected but ANTHROPIC_API_KEY is not set.
-  reviewer  CONFIGURATION_INCOMPLETE  Provider "openai" is selected but OPENAI_API_KEY is not set.
-  retrieval NOT_IMPLEMENTED           Provider "custom" is registered and configured, but no adapter for it is implemented yet.
+  RESEARCH_MODEL CONFIGURATION_INCOMPLETE  Provider "anthropic" is selected but ANTHROPIC_API_KEY is not set.
+  REVIEWER_MODEL CONFIGURATION_INCOMPLETE  Provider "openai" is selected but OPENAI_API_KEY is not set.
+  RETRIEVAL      NOT_IMPLEMENTED           Provider "custom" is registered and configured, but no adapter for it is implemented yet.
   fully available: false
+
+research selected, reviewer absent (the exact absent slot)
+  RESEARCH_MODEL NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
+  REVIEWER_MODEL NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  RETRIEVAL      NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  fully available: false
+
+what an entry declaring only ANTHROPIC_API_KEY receives
+  environment holds:  ANTHROPIC_API_KEY, OPENAI_API_KEY, XRAY_POSTGRES_URL, XRAY_UNRELATED_SENTINEL
+  declaredNames:      ANTHROPIC_API_KEY
+  declared keys:      ANTHROPIC_API_KEY
+  prototype:          null
+  frozen:             true
+  require(OPENAI_API_KEY) → This provider entry declares ANTHROPIC_API_KEY and may not read OPENAI_API_KEY. Declare it on the registry entry to use it.
+  require(XRAY_POSTGRES_URL) → This provider entry declares ANTHROPIC_API_KEY and may not read XRAY_POSTGRES_URL. Declare it on the registry entry to use it.
+  require(XRAY_UNRELATED_SENTINEL) → This provider entry declares ANTHROPIC_API_KEY and may not read XRAY_UNRELATED_SENTINEL. Declare it on the registry entry to use it.
+
+=== negative controls (each reverted immediately; see report) ===
+A  narrowEnvironment widened to every env key   → FAIL 12c (declares [ANTHROPIC_API_KEY, OPENAI_API_KEY, XRAY_POSTGRES_URL, XRAY_UNRELATED_SENTINEL, ...])
+B  env re-added to ModelProviderConfig          → FAIL 12c (a foreign value is reachable) + FAIL 12d (a config interface still declares env)
+C  NOT_SELECTED reverted to a generic slot      → FAIL 12b (absent research slot RETRIEVAL)
+D  composeProviders defaulting to process.env   → FAIL 13 (registry.ts reads process.env directly)
