@@ -184,6 +184,23 @@ export interface ClosureAssertion {
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * Every command that depends on action history runs as:
+ *
+ *   BEGIN → lock the request row → re-read history → check → append → COMMIT
+ *
+ * Every sequence 10a allocates is `MAX(...) + 1`, which two concurrent callers
+ * can read identically, and every lifecycle rule is a statement about history
+ * that a concurrent command can invalidate. Both problems have the same fix, so
+ * the lock covers the checks as well as the allocation — see
+ * `withRequestLock`.
+ *
+ * HONEST LIMITATION: PGlite runs a single connection. The gates prove the
+ * ordering — that checks run on state re-read after the lock — and prove the
+ * outcome deterministic. They do not prove native concurrent row-lock
+ * behaviour; that needs a real PostgreSQL gate, the same limitation #7 and #9
+ * record.
+ */
 export class ATIActionService {
   private readonly db: SnapshotDatabase
   private readonly clock: () => string
@@ -199,10 +216,18 @@ export class ATIActionService {
     return readRequestLifecycle(this.db, requestId)
   }
 
-  /** The derived read model. Throws if the request does not exist. */
+  /**
+   * The derived read model. Throws if the request does not exist.
+   *
+   * Takes no lock: it is a read, and a caller acting on what it returns goes
+   * back through a command, which re-reads under one.
+   */
   async view(requestId: string): Promise<ATIRequestView> {
-    const lifecycle = await this.require(requestId)
-    return projectATIRequest(lifecycle)
+    const lifecycle = await readRequestLifecycle(this.db, requestId)
+    if (lifecycle === undefined) {
+      reject('ATI/REQUEST_NOT_FOUND', `no ATI request ${requestId}`, { requestId })
+    }
+    return projectATIRequest(lifecycle!)
   }
 
   /** Every request anchored to one exact gap. There may legitimately be several (C3). */
@@ -264,33 +289,34 @@ export class ATIActionService {
   /**
    * Add a revision, bounded by the request's **frozen** origin snapshot.
    *
-   * The origin is re-read from the request's own row, not taken from the
-   * caller, so a revision cannot quietly re-anchor itself to a newer version
-   * that names more records.
+   * The origin is read from the request's own row, not taken from the caller,
+   * so a revision cannot quietly re-anchor itself to a newer version that names
+   * more records.
    */
   async reviseDraft(requestId: string, input: ReviseDraftInput): Promise<number> {
-    const lifecycle = await this.require(requestId)
-    this.refuseIfClosed(lifecycle)
+    return this.withRequestLock(requestId, async (lifecycle) => {
+      this.refuseIfClosed(lifecycle)
 
-    const gap = await this.loadOriginGap({
-      investigationId: lifecycle.investigationId,
-      originVersion: lifecycle.originVersion,
-      gapId: lifecycle.gapId,
+      const gap = await this.loadOriginGap({
+        investigationId: lifecycle.investigationId,
+        originVersion: lifecycle.originVersion,
+        gapId: lifecycle.gapId,
+      })
+      const createdAt = input.createdAt ?? this.clock()
+      const content = this.buildContent(gap, input, createdAt)
+
+      // Sequence is authoritative for ordering, so a revision may not be
+      // stamped before the revision it follows — that would make the history
+      // read as though the older text were the newer one.
+      const latest = lifecycle.revisions[lifecycle.revisions.length - 1]
+      if (latest !== undefined && createdAt < latest.createdAt) {
+        reject('ATI/RETROGRADE_EVENT',
+          `revision would be stamped ${createdAt}, before revision ${latest.revision} at ${latest.createdAt}`,
+          { requestId, createdAt, previousRevision: latest.revision, previousCreatedAt: latest.createdAt })
+      }
+
+      return reviseRequest(this.db, requestId, content)
     })
-    const createdAt = input.createdAt ?? this.clock()
-    const content = this.buildContent(gap, input, createdAt)
-
-    // Sequence is authoritative for ordering, so a revision may not be stamped
-    // before the revision it follows — that would make the history read as
-    // though the older text were the newer one.
-    const latest = lifecycle.revisions[lifecycle.revisions.length - 1]
-    if (latest !== undefined && createdAt < latest.createdAt) {
-      reject('ATI/RETROGRADE_EVENT',
-        `revision would be stamped ${createdAt}, before revision ${latest.revision} at ${latest.createdAt}`,
-        { requestId, createdAt, previousRevision: latest.revision, previousCreatedAt: latest.createdAt })
-    }
-
-    return this.serialized(requestId, () => reviseRequest(this.db, requestId, content))
   }
 
   // -- lifecycle acts ------------------------------------------------------
@@ -299,24 +325,25 @@ export class ATIActionService {
   async exportRevision(
     requestId: string, revision: number, occurredAt?: string,
   ): Promise<number> {
-    const lifecycle = await this.require(requestId)
-    this.refuseIfClosed(lifecycle)
+    return this.withRequestLock(requestId, async (lifecycle) => {
+      this.refuseIfClosed(lifecycle)
 
-    const frozen = lifecycle.revisions.find((row) => row.revision === revision)
-    if (frozen === undefined) {
-      reject('ATI/REVISION_NOT_FOUND',
-        `request ${requestId} has no revision ${revision}`,
-        { requestId, revision, revisions: lifecycle.revisions.map((r) => r.revision) })
-    }
+      const frozen = lifecycle.revisions.find((row) => row.revision === revision)
+      if (frozen === undefined) {
+        reject('ATI/REVISION_NOT_FOUND',
+          `request ${requestId} has no revision ${revision}`,
+          { requestId, revision, revisions: lifecycle.revisions.map((r) => r.revision) })
+      }
 
-    const at = occurredAt ?? this.clock()
-    if (at < frozen!.createdAt) {
-      reject('ATI/RETROGRADE_EVENT',
-        `export at ${at} precedes revision ${revision}, created at ${frozen!.createdAt}`,
-        { requestId, revision, occurredAt: at, revisionCreatedAt: frozen!.createdAt })
-    }
+      const at = occurredAt ?? this.clock()
+      if (at < frozen!.createdAt) {
+        reject('ATI/RETROGRADE_EVENT',
+          `export at ${at} precedes revision ${revision}, created at ${frozen!.createdAt}`,
+          { requestId, revision, occurredAt: at, revisionCreatedAt: frozen!.createdAt })
+      }
 
-    return this.serialized(requestId, () => recordExport(this.db, requestId, revision, at))
+      return recordExport(this.db, requestId, revision, at)
+    })
   }
 
   /**
@@ -329,52 +356,52 @@ export class ATIActionService {
     requestId: string, exportSequence: number, assertion: SubmissionAssertion,
     occurredAt?: string,
   ): Promise<number> {
-    const lifecycle = await this.require(requestId)
-    this.refuseIfClosed(lifecycle)
+    return this.withRequestLock(requestId, async (lifecycle) => {
+      this.refuseIfClosed(lifecycle)
 
-    const named = lifecycle.events.find((event) => event.sequence === exportSequence)
-    if (named === undefined || named.act !== 'EXPORT') {
-      reject('ATI/EXPORT_NOT_FOUND',
-        named === undefined
-          ? `request ${requestId} has no event ${exportSequence}`
-          : `event ${exportSequence} of ${requestId} is a ${named.act}, not an export`,
-        { requestId, exportSequence, ...(named === undefined ? {} : { act: named.act }) })
-    }
+      const named = lifecycle.events.find((event) => event.sequence === exportSequence)
+      if (named === undefined || named.act !== 'EXPORT') {
+        reject('ATI/EXPORT_NOT_FOUND',
+          named === undefined
+            ? `request ${requestId} has no event ${exportSequence}`
+            : `event ${exportSequence} of ${requestId} is a ${named.act}, not an export`,
+          { requestId, exportSequence, ...(named === undefined ? {} : { act: named.act }) })
+      }
 
-    const at = occurredAt ?? this.clock()
-    if (at < named!.occurredAt) {
-      reject('ATI/RETROGRADE_EVENT',
-        `submission at ${at} precedes the export it names, at ${named!.occurredAt}`,
-        { requestId, exportSequence, occurredAt: at, exportOccurredAt: named!.occurredAt })
-    }
+      const at = occurredAt ?? this.clock()
+      if (at < named!.occurredAt) {
+        reject('ATI/RETROGRADE_EVENT',
+          `submission at ${at} precedes the export it names, at ${named!.occurredAt}`,
+          { requestId, exportSequence, occurredAt: at, exportOccurredAt: named!.occurredAt })
+      }
 
-    const { humanConfirmed: _confirmed, ...facts } = assertion
-    return this.serialized(requestId,
-      () => confirmSubmission(this.db, requestId, exportSequence, at, facts))
+      const { humanConfirmed: _confirmed, ...facts } = assertion
+      return confirmSubmission(this.db, requestId, exportSequence, at, facts)
+    })
   }
 
   /** An institution acknowledged a request that was actually filed. */
   async acknowledge(requestId: string, occurredAt?: string, note?: string): Promise<number> {
-    const lifecycle = await this.require(requestId)
-    this.refuseIfClosed(lifecycle)
+    return this.withRequestLock(requestId, async (lifecycle) => {
+      this.refuseIfClosed(lifecycle)
 
-    const submissions = lifecycle.events.filter((event) => event.act === 'SUBMIT')
-    if (submissions.length === 0) {
-      reject('ATI/ACKNOWLEDGEMENT_BEFORE_SUBMISSION',
-        `request ${requestId} has not been filed, so there is nothing to acknowledge`,
-        { requestId, status: lifecycle.status })
-    }
+      const submissions = lifecycle.events.filter((event) => event.act === 'SUBMIT')
+      if (submissions.length === 0) {
+        reject('ATI/ACKNOWLEDGEMENT_BEFORE_SUBMISSION',
+          `request ${requestId} has not been filed, so there is nothing to acknowledge`,
+          { requestId, status: lifecycle.status })
+      }
 
-    const at = occurredAt ?? this.clock()
-    const earliest = submissions[0] as EventRow
-    if (at < earliest.occurredAt) {
-      reject('ATI/RETROGRADE_EVENT',
-        `acknowledgement at ${at} precedes the submission at ${earliest.occurredAt}`,
-        { requestId, occurredAt: at, submittedAt: earliest.occurredAt })
-    }
+      const at = occurredAt ?? this.clock()
+      const earliest = submissions[0] as EventRow
+      if (at < earliest.occurredAt) {
+        reject('ATI/RETROGRADE_EVENT',
+          `acknowledgement at ${at} precedes the submission at ${earliest.occurredAt}`,
+          { requestId, occurredAt: at, submittedAt: earliest.occurredAt })
+      }
 
-    return this.serialized(requestId,
-      () => recordAcknowledgement(this.db, requestId, at, note))
+      return recordAcknowledgement(this.db, requestId, at, note)
+    })
   }
 
   /**
@@ -387,32 +414,85 @@ export class ATIActionService {
   async close(
     requestId: string, assertion: ClosureAssertion, occurredAt?: string,
   ): Promise<number> {
-    const lifecycle = await this.require(requestId)
-    this.refuseIfClosed(lifecycle)
+    return this.withRequestLock(requestId, async (lifecycle) => {
+      this.refuseIfClosed(lifecycle)
 
-    if (lifecycle.events.length === 0) {
-      reject('ATI/CLOSE_REQUIRES_POST_DRAFT_STATE',
-        `request ${requestId} is still a draft; closure is a post-draft administrative act`,
-        { requestId, status: lifecycle.status })
-    }
-    if (assertion.reason.trim() === '') {
-      reject('ATI/CLOSE_REQUIRES_POST_DRAFT_STATE',
-        `closing ${requestId} requires a stated reason`, { requestId })
-    }
+      if (lifecycle.events.length === 0) {
+        reject('ATI/CLOSE_REQUIRES_POST_DRAFT_STATE',
+          `request ${requestId} is still a draft; closure is a post-draft administrative act`,
+          { requestId, status: lifecycle.status })
+      }
+      if (assertion.reason.trim() === '') {
+        reject('ATI/CLOSE_REQUIRES_POST_DRAFT_STATE',
+          `closing ${requestId} requires a stated reason`, { requestId })
+      }
 
-    const at = occurredAt ?? this.clock()
-    return this.serialized(requestId,
-      () => closeRequest(this.db, requestId, at, assertion.reason))
+      const at = occurredAt ?? this.clock()
+      return closeRequest(this.db, requestId, at, assertion.reason)
+    })
   }
 
   // -- internals -----------------------------------------------------------
 
-  private async require(requestId: string): Promise<RequestLifecycle> {
-    const lifecycle = await readRequestLifecycle(this.db, requestId)
-    if (lifecycle === undefined) {
-      reject('ATI/REQUEST_NOT_FOUND', `no ATI request ${requestId}`, { requestId })
+  /**
+   * Take the request's row lock FIRST, then read the history every check will
+   * run against.
+   *
+   * THE ORDER IS THE POINT
+   * ======================
+   * An earlier version of this file validated before locking:
+   *
+   *   read lifecycle → validate → lock → append
+   *
+   * which is wrong in a way a perfectly behaving lock cannot save. Two
+   * commands, B arriving second:
+   *
+   *   B reads the history: OPEN, an export is legal
+   *   A takes the lock, appends CLOSE, commits
+   *   B takes the lock — and appends the EXPORT it decided on before A ran
+   *
+   * The result is a history reading `... CLOSE → EXPORT`, which the whole
+   * point of refusing post-close acts was to make impossible. B's decision was
+   * sound when it was made and stale by the time it was applied.
+   *
+   * So the lifecycle is re-read after the lock is held, inside the same
+   * transaction, and every lifecycle-dependent check — closure, sequence
+   * allocation, predecessor lookup, chronology — runs on that fresh read.
+   * Nothing can change between the check and the append, because nothing else
+   * can hold the row.
+   *
+   * This relies on READ COMMITTED, PostgreSQL's default and what every other
+   * transaction in this codebase uses: once `FOR UPDATE` returns, a later
+   * statement in the same transaction sees what the blocking transaction
+   * committed. Under REPEATABLE READ the re-read would return the pre-lock
+   * snapshot instead and this would have to be a serialization-failure retry.
+   *
+   * The lock query doubles as the existence check: no row, no request.
+   */
+  private async withRequestLock<T>(
+    requestId: string, act: (lifecycle: RequestLifecycle) => Promise<T>,
+  ): Promise<T> {
+    await this.db.query('BEGIN')
+    try {
+      const locked = (await this.db.query(
+        'SELECT id FROM ati_requests WHERE id=$1 FOR UPDATE', [requestId])).rows
+      if (locked.length !== 1) {
+        reject('ATI/REQUEST_NOT_FOUND', `no ATI request ${requestId}`, { requestId })
+      }
+      // Re-read under the lock. Anything a concurrent command committed while
+      // this one waited is visible here, and nothing further can change until
+      // this transaction ends.
+      const lifecycle = await readRequestLifecycle(this.db, requestId)
+      if (lifecycle === undefined) {
+        reject('ATI/REQUEST_NOT_FOUND', `no ATI request ${requestId}`, { requestId })
+      }
+      const out = await act(lifecycle!)
+      await this.db.query('COMMIT')
+      return out
+    } catch (error) {
+      await this.db.query('ROLLBACK')
+      throw error
     }
-    return lifecycle!
   }
 
   /**
@@ -569,29 +649,4 @@ export class ATIActionService {
     }
   }
 
-  /**
-   * Run one append under a row lock on the request.
-   *
-   * Every sequence 10a allocates is `MAX(...) + 1`, which two concurrent
-   * callers can read identically. The lock is on the `ati_requests` row
-   * because that is the one row every revision, event and response of a
-   * request already hangs off.
-   *
-   * HONEST LIMITATION: PGlite runs a single connection, so the gates can prove
-   * the lock is taken and the outcome deterministic, and cannot prove native
-   * concurrent row-lock behaviour. That needs a real PostgreSQL gate, which is
-   * the same limitation #7 and #9 record.
-   */
-  private async serialized<T>(requestId: string, act: () => Promise<T>): Promise<T> {
-    await this.db.query('BEGIN')
-    try {
-      await this.db.query('SELECT id FROM ati_requests WHERE id=$1 FOR UPDATE', [requestId])
-      const out = await act()
-      await this.db.query('COMMIT')
-      return out
-    } catch (error) {
-      await this.db.query('ROLLBACK')
-      throw error
-    }
-  }
 }

@@ -142,17 +142,46 @@ it names — a submission before its export, an export before the revision it
 freezes, an acknowledgement before the submission it presupposes. No attempt is
 made at global wall-clock truth.
 
-### Ordinals and sequences are allocated by the service
+### A transition is decided and applied under one lock
 
 Requests are `UNIQUE (investigation_id, ordinal)` and every revision, event and
 response sequence is `MAX(...) + 1`, which two concurrent callers can read
 identically. So the caller never chooses one: a create allocates under a row
 lock on the investigation, an append under a row lock on the request.
 
+**The lock covers the decision, not only the write.** Every lifecycle rule
+above is a statement about history, so a command that checked history before
+taking the lock could be overtaken:
+
+```text
+B reads the history: open, an export is legal
+A takes the lock, appends CLOSE, commits
+B takes the lock — and appends the export it decided on before A ran
+→ history reads  ... CLOSE → EXPORT
+```
+
+A perfectly behaving lock does not prevent that; the ordering does. So every
+command runs as:
+
+```text
+BEGIN → lock the request row → re-read history → check → append → COMMIT
+```
+
+Closure, sequence allocation, predecessor lookup and chronology all operate on
+the post-lock read. Nothing can change between the check and the append,
+because nothing else can hold the row.
+
+This relies on `READ COMMITTED`, PostgreSQL's default: once `FOR UPDATE`
+returns, a later statement in the same transaction sees what the blocking
+transaction committed. Under `REPEATABLE READ` the re-read would return the
+pre-lock snapshot and this would have to become a serialization-failure retry.
+
 **Honest limitation.** PGlite runs a single connection. The gates prove the
-lock is taken and the outcome deterministic; native concurrent row-lock
-behaviour needs a real PostgreSQL gate, which remains unrun — the same
-limitation #7 and #9 record.
+ordering — by landing another operator's `CLOSE` at the instant the lock is
+acquired, which only a post-lock re-read can see — and prove the outcome
+deterministic. They do **not** prove native concurrent row-lock behaviour;
+that needs a real PostgreSQL gate, which remains unrun, the same limitation #7
+and #9 record.
 
 ---
 

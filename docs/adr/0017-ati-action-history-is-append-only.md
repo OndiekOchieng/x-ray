@@ -147,5 +147,11 @@ removed the graph-level checks. Evidence in `verification/issue-10-10b/`.
 **The command layer also owns what the database cannot say.** Append-only means
 no mutation, not no sequel, so semantically impossible sequences — a submission
 inferred from an export, an acknowledgement of an unfiled request, anything
-after a close — are refused there. And it allocates every ordinal and sequence
-under a row lock, so no caller can collide on one.
+after a close — are refused there.
+
+**And a transition is decided and applied under one lock.** Each of those rules
+is a statement about history, so checking before locking is not enough: a
+command overtaken while it waited would apply a decision that was sound when
+made and stale when applied, producing a history that reads past its own close.
+Every command therefore locks the request row first, re-reads the history, and
+runs every lifecycle-dependent check on that read before appending.

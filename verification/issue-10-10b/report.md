@@ -1,8 +1,85 @@
 # Slice 10b — ATI action commands and graph-boundary cleanup
 
-**Released from:** `03eaa5d` · **Delivered at:** `1d0cdde`
-**Commits:** `40f9bc3` `feat(ati): add action command boundary` → `1d0cdde` `refactor(graph): remove ATI lifecycle from evidence graph`
-**Gate:** `pnpm check:ati-commands` — **30/30**
+**Released from:** `03eaa5d`
+**Commits:** `40f9bc3` `feat(ati): add action command boundary` → `1d0cdde` `refactor(graph): remove ATI lifecycle from evidence graph` → `60a1d23` `test(ati): preserve action eligibility at command boundary` → **remediation** `fix(ati): decide and apply transitions under one lock`
+**Gate:** `pnpm check:ati-commands` — **32/32**
+
+---
+
+## Remediation — transition atomicity
+
+**Blocker as reviewed at `60a1d23`.** Every lifecycle-dependent command did the
+semantic checks *before* acquiring the per-request lock:
+
+```text
+read lifecycle → validate → lock → append
+```
+
+which a perfectly behaving lock cannot save:
+
+```text
+B reads the history: open, an export is legal
+A takes the lock, appends CLOSE, commits
+B takes the lock — and appends the export it decided on before A ran
+→ history reads  ... CLOSE → EXPORT
+```
+
+B's decision was sound when made and stale when applied. Accepted as a real
+defect; the review's framing was exact.
+
+**Fix.** `serialized(requestId, act)` is replaced by
+`withRequestLock(requestId, act)`, which takes the row lock **first**, re-reads
+`RequestLifecycle` inside the same transaction, and hands that fresh read to
+every check:
+
+```text
+BEGIN → lock the request row → re-read history → check → append → COMMIT
+```
+
+Applied to all five lifecycle-dependent commands — `reviseDraft`,
+`exportRevision`, `confirmSubmitted`, `acknowledge`, `close`. Closure,
+sequence allocation, predecessor lookup and chronology now all operate on the
+post-lock read. `require()` is gone: the lock query is the existence check, so
+there is no pre-lock history read left to be stale. `readLifecycle` and `view`
+remain unlocked, because they are reads — a caller acting on one goes back
+through a command, which re-reads under the lock.
+
+`createDraft` was already correct and is unchanged: it locks the investigation
+before allocating, and its authorization reads immutable committed state, which
+no concurrent command can move.
+
+**Dependency now stated in the code, the doc and the ADR.** The post-lock
+re-read is only meaningful under `READ COMMITTED` — PostgreSQL's default, and
+what every other transaction in this codebase uses. Under `REPEATABLE READ` the
+re-read would return the pre-lock snapshot and this would have to become a
+serialization-failure retry.
+
+**Proof (two new checks, and they are load-bearing).**
+
+- **21d** injects another operator's `CLOSE` at the exact instant the `FOR
+  UPDATE` returns, via a `SnapshotDatabase` wrapper — the interleaving a single
+  PGlite connection cannot produce for real. All five commands must see it and
+  reject with `ATI/REQUEST_CLOSED`; the check then asserts the rollback left
+  the history byte-identical to the setup.
+- **21e** asserts the ordering structurally: `FOR UPDATE` precedes
+  `readRequestLifecycle` inside `withRequestLock`, there are exactly three
+  history call sites (the wrapper and the two read-only accessors), and each of
+  the five commands runs inside `withRequestLock` and reads no history of its
+  own.
+
+Run against the reviewed `60a1d23` service, both fail, and 21d names the
+corruption rather than just the miss —
+[`stale-prelock-state-failure.txt`](stale-prelock-state-failure.txt):
+
+```text
+FAIL  21d — revise acted on pre-lock state: accepted; expected ATI/REQUEST_CLOSED;
+            history now 1:EXPORT → 2:SUBMIT → 3:CLOSE → r2 → r3
+FAIL  21e — withRequestLock no longer locks and re-reads
+30/32
+```
+
+`r3` is a revision committed after the close: the exact history the review
+predicted.
 
 ---
 
@@ -14,7 +91,8 @@ This was the slice's central constraint, so it is the first thing to check.
 | --- | --- | --- |
 | `03eaa5d` (before) | absent | present |
 | `40f9bc3` | **present, 28/28 proven** | present |
-| `1d0cdde` (final) | **present, 30/30 proven** | removed |
+| `1d0cdde` | **present, 30/30 proven** | removed |
+| remediation (final) | **present, 32/32 proven**, now transition-atomic | removed |
 
 There is no commit in which neither layer enforces it. `40f9bc3` is the
 overlap, and the evidence for that moment is preserved verbatim in
@@ -227,14 +305,17 @@ Ordinals and sequences are allocated by the service. `CreateDraftInput` has no
   `inTransaction` option to participate — the same convention `workspace.ts`
   already uses. No schema change.
 - **appends** (revisions, events) hold
-  `SELECT id FROM ati_requests WHERE id=$1 FOR UPDATE`.
+  `SELECT id FROM ati_requests WHERE id=$1 FOR UPDATE` — and, since the
+  remediation, so do the checks that decide whether to append at all.
 
 `FOR UPDATE` on an existing row is the established style here (`version-commit.ts`,
 `publication.ts`).
 
 **HONEST LIMITATION, unchanged from #7 and #9.** PGlite runs a single
-connection. These gates prove the lock is taken and the outcome deterministic;
-they do **not** prove native concurrent row-lock behaviour. The native gate
+connection. These gates prove the *ordering* — by landing a concurrent `CLOSE`
+at the instant the lock is acquired, which only a post-lock re-read can see —
+and prove the outcome deterministic. They do **not** prove native concurrent
+row-lock behaviour. The native gate
 (`check:persistence-postgres-concurrency`) remains unrun because
 `XRAY_POSTGRES_URL` is unset — recorded as `NOT RUN` in `final-gate.txt`, not
 as a pass.
@@ -287,7 +368,7 @@ persistence type. It is not reachable from `XRayGraph`.
 | 18 | acknowledgement before submission fails | 18, 18b |
 | 19 | acknowledgement after submission succeeds | 19 |
 | 20 | close is explicit and administrative | 20 |
-| 21 | anything after close fails | 21 |
+| 21 | anything after close fails | 21, and 21d for the concurrent case |
 | 22 | derived read model correct | 22 |
 | 23 | action writes leave snapshots byte-identical | 23 (v1, v2, v3 + canonical row count) |
 | 24 | `XRayGraph` no longer carries ATI requests | 24 |
@@ -298,7 +379,8 @@ persistence type. It is not reachable from `XRayGraph`.
 | 29 | #8/#9 regressions green | 31 gates in `final-gate.txt` |
 | 30 | `tsc --noEmit` and `pnpm build` green | `final-gate.txt` |
 
-Check 4b (no record requested) is the one addition beyond the released list.
+Additions beyond the released list: check 4b (no record requested), and checks
+21d and 21e from the transition-atomicity remediation.
 
 ---
 
@@ -322,4 +404,5 @@ routes. No new migration: 10b is code over 10a's schema.
 
 - `verification/issue-10-10b/both-layers-active.txt` — the handoff overlap at `40f9bc3`
 - `verification/issue-10-10b/command-enforcement-removed.txt` — adversarial proof the gate bites
-- `verification/issue-10-10b/final-gate.txt` — 30/30 plus the full sweep at `1d0cdde`
+- `verification/issue-10-10b/stale-prelock-state-failure.txt` — the reviewed `60a1d23` ordering failing the remediated gate
+- `verification/issue-10-10b/final-gate.txt` — 32/32 plus the full sweep, remediated

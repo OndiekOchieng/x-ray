@@ -1,0 +1,46 @@
+Failing evidence — the reviewed 60a1d23 ordering, under the remediated gate.
+
+ati-service.ts restored to 60a1d23, where every command validated BEFORE
+acquiring the lock:  read lifecycle -> validate -> lock -> append.
+ati-command-checks.ts is the remediated gate.
+
+Check 21d injects another operator's CLOSE immediately after the FOR UPDATE
+and before anything else, modelling 'A committed while B waited'. A command
+that decided before locking cannot see it, and appends anyway.
+
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/ati-command-checks.ts
+ok    1 · an eligible exact-origin gap creates a draft
+ok    2 · a non-ATI gap is rejected at the command boundary
+ok    3 · unknown investigation, version or gap is rejected
+ok    4 · a requested record the origin gap does not name is rejected
+ok    4b · a request naming no record at all is rejected
+ok    5 · any exact subset of the origin gap's resolving evidence is accepted
+ok    6 · initial holder institution, office and basis come from the origin gap
+ok    7 · a gap with no likely holder never gets one invented
+ok    8 · a human CONFIRMED custody basis requires a stated rationale
+ok    9 · a revision stays bounded by the frozen origin after a later version exists
+ok    10 · several requests may target the same exact gap (C3)
+ok    11 · the service allocates the ordinal; the caller cannot
+ok    12 · exporting an exact existing revision succeeds
+ok    13 · exporting a revision that does not exist fails
+ok    13b · an export stamped before the revision it freezes fails
+ok    13c · acting on a request that does not exist fails
+ok    14 · an export does not imply a submission
+ok    15 · submission requires an explicit human assertion about an exact export
+ok    16 · a submission naming something that was not an export fails
+ok    17 · a submission stamped before the export it names fails
+ok    18 · an acknowledgement before any submission fails
+ok    18b · an acknowledgement stamped before the submission fails
+ok    19 · an acknowledgement after a submission succeeds
+ok    20 · closure is explicit, administrative, and unavailable from DRAFT
+ok    21 · nothing may follow a close
+FAIL  21d · every lifecycle check runs on history re-read under the lock — revise acted on pre-lock state: accepted; expected ATI/REQUEST_CLOSED; history now 1:EXPORT → 2:SUBMIT → 3:CLOSE → r2 → r3
+FAIL  21e · the lock is acquired before the history every check reads — withRequestLock no longer locks and re-reads
+ok    22 · the derived read model replays history without inventing anything
+ok    23 · every action write leaves committed snapshots byte-identical
+ok    24 · XRayGraph no longer carries ATI requests
+ok    25 · referential and epistemic validation no longer inspect ATI requests
+ok    26 · the command boundary emits XR-INV-009's own violation codes
+
+30/32 ATI command checks passed
+[ELIFECYCLE] Command failed with exit code 1.

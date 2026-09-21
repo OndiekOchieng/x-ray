@@ -29,7 +29,10 @@ import { createXRayGraph, type XRayGraph, type XRayGraphInput } from '@/lib/xray
 import { assessGraduation } from '@/lib/xray/acceptance'
 import { XRAY_KE_001_ACCEPTANCE } from '@/lib/xray/fixtures/xray-ke-001/acceptance'
 import { validateXRayGraph, type ViolationCode } from '@/lib/xray/validation'
-import { readSnapshot, writeInitialSnapshot } from '@/lib/xray/persistence/snapshot'
+import {
+  readSnapshot, writeInitialSnapshot, type SnapshotDatabase,
+} from '@/lib/xray/persistence/snapshot'
+import { closeRequest } from '@/lib/xray/persistence/ati-lifecycle'
 import { commitNextVersion } from '@/lib/xray/persistence/version-commit'
 import { prepareAssessedRun } from '@/lib/xray/persistence/graduation-check-support'
 import {
@@ -72,6 +75,50 @@ const rejectedWith = async (
   if (error === null) return `accepted; expected ${code}`
   if (!(error instanceof ATIActionRejected)) return `threw ${error.name}: ${error.message}`
   return error.code === code ? null : `rejected with ${error.code}, expected ${code}`
+}
+
+/**
+ * A database that lets another command's commit land at the exact moment this
+ * one acquires the request lock.
+ *
+ * This is the interleaving a single PGlite connection cannot produce for real:
+ *
+ *   B decides                    (stale, if the decision came before the lock)
+ *   A appends CLOSE and commits  ← injected here, right after B's FOR UPDATE
+ *   B appends                    (corrupt: ... CLOSE → EXPORT)
+ *
+ * The injection sits immediately AFTER the `FOR UPDATE` statement and before
+ * anything else, so a command that re-reads history under the lock must see it
+ * and a command that decided beforehand cannot. Which side of the lock the
+ * lifecycle checks run on is exactly what that discriminates.
+ */
+class LockInterleavingDatabase implements SnapshotDatabase {
+  private fired = false
+  readonly interleaved: string[] = []
+  private readonly inner: PGlite
+  private readonly requestId: string
+  private readonly other: (db: SnapshotDatabase) => Promise<void>
+
+  constructor(
+    inner: PGlite, requestId: string, other: (db: SnapshotDatabase) => Promise<void>,
+  ) {
+    this.inner = inner
+    this.requestId = requestId
+    this.other = other
+  }
+
+  async query(sql: string, params: unknown[] = []): Promise<{ rows: Record<string, unknown>[] }> {
+    const isRequestLock = /FROM ati_requests WHERE id=\$1 FOR UPDATE/.test(sql)
+      && params[0] === this.requestId
+    if (isRequestLock && !this.fired) {
+      this.fired = true
+      const locked = await this.inner.query(sql, params)
+      await this.other(this.inner)
+      this.interleaved.push(sql)
+      return locked as { rows: Record<string, unknown>[] }
+    }
+    return (await this.inner.query(sql, params)) as { rows: Record<string, unknown>[] }
+  }
 }
 
 const INV = 'XRAY-ATI-CMD'
@@ -488,6 +535,99 @@ async function main(): Promise<void> {
         ? null : `${lifecycle.events.length} events after the close attempts`
     })
 
+    // -- 21d -----------------------------------------------------------------
+    await check('21d · every lifecycle check runs on history re-read under the lock', async () => {
+      // A request in a state where revise, export, submit, acknowledge and
+      // close are all individually legal.
+      await service.createDraft({
+        ...origin, requestedRecords: [records[0]], publicInterestContext: context,
+        requestId: 'ATI-RACE', createdAt: '2026-09-21T08:00:00Z',
+      })
+      await service.reviseDraft('ATI-RACE', {
+        requestedRecords: [...records], publicInterestContext: context,
+        createdAt: '2026-09-21T08:30:00Z',
+      })
+      await service.exportRevision('ATI-RACE', 1, '2026-09-21T09:00:00Z')
+      await service.confirmSubmitted('ATI-RACE', 1, { humanConfirmed: true },
+        '2026-09-21T10:00:00Z')
+      const before = (await service.readLifecycle('ATI-RACE'))!
+      if (before.status !== 'SUBMITTED') return `setup status ${before.status}`
+
+      // Another operator closes the request while this command waits on the
+      // lock. Every one of these decided nothing before acquiring it, so every
+      // one must see the close.
+      const closesUnderUs = async (db: SnapshotDatabase) => void await closeRequest(
+        db, 'ATI-RACE', '2026-12-01T10:00:00Z',
+        'Closed by another operator while this command waited on the lock.')
+
+      const races: [string, (raced: ATIActionService) => Promise<unknown>][] = [
+        ['revise', (raced) => raced.reviseDraft('ATI-RACE', {
+          requestedRecords: [records[0]], publicInterestContext: context,
+          createdAt: '2026-12-02T10:00:00Z' })],
+        ['export', (raced) => raced.exportRevision('ATI-RACE', 2, '2026-12-02T10:00:00Z')],
+        ['submit', (raced) => raced.confirmSubmitted('ATI-RACE', 1,
+          { humanConfirmed: true }, '2026-12-02T10:00:00Z')],
+        ['acknowledge', (raced) => raced.acknowledge('ATI-RACE', '2026-12-02T10:00:00Z')],
+        ['close', (raced) => raced.close('ATI-RACE',
+          { humanConfirmed: true, reason: 'Second closure.' }, '2026-12-02T10:00:00Z')],
+      ]
+
+      for (const [label, act] of races) {
+        const raceDb = new LockInterleavingDatabase(db, 'ATI-RACE', closesUnderUs)
+        const raced = new ATIActionService(raceDb, clock(AT))
+        const failure = await rejectedWith('ATI/REQUEST_CLOSED', () => act(raced))
+        if (failure !== null) {
+          // Name the corruption, not just the miss: if the append went
+          // through, the committed history now reads past its own close.
+          const wrecked = await service.readLifecycle('ATI-RACE')
+          const sequence = wrecked === undefined ? 'unreadable'
+            : [...wrecked.events.map((event) => `${event.sequence}:${event.act}`),
+              ...wrecked.revisions.slice(1).map((row) => `r${row.revision}`)].join(' → ')
+          return `${label} acted on pre-lock state: ${failure}; history now ${sequence}`
+        }
+        if (raceDb.interleaved.length !== 1)
+          return `${label} never took the request lock`
+      }
+
+      // The rejections rolled back, so the injected close is gone and the
+      // request is exactly as the setup left it — the checks refused stale
+      // state without leaving any of their own behind.
+      const after = (await service.readLifecycle('ATI-RACE'))!
+      if (JSON.stringify(after) !== JSON.stringify(before))
+        return 'a rejected race left the history changed'
+      return null
+    })
+
+    // -- 21e -----------------------------------------------------------------
+    await check('21e · the lock is acquired before the history every check reads', async () => {
+      const source = stripComments(
+        readFileSync(new URL('./ati-service.ts', import.meta.url), 'utf8'))
+
+      // Inside withRequestLock, FOR UPDATE must come before the history read.
+      const wrapper = source.slice(source.indexOf('private async withRequestLock'))
+      const lockAt = wrapper.indexOf('FOR UPDATE')
+      const readAt = wrapper.indexOf('readRequestLifecycle')
+      if (lockAt < 0 || readAt < 0) return 'withRequestLock no longer locks and re-reads'
+      if (lockAt > readAt) return 'the history is read before the lock is taken'
+
+      // And no command reads the history outside the wrapper. The only other
+      // call sites are the two read-only accessors.
+      // Three call sites only: the wrapper, and the two read-only accessors.
+      const readers = source.split('readRequestLifecycle(').length - 1
+      if (readers !== 3)
+        return `${readers} call sites read the history, expected 3 (withRequestLock, readLifecycle, view)`
+      for (const command of ['reviseDraft', 'exportRevision', 'confirmSubmitted',
+        'acknowledge(', 'close(']) {
+        const body = commandBody(source, command)
+        if (body === null) return `could not locate ${command}`
+        if (!body.includes('this.withRequestLock('))
+          return `${command} does not run inside withRequestLock`
+        if (body.includes('readRequestLifecycle('))
+          return `${command} reads history outside the lock`
+      }
+      return null
+    })
+
     // -- 22 ------------------------------------------------------------------
     await check('22 · the derived read model replays history without inventing anything', async () => {
       const lifecycle = (await service.readLifecycle('ATI-A'))!
@@ -636,6 +776,16 @@ async function commitWithExtraRecord(
     executionRunId: runId,
   })
   return candidate
+}
+
+/** One method body, from its declaration to the start of the next member. */
+function commandBody(source: string, name: string): string | null {
+  const start = source.indexOf(`  async ${name}`)
+  if (start < 0) return null
+  const next = source.indexOf('\n  async ', start + 1)
+  const privateNext = source.indexOf('\n  private ', start + 1)
+  const end = [next, privateNext].filter((at) => at > 0).sort((a, b) => a - b)[0]
+  return source.slice(start, end === undefined ? undefined : end)
 }
 
 /** Strip comments, so a claim about source text is a claim about code. */
