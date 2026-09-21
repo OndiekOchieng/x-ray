@@ -72,28 +72,34 @@ const enumOf = (values: readonly string[], description: string) => ({
   type: 'string', enum: [...values], description,
 })
 
-const MEASUREMENT = {
-  type: 'object',
-  description: 'Present only if the text states a measurement. Omit otherwise.',
-  properties: {
-    metric: { type: 'string' },
-    value: { type: 'number' },
-    unit: { type: 'string' },
-    denominator: { type: 'string', description: 'What the value is a proportion of.' },
-    scope: { type: 'string' },
-  },
-}
+/**
+ * An object schema, always closed.
+ *
+ * `additionalProperties: false` is required on **every** object in the strict
+ * subset — a nested item schema inside an array is an object too. Authoring
+ * every object through one helper is what stops the twenty-ninth one being
+ * forgotten; `strict-schema.ts` still audits the result, because a helper
+ * nobody used would be no guard at all.
+ */
+const obj = (
+  properties: Readonly<Record<string, unknown>>,
+  extra: Readonly<Record<string, unknown>> = {},
+) => ({ type: 'object', properties, ...extra, additionalProperties: false })
 
-const TIME_SCOPE = {
-  type: 'object',
-  description: 'The period the statement covers. Dates must be ISO 8601 (YYYY-MM-DD).',
-  properties: {
-    from: { type: 'string' },
-    to: { type: 'string' },
-    asOf: { type: 'string' },
-    description: { type: 'string', description: 'Use when the wording cannot be reduced to dates.' },
-  },
-}
+const MEASUREMENT = obj({
+  metric: { type: 'string' },
+  value: { type: 'number' },
+  unit: { type: 'string' },
+  denominator: { type: 'string', description: 'What the value is a proportion of.' },
+  scope: { type: 'string' },
+}, { description: 'Present only if the text states a measurement. Omit otherwise.' })
+
+const TIME_SCOPE = obj({
+  from: { type: 'string' },
+  to: { type: 'string' },
+  asOf: { type: 'string' },
+  description: { type: 'string', description: 'Use when the wording cannot be reduced to dates.' },
+}, { description: 'The period the statement covers. Dates must be ISO 8601 (YYYY-MM-DD).' })
 
 const CLAIM_FIELDS = {
   text: { type: 'string', description: 'The single assertion, stated plainly.' },
@@ -135,10 +141,11 @@ extend what it says.
     description: 'The atomic claims the record makes.',
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         claims: {
           type: 'array',
-          items: { type: 'object', properties: CLAIM_FIELDS, required: ['text'] },
+          items: obj(CLAIM_FIELDS, { required: ['text'] }),
         },
       },
       required: ['claims'],
@@ -160,11 +167,13 @@ INTERPRETATION.
     description: 'A classification for each claim offered.',
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         classifications: {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               claimRef: handle('The claim being classified.'),
               layer: CLAIM_FIELDS.layer,
@@ -207,11 +216,13 @@ whether two documents are independent of each other. X-Ray decides that.
     description: 'Propositions, discovered claims and further searches.',
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         evidence: {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               sourceRef: handle('The document this came from.'),
               proposition: { type: 'string', description: 'What the document establishes.' },
@@ -236,6 +247,7 @@ whether two documents are independent of each other. X-Ray decides that.
           description: 'Claims the retrieved documents make that the original record did not.',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: { ...CLAIM_FIELDS, sourceRef: handle('The document it surfaced from.') },
             required: ['text', 'sourceRef'],
           },
@@ -245,6 +257,7 @@ whether two documents are independent of each other. X-Ray decides that.
           description: "A source's position relative to the claim, where the document shows it.",
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               sourceRef: handle('The document whose position this is.'),
               claimRefs: handles('Claims the position bears on.'),
@@ -270,6 +283,7 @@ whether two documents are independent of each other. X-Ray decides that.
           description: 'Further searches worth running. Advisory.',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: { terms: { type: 'string' }, constraints: strings('Narrowing to apply.') },
             required: ['terms'],
           },
@@ -295,11 +309,13 @@ have needed in order to overturn it, and whether you had it.
     description: 'A disconfirmation attempt per claim.',
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         disconfirmations: {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               claimRef: handle('The claim tested.'),
               preliminaryHypothesis: { type: 'string' },
@@ -335,11 +351,13 @@ GENUINE_CONTRADICTION for evidence that cannot both be true as stated.
     description: 'Discrepancies among the evidence, classified.',
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         discrepancies: {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               claimRefs: handles('Claims the discrepancy bears on.'),
               evidenceRefs: handles('The conflicting evidence.'),
@@ -381,11 +399,13 @@ nothing you can name would change it, the grade is too strong.
     description: 'A graded finding per claim.',
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         findings: {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               claimRef: handle('The claim graded.'),
               status: enumOf(VOCABULARY.findingStatus, 'The grade.'),
@@ -425,11 +445,13 @@ Do not repeat gaps already recorded.
     description: 'Evidence gaps limiting the investigation.',
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         gaps: {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               claimRefs: handles('Claims the gap limits.'),
               missingEvidence: { type: 'string', description: 'The specific record missing.' },
@@ -437,6 +459,7 @@ Do not repeat gaps already recorded.
               resolvingEvidence: strings('What would actually resolve it.'),
               likelyHolder: {
                 type: 'object',
+                additionalProperties: false,
                 properties: {
                   institution: { type: 'string' },
                   office: { type: 'string' },
@@ -504,6 +527,7 @@ export const REVIEW_TOOL: ToolSchema = {
   description: 'One calibrated judgment about the material given.',
   input_schema: {
     type: 'object',
+    additionalProperties: false,
     properties: {
       flagged: {
         type: 'boolean',
@@ -518,6 +542,7 @@ export const REVIEW_TOOL: ToolSchema = {
         description: 'The artifacts this concerns, by the ids given to you. Never invent an id.',
         items: {
           type: 'object',
+          additionalProperties: false,
           properties: {
             kind: enumOf(VOCABULARY.reviewTargetKind, 'What sort of artifact.'),
             id: { type: 'string', description: 'Exactly as given.' },

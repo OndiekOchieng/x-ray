@@ -1,0 +1,78 @@
+=== pnpm check:anthropic-adapters ===
+ok    5 · every malformed shape is rejected before it becomes a proposal
+ok    6 · a required vocabulary is checked in every slot that has one
+ok    14b · every operation is sent with strict schema enforcement
+ok    14c · every authored schema is strict-compatible, nested objects included
+ok    14d · a non-strict schema is refused before any request is sent
+ok    14e · RECONCILE still requires an array; strict is not a reason to coerce
+32/32 Anthropic adapter checks passed
+
+=== other gates ===
+22/22 provider composition checks passed
+29/29 Anthropic retrieval checks passed
+35/35 live runtime checks passed
+
+=== API contract verified, 2026-09-21 ===
+  https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use
+  https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+  https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools
+
+strict: true
+  - a TOP-LEVEL property of a tool definition, beside name/description/input_schema
+  - no beta header; anthropic-version: 2023-06-01 unchanged
+  - guarantees: tool `input` strictly follows `input_schema`, and tool `name` is valid
+  - implemented by grammar-constrained sampling over a compiled schema
+  - composes with forced selection; forced tool_choice is KEPT
+  - not accepted on the computer-use / browser-use toolsets (not used here)
+  - server tools (web_search, web_fetch) do NOT receive it — 20c's retrieval
+    path is untouched
+
+SUPPORTED subset
+  types object, array, string, integer, number, boolean, null
+  enum over scalars/null only; const; default
+  anyOf, allOf (no allOf with $ref); $ref/$defs/definitions (no external $ref)
+  required; additionalProperties — MUST be false for objects
+  formats date-time, time, date, duration, email, hostname, uri, ipv4, ipv6, uuid
+  array minItems — only 0 or 1
+
+NOT SUPPORTED
+  recursive schemas; complex types in enum; external $ref
+  numeric constraints (minimum, maximum, multipleOf)
+  string constraints (minLength, maxLength)
+  array constraints beyond minItems 0/1
+  additionalProperties anything other than false
+  -> an unsupported feature is a 400
+
+=== the audit, and what it found ===
+Before: 29 problems across all 8 tools. Every one a missing
+additionalProperties: false, and they included measurement, timeScope,
+likelyHolder, targets.items and every array item object.
+
+  DECOMPOSE 4 · CLASSIFY 4 · TRACE 10 · DISCONFIRM 2 · RECONCILE 2
+  GRADE 2 · IDENTIFY_GAPS 3 · REVIEW 2
+
+Special-casing RECONCILE would have fixed 2 of 29.
+After: 0 problems in all 8.
+
+=== the one live call ===
+  operation: reconcile (the one first light failed on)
+  material:  synthetic — two invented depot figures. No civic URL, no search.
+  schema audit before sending: 0 problems
+  HTTP:      accepted strict: true — no 400
+  stop_reason: tool_use
+  discrepancies: returned as an ARRAY and decoded into 1 proposal
+    classification=GENUINE_CONTRADICTION resolved=false
+    claimRefs=ref:c1,ref:c2  evidenceRefs=ref:e1,ref:e2
+  tokens: 1894 in / 374 out · 7.5s · one call
+
+=== negative controls (each verified to apply, then reverted) ===
+AW strict: true removed from the tool definition  -> FAIL 14b
+     "decompose: strict is undefined, expected true"
+AX a nested item object loses additionalProperties -> FAIL 14c, and 4 more
+     14c names the path: discrepancies.items.additionalProperties
+     the others fail because the request is REFUSED BEFORE BEING SENT, which
+     is the required behaviour
+AY the pre-request audit removed                   -> FAIL 14d
+     the bad schema reached the wire (AdapterFailure instead of a refusal)
+AZ the decoder coerces a scalar into an array      -> FAIL 5, 14e
+     proof the decoder is unchanged and still rejects bad shapes

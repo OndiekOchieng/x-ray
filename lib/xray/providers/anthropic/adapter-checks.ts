@@ -35,6 +35,9 @@ import type { ReviewerModelQuery } from '@/lib/xray/review'
 import { composeProviders, DEFAULT_REGISTRY } from '../registry'
 import { PROVIDER_ENV } from '../config'
 import { AnthropicResearchModel, AnthropicReviewerModel } from './index'
+import * as PROMPTS from './prompts'
+import { strictSchemaProblems } from './strict-schema'
+import { callMessages } from './transport'
 
 type Check = { name: string; run: () => string | null | Promise<string | null> }
 const checks: Check[] = []
@@ -976,6 +979,244 @@ check('14 · the adapter never retries; the pipeline owns that', async () => {
   if (scheduling !== null) return `the call path contains ${scheduling[0]}`
   return /setTimeout|setInterval|\bbackoff\b/i.test(transport)
     ? 'the transport schedules a later attempt' : null
+})
+
+// ---------------------------------------------------------------------------
+// 14b — strict tool use (#20 first-light Finding 1)
+// ---------------------------------------------------------------------------
+
+check('14b · every operation is sent with strict schema enforcement', async () => {
+  /*
+   * First light failed at RECONCILE because the model returned
+   * `discrepancies` as a string where the schema declares an array. The
+   * envelope was correct and the decoder correctly refused it: a declared
+   * schema was a *request*, not a guarantee.
+   *
+   * `strict: true` makes it a guarantee, so every operation must carry it —
+   * not just the one that failed.
+   */
+  const research = model()
+  const claimOffer = offer('c1', claim('C1', '42 kilometres were resurfaced.'))
+  const evidenceOffer = offer('e1', evidence('E1'))
+
+  const drives: [string, string, unknown, () => Promise<unknown>][] = [
+    ['decompose', 'propose_claims', { claims: [] },
+      () => research.decompose(DECOMPOSE_INPUT)],
+    ['classify', 'propose_classifications', { classifications: [] },
+      () => research.classify({ claims: [claimOffer] })],
+    ['trace', 'propose_trace', { evidence: [], discoveredClaims: [] },
+      () => research.trace({ claim: claimOffer, documents: [document] })],
+    ['disconfirm', 'propose_disconfirmation', { disconfirmations: [] },
+      () => research.disconfirm({ claim: claimOffer, evidence: [evidenceOffer] })],
+    ['reconcile', 'propose_discrepancies', { discrepancies: [] },
+      () => research.reconcile({ claims: [claimOffer], evidence: [evidenceOffer] })],
+    ['grade', 'propose_findings', { findings: [] },
+      () => research.grade({ claim: claimOffer, evidence: [evidenceOffer], discrepancyRefs: [] })],
+    ['identifyGaps', 'propose_gaps', { gaps: [] },
+      () => research.identifyGaps({ claims: [claimOffer], findings: [], existingGaps: [] })],
+  ]
+
+  for (const [operation, toolName, payload, act] of drives) {
+    stub.script(toolReply(toolName, payload))
+    await act()
+    const tools = stub.last.parsed.tools ?? []
+    if (tools.length !== 1) return `${operation}: ${tools.length} tools sent`
+    const tool = tools[0] as { name?: string; strict?: unknown; input_schema?: unknown }
+    if (tool.name !== toolName) return `${operation}: sent tool ${String(tool.name)}`
+    if (tool.strict !== true)
+      return `${operation}: strict is ${JSON.stringify(tool.strict)}, expected true`
+    // Forced selection is kept: strict guarantees the shape, not that a tool
+    // is called at all.
+    if ((stub.last.parsed.tool_choice as { type?: string } | undefined)?.type !== 'tool')
+      return `${operation}: forced tool selection was dropped`
+    // And the schema that went out is the strict-compatible one.
+    const problems = strictSchemaProblems(tool.input_schema)
+    if (problems.length > 0)
+      return `${operation}: sent a non-strict schema (${problems[0]!.path})`
+  }
+
+  // The reviewer too.
+  stub.script(toolReply('answer_review_question', {
+    flagged: false, severity: 'ADVISORY', rationale: 'r', requiredAction: 'n', targets: [],
+  }))
+  await reviewer().judge(REVIEW_QUERY)
+  const reviewTool = (stub.last.parsed.tools ?? [])[0] as { strict?: unknown } | undefined
+  return reviewTool?.strict === true
+    ? null : `the reviewer sent strict ${JSON.stringify(reviewTool?.strict)}`
+})
+
+check('14c · every authored schema is strict-compatible, nested objects included', () => {
+  /*
+   * The audit, not a spot check. When this was written all eight tools were
+   * non-compliant — 29 problems, every one of them a missing
+   * `additionalProperties: false`, and they included `measurement`,
+   * `timeScope`, `likelyHolder` and every array item object. Special-casing
+   * RECONCILE would have fixed two of the twenty-nine.
+   */
+  const tools: [string, { name: string; input_schema: unknown }][] = [
+    ['DECOMPOSE', PROMPTS.DECOMPOSE.tool], ['CLASSIFY', PROMPTS.CLASSIFY.tool],
+    ['TRACE', PROMPTS.TRACE.tool], ['DISCONFIRM', PROMPTS.DISCONFIRM.tool],
+    ['RECONCILE', PROMPTS.RECONCILE.tool], ['GRADE', PROMPTS.GRADE.tool],
+    ['IDENTIFY_GAPS', PROMPTS.IDENTIFY_GAPS.tool], ['REVIEW', PROMPTS.REVIEW_TOOL],
+  ]
+  if (tools.length !== 8) return `${tools.length} tools audited, expected 8`
+
+  for (const [label, tool] of tools) {
+    const problems = strictSchemaProblems(tool.input_schema)
+    if (problems.length > 0)
+      return `${label}: ${problems.length} problem(s), first at ${problems[0]!.path}`
+        + ` — ${problems[0]!.problem}`
+  }
+
+  /*
+   * And the audit itself is not vacuous: it must actually object to each thing
+   * the documented subset forbids.
+   */
+  const shouldFail: [string, unknown][] = [
+    ['a top-level object with no additionalProperties',
+      { type: 'object', properties: {} }],
+    ['additionalProperties: true',
+      { type: 'object', properties: {}, additionalProperties: true }],
+    ['a nested item object with none', {
+      type: 'object', additionalProperties: false,
+      properties: { xs: { type: 'array', items: { type: 'object', properties: {} } } },
+    }],
+    ['a nested property object with none', {
+      type: 'object', additionalProperties: false,
+      properties: { inner: { type: 'object', properties: {} } },
+    }],
+    ['a numeric constraint', {
+      type: 'object', additionalProperties: false,
+      properties: { n: { type: 'number', minimum: 0 } },
+    }],
+    ['a string constraint', {
+      type: 'object', additionalProperties: false,
+      properties: { s: { type: 'string', maxLength: 10 } },
+    }],
+    ['minItems 2', {
+      type: 'object', additionalProperties: false,
+      properties: { xs: { type: 'array', items: { type: 'string' }, minItems: 2 } },
+    }],
+    ['an unsupported format', {
+      type: 'object', additionalProperties: false,
+      properties: { s: { type: 'string', format: 'phone' } },
+    }],
+    ['an object inside enum', {
+      type: 'object', additionalProperties: false,
+      properties: { s: { enum: [{ a: 1 }] } },
+    }],
+    ['oneOf', {
+      type: 'object', additionalProperties: false,
+      properties: { s: { oneOf: [{ type: 'string' }] } },
+    }],
+    ['an external $ref', {
+      type: 'object', additionalProperties: false,
+      properties: { s: { $ref: 'https://example.invalid/schema.json' } },
+    }],
+  ]
+  for (const [label, schema] of shouldFail) {
+    if (strictSchemaProblems(schema).length === 0)
+      return `the audit accepted ${label}`
+  }
+  // minItems 0 and 1 are supported and must not be flagged.
+  for (const minItems of [0, 1]) {
+    const problems = strictSchemaProblems({
+      type: 'object', additionalProperties: false,
+      properties: { xs: { type: 'array', items: { type: 'string' }, minItems } },
+    })
+    if (problems.length > 0) return `the audit rejected minItems ${minItems}`
+  }
+  return null
+})
+
+check('14d · a non-strict schema is refused before any request is sent', async () => {
+  /*
+   * The API answers an unsupported keyword with a 400, and a 400 discovered in
+   * production is a 400 that cost a run. So the audit runs first, and the
+   * proof is that the stub received nothing at all.
+   */
+  stub.script(toolReply('propose_claims', { claims: [] }))
+  let threw: Error | undefined
+  try {
+    await callMessages({
+      operation: 'research-model:probe',
+      modelId: 'a-model-id',
+      apiKey: SECRET,
+      baseUrl: stub.baseUrl,
+      system: 'system',
+      userContent: 'content',
+      maxTokens: 512,
+      tool: {
+        name: 'probe_tool',
+        description: 'A tool whose nested item object forgets to close itself.',
+        input_schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            rows: { type: 'array', items: { type: 'object', properties: { a: { type: 'string' } } } },
+          },
+          required: ['rows'],
+        },
+      },
+    })
+  } catch (err) { threw = err as Error }
+
+  if (threw === undefined) return 'an incompatible schema was sent'
+  if (threw.name !== 'StrictSchemaRejected') return `threw ${threw.name}`
+  if (!/rows\.items\.additionalProperties/.test(threw.message))
+    return `the refusal does not name the path: ${threw.message}`
+  return stub.received.length === 0
+    ? null : `${stub.received.length} request(s) were sent despite the bad schema`
+})
+
+check('14e · RECONCILE still requires an array; strict is not a reason to coerce', async () => {
+  /*
+   * The decoder is unchanged, and this is the check that says so. `strict:
+   * true` is a provider guarantee, and a provider guarantee is still a
+   * provider's — if a scalar somehow crosses the boundary it must be refused
+   * exactly as it was in first light, which is what made that failure
+   * legible rather than silent.
+   */
+  const research = model()
+  const claimOffer = offer('c1', claim('C1', 'x'))
+  const evidenceOffer = offer('e1', evidence('E1'))
+  const reconcile = () =>
+    research.reconcile({ claims: [claimOffer], evidence: [evidenceOffer] })
+
+  // The exact first-light shape.
+  stub.script(toolReply('propose_discrepancies', {
+    discrepancies: 'The 42 km and 31 km figures cover different scopes.',
+  }))
+  const scalar = await failure(reconcile)
+  if (scalar === undefined) return 'a scalar `discrepancies` was accepted'
+  if (scalar.disposition !== 'PERMANENT') return `scalar gave ${scalar.disposition}`
+  if (!/discrepancies is a string rather than an array/.test(scalar.message))
+    return `the refusal changed wording: ${scalar.message}`
+
+  // And no other scalar shape is coerced either.
+  for (const [label, payload] of [
+    ['a number', { discrepancies: 1 }],
+    ['an object', { discrepancies: { description: 'x' } }],
+    ['null', { discrepancies: null }],
+    ['a missing key', {}],
+  ] as [string, unknown][]) {
+    stub.script(toolReply('propose_discrepancies', payload))
+    const outcome = await failure(reconcile)
+    if (outcome === undefined) return `${label} was accepted for discrepancies`
+    if (outcome.disposition !== 'PERMANENT') return `${label} gave ${outcome.disposition}`
+  }
+
+  // A well-formed array still decodes, so the strictness is not blanket refusal.
+  stub.script(toolReply('propose_discrepancies', {
+    discrepancies: [{
+      claimRefs: ['ref:c1'], evidenceRefs: ['ref:e1'],
+      description: '42 km against 31 km for the same period.',
+      classification: 'DIFFERENT_SCOPE', resolvedCandidate: false,
+    }],
+  }))
+  const good = await reconcile()
+  return isAvailable(good) && good.value.length === 1
+    ? null : 'a well-formed answer no longer decodes'
 })
 
 // ---------------------------------------------------------------------------

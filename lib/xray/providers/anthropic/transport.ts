@@ -15,14 +15,25 @@
  * to validate. A transport that understood proposals could shape them, which
  * is precisely what must not happen between the provider and the stage.
  *
- * WHY STRUCTURED OUTPUT IS A FORCED TOOL CALL
- * ===========================================
+ * WHY STRUCTURED OUTPUT IS A FORCED, STRICT TOOL CALL
+ * ===================================================
  * `tool_choice: { type: 'tool' }` makes the model answer in a declared JSON
  * shape rather than prose that happens to contain JSON. Prose-wrapped JSON
  * fails in the interesting cases — a hedge before the object, a trailing
  * explanation — and every one of those failures would land as a decode error
- * on material that was actually fine. This is still validated afterwards: a
- * declared schema is a request, not a guarantee.
+ * on material that was actually fine.
+ *
+ * `strict: true` is the other half, and first light is why. `RECONCILE` failed
+ * because the model returned `discrepancies` as a string where the schema says
+ * array: the envelope was right, and a declared schema turned out to be a
+ * *request* rather than a guarantee. Strict tool use closes that by
+ * constraining sampling to schema-valid tokens, so `input` follows
+ * `input_schema` — at the price of the schema having to lie inside a
+ * documented subset, which `strict-schema.ts` audits before a request goes out.
+ *
+ * The decoder stays exactly as it was. A guarantee from a provider is still a
+ * provider's guarantee, and `decode.ts` is what makes a broken one visible
+ * rather than load-bearing.
  *
  * CLASSIFICATION READS TYPES AND HEADERS, NOT PROSE
  * ================================================
@@ -47,6 +58,7 @@
  */
 
 import { AdapterFailure, unavailable, type CapabilityUnavailable } from '@/lib/xray/capability'
+import { assertStrictSchema } from './strict-schema'
 
 /** The stable Messages API version. Not configurable: it is a contract, not a preference. */
 const ANTHROPIC_VERSION = '2023-06-01'
@@ -198,14 +210,22 @@ async function send(request: CallBase, body: unknown): Promise<SendResult> {
   return { kind: 'ENVELOPE', envelope, requestId, latencyMs }
 }
 
-/** Ask for one forced structured answer. */
+/**
+ * Ask for one forced, schema-constrained answer.
+ *
+ * The schema is audited first. A schema outside the strict subset is a 400
+ * from the API, and discovering that in production costs a run — so it is
+ * refused here, naming the path, before anything is sent.
+ */
 export async function callMessages(request: MessagesRequest): Promise<MessagesOutcome> {
+  assertStrictSchema(request.tool.name, request.tool.input_schema)
+
   const sent = await send(request, {
     model: request.modelId,
     max_tokens: request.maxTokens,
     system: request.system,
     messages: [{ role: 'user', content: request.userContent }],
-    tools: [request.tool],
+    tools: [{ ...request.tool, strict: true }],
     tool_choice: { type: 'tool', name: request.tool.name },
   })
   if (sent.kind === 'CAPABILITY') return sent

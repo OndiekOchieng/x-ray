@@ -1,0 +1,13 @@
+=== schema audit, before the call ===
+  propose_discrepancies: 0 problem(s)
+  additionalProperties count in the sent schema: 2
+
+=== one live reconcile call (claude-sonnet-5) ===
+  elapsed: 7.5s
+  HTTP accepted the strict schema: yes (no 400)
+  decoded discrepancies: 1
+    classification=GENUINE_CONTRADICTION resolved=false
+    claimRefs=ref:c1,ref:c2 evidenceRefs=ref:e1,ref:e2
+    ref:c1 states the depot recorded 42 units in the first quarter, supported by ref:e1 ('The register lists 42 units for Ja
+
+  diagnostics (non-canonical): stop=tool_use in=1894 out=374 latency=7482ms
