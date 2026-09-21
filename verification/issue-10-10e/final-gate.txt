@@ -1,0 +1,74 @@
+Slice 10e final gate.
+
+=== pnpm check:ati-surface (10e) ===
+ok    1/2/34 · only a public-record gap offers the draft action
+ok    3/4/6 · a created draft names its exact origin and states it is not filed
+ok    4/5 · inferred custody renders as inferred, confirmed as confirmed
+ok    7 · an export names the exact revision and does not report a filing
+ok    8/9 · only an explicit human statement moves it to filed
+ok    10 · an acknowledgement is an event, never inferred
+ok    11/14/15/16 · a received record is a receipt, and a supplied digest says so
+ok    17/18 · processing needs the material, and a mismatch creates no run
+ok    19/20 · a committed outcome links the exact successor version
+ok    21 · a record that produced nothing shows no version and no Source
+ok    12/13 · a response after closure is visible and unlocks nothing
+ok    23/24/25/26 · no action changed a gap; only the new version did
+ok    27/28/29 · v2 is byte-identical and the exact exported revision survives edits
+ok    30/31 · no route accepts a Source id, a version commit or an audit row
+ok    32 · no public immutable version payload carries ATI lifecycle state
+ok    33/35/36/37 · the rendered copy carries none of the forbidden implications
+ok    38 · the explorer loads the same surfaces the routes serve
+ok    a11y · the ATI controls are labelled, reachable and not colour-only
+
+18/18 ATI surface checks passed
+
+=== the ATI slices ===
+check:ati-lifecycle        28/28 passed
+check:ati-commands         32/32 ATI command checks passed
+check:ati-responses        25/25 ATI response checks passed
+check:ati-research         35/35 ATI research checks passed
+=== regression sweep ===
+check:fixtures                             PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:validation                           PASS  52/52 passed
+check:query                                PASS  56/56 passed
+check:review                               PASS  32/32 passed
+check:acceptance                           PASS  32/32 passed
+check:pipeline                             PASS  54/54 passed
+check:adapters                             PASS  45/45 passed
+check:replay                               PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:source-position                      PASS  14a: contextual positions, T1/T2, Evidence basis and orthogonal provenance PASS
+check:source-position-pipeline             PASS  14b: TRACE retry identity, PROVENANCE revision, orthogonal lineage PASS
+check:source-position-review               PASS  14c: characterization, agency, retrospective intent, falsifier, and revision history pass
+check:persistence-schema                   PASS  
+check:source-position-schema               PASS  15a schema: 29/29 checks passed
+check:persistence-roundtrip                PASS  15b: explicitly present empty membership round-trip PASS
+check:persistence-versioning               PASS  7c: stale expected predecessor conflicts without overwrite PASS
+check:source-position-versioning           PASS  15c: stale predecessor rejects without partial v2 change PASS
+check:persistence-workspace                PASS  7d-a: resumed run skips success, retains failure, clears stale/capability/stop, preserves ident
+check:persistence-audit                    PASS  7d-b: missing ReviewerModel remains NOT_EVALUATED and capability-incomplete PASS
+check:persistence-ati                      PASS  7d-d ATI: version-scoped eligible origin, invalid references, lifecycle isolation PASS
+check:persistence-durable-integration      PASS  7d-d: restart → resume → gates → audit → graduation → commit; failed run stays uncomm
+check:persistence-graduation               PASS  7c: stale expected predecessor conflicts without overwrite PASS
+check:investigation-service                PASS  8a: owner-scoped run/candidate reads; exact v1/v2 snapshots; ordered history/latest pointer PAS
+check:inline-execution                     PASS  8b: the surface Source appears only from actual INGEST output PASS
+check:api-routes                           PASS  23/23 passed
+check:lifecycle                            PASS  21/21 passed
+check:publication                          PASS  26/26 passed
+check:public-resolver                      PASS  25/25 passed
+check:public-routes                        PASS  31/31 passed
+check:public-library                       PASS  25/25 passed
+check:version-lineage                      PASS  15/15 passed
+check:benchmark-corpus                     PASS  benchmark corpus: 12 cases, 1 executable fixture(s), registry integrity PASS
+
+check:persistence-postgres-concurrency     NOT RUN — XRAY_POSTGRES_URL is unset
+
+=== tsc --noEmit ===
+clean
+
+=== pnpm build ===
+
+
+○  (Static)             prerendered as static content
+◐  (Partial Prerender)  prerendered as static HTML with dynamic server-streamed content
+ƒ  (Dynamic)            server-rendered on demand
+

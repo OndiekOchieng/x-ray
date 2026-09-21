@@ -262,6 +262,12 @@ absent from the rendered surfaces; a closed request with an unhelpful response
 leaves its gap open; an unresolved gap is never rendered as an implication of
 wrongdoing; the full loop passes.
 
+**Delivered 2026-09-21** — nine application routes under
+`/api/investigations/{id}/ati/…`, `projections/ati-surface.ts`,
+`components/investigations/ati-request-panel.tsx`, and
+`pnpm check:ati-surface` 18/18 driving the whole loop through the route
+handlers. This closes #10.
+
 ---
 
 ## Sequencing
@@ -277,3 +283,4 @@ Strictly sequential. Each slice needs the durable model beneath it.
 Automated filing, jurisdictions beyond `KE`, authentication or roles,
 publication changes (#9 is closed), demo workflow (#11), and any path that
 writes a version without going through #6/#7.
+

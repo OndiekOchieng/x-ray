@@ -435,6 +435,52 @@ Gap status changes only in a newly graduated version, on the evidence.
 
 ---
 
+## The action surface
+
+**Recorded 2026-09-21 · #10 slice 10e.**
+
+The ATI surface lives on the **internal** investigation explorer, anchored to
+an exact gap at an exact version. Action state is mutable and that page is
+dynamic; a committed public version's bytes are neither, and nothing embeds one
+in the other. #9's publication semantics are untouched.
+
+All copy is authored in `projections/ati-surface.ts` and the component writes
+none of its own, because the wording constraints below are product policy and
+policy in JSX cannot be tested.
+
+| Surface element | Wording |
+| --- | --- |
+| Origin | `Version 2 · GAP-001` — permanent, never tracking the latest |
+| Moved on | `Request created from version 2; latest research is version 4.` |
+| Custody | `Likely holder — inferred` / `Holder — confirmed` |
+| Filing | `Draft — not filed` / `Exported — not filed` / `Filed by a person, outside X-Ray` |
+| Confirmation | `I filed this exported request outside X-Ray.` |
+| Completeness | `Completeness as stated: partial` / `Completeness: not stated by the institution` |
+| Received record | `Received record` → `Awaiting research` → `Researched into Source SRC-…` |
+| Digest | `Integrity digest — computed by X-Ray` / `— supplied externally` |
+| Gap | the action record `says nothing about whether the gap is resolved` |
+
+The not-filed notice is present at **every** stage, not only on a draft.
+
+**Processing needs the material again.** The receipt is all X-Ray kept, so the
+surface asks for the bytes rather than offering a button that would turn a
+receipt into a `Source`. The three outcomes read distinctly, and
+`NO_CANONICAL_CHANGE` says *a research result, not a failure* rather than
+calling the document useless.
+
+**Routes are transport only.** Nine endpoints over the services; none exposes
+`recordExport`, `recordResponse`, `acceptIntakeSource`, a version commit or an
+audit insertion, and no write body reads a `sourceId`. A request addressed under
+the wrong investigation is `404`, because `403` would confirm it exists
+elsewhere.
+
+**Known limitation.** There is no production authentication. Mutation routes
+follow #8's application boundary conventions and are not reachable through the
+public immutable resolver, but the trusted-host assumption is exactly what it
+was before 10e — #10 did not solve it and does not pretend to.
+
+---
+
 ## Language
 
 The action surface reports recorded events and interprets none of them
