@@ -1,0 +1,20 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/host/realm-checks.ts
+ok    1 · only two error-defining modules reach the host bundle
+ok    2 · the branded predicate is a brand, not a name
+ok    3 · a permanent failure built in the host bundle is not retried
+ok    4 · control — constructor identity reproduces the two attempts
+
+{
+  "hostBundleIsSeparate": true,
+  "hostFailureIsAppInstance": false,
+  "appFailureIsAppInstance": true,
+  "brandedPredicateSeesHostFailure": true,
+  "permanentPredicateSeesHostFailure": true,
+  "hostFailureName": "AdapterFailure",
+  "hostFailureDisposition": "PERMANENT",
+  "attempts": [
+    "DECOMPOSE:FAILED"
+  ]
+}
+
+4/4 realm checks passed

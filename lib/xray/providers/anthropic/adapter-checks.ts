@@ -24,7 +24,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { AdapterFailure, isAvailable, isUnavailable } from '@/lib/xray/capability'
+import { AdapterFailure, isAdapterFailure, isAvailable, isUnavailable } from '@/lib/xray/capability'
 import type { CapabilityResult, CapabilityUnavailable, UnavailableReason } from '@/lib/xray/capability'
 import type {
   Claim, Evidence, Finding, Gap, Source, SourcePosition,
@@ -75,6 +75,15 @@ class Stub {
   private port = 0
   readonly received: Recorded[] = []
   private replies: Reply[] = []
+  /**
+   * Replies chosen by the tool the request asked for.
+   *
+   * `trace` now issues three concurrent requests, one per proposal family, so
+   * a queue would hand back whichever reply happened to be next in arrival
+   * order. Keying by tool name is deterministic under concurrency, and a
+   * check that wants a *wrong* tool back still uses `script`.
+   */
+  private byTool: Map<string, Reply> = new Map()
 
   async start(): Promise<void> {
     this.server = createServer((request, response) => { void this.handle(request, response) })
@@ -97,6 +106,14 @@ class Stub {
   /** Queue what the next call(s) get back, and forget earlier traffic. */
   script(...replies: Reply[]): void {
     this.replies = [...replies]
+    this.byTool.clear()
+    this.received.length = 0
+  }
+
+  /** Answer each request with the reply for the tool it asked for. */
+  scriptByTool(replies: Readonly<Record<string, Reply>>): void {
+    this.byTool = new Map(Object.entries(replies))
+    this.replies = []
     this.received.length = 0
   }
 
@@ -114,7 +131,10 @@ class Stub {
     try { parsed = JSON.parse(body) as Recorded['parsed'] } catch { /* recorded raw */ }
     this.received.push({ headers: request.headers, body, parsed })
 
-    const reply = this.replies.shift() ?? { status: 500, body: { error: { type: 'no_script' } } }
+    const asked = (parsed.tools ?? [])[0] as { name?: string } | undefined
+    const reply = this.byTool.get(String(asked?.name))
+      ?? this.replies.shift()
+      ?? { status: 500, body: { error: { type: 'no_script' } } }
     response.writeHead(reply.status, { 'content-type': 'application/json', ...reply.headers })
     response.end(typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body))
   }
@@ -133,6 +153,27 @@ const toolReply = (name: string, input: unknown, extra: Record<string, unknown> 
     content: [{ type: 'tool_use', id: 'tu_1', name, input }],
     ...extra,
   },
+})
+
+/**
+ * What one `trace` needs now: three replies, one per narrow tool.
+ *
+ * The operation is still one `ResearchModel.trace`; Anthropic refuses the
+ * combined schema under `strict: true`, so the adapter asks three times. A
+ * fixture that supplies one family leaves the others empty.
+ */
+const traceScript = (payload: {
+  evidence?: unknown; discoveredClaims?: unknown
+  sourcePositions?: unknown; suggestedQueries?: unknown
+} = {}): Record<string, Reply> => ({
+  propose_evidence: toolReply('propose_evidence', { evidence: payload.evidence ?? [] }),
+  propose_discovered_claims: toolReply('propose_discovered_claims', {
+    discoveredClaims: payload.discoveredClaims ?? [],
+  }),
+  propose_positions: toolReply('propose_positions', {
+    sourcePositions: payload.sourcePositions ?? [],
+    suggestedQueries: payload.suggestedQueries ?? [],
+  }),
 })
 
 // ---------------------------------------------------------------------------
@@ -437,11 +478,12 @@ check('6 · a required vocabulary is checked in every slot that has one', async 
   const toolFor: Record<string, string> = {
     classifications: 'propose_classifications', findings: 'propose_findings',
     discrepancies: 'propose_discrepancies', disconfirmations: 'propose_disconfirmation',
-    gaps: 'propose_gaps', evidence: 'propose_trace',
+    gaps: 'propose_gaps',
   }
   for (const [label, payload, act] of cases) {
     const key = Object.keys(payload as Record<string, unknown>)[0]!
-    stub.script(toolReply(toolFor[key]!, payload))
+    if (key === 'evidence') stub.scriptByTool(traceScript(payload as { evidence: unknown }))
+    else stub.script(toolReply(toolFor[key]!, payload))
     const outcome = await failure(act)
     if (outcome === undefined) return `${label}: an invalid value was accepted`
     if (outcome.disposition !== 'PERMANENT')
@@ -497,12 +539,12 @@ check('8 · a handle the stage did not offer is rejected', async () => {
   ]
 
   const toolFor: Record<string, string> = {
-    classifications: 'propose_classifications', evidence: 'propose_trace',
-    findings: 'propose_findings',
+    classifications: 'propose_classifications', findings: 'propose_findings',
   }
   for (const [label, payload, act] of cases) {
     const key = Object.keys(payload as Record<string, unknown>)[0]!
-    stub.script(toolReply(toolFor[key]!, payload))
+    if (key === 'evidence') stub.scriptByTool(traceScript(payload as { evidence: unknown }))
+    else stub.script(toolReply(toolFor[key]!, payload))
     const outcome = await failure(act)
     if (outcome === undefined) return `${label}: was accepted`
     if (!/was not offered|not a stage-issued handle/.test(outcome.message))
@@ -511,9 +553,8 @@ check('8 · a handle the stage did not offer is rejected', async () => {
 
   // And an offered handle of the wrong *kind* is still rejected: a claim
   // handle cannot stand in for a document.
-  stub.script(toolReply('propose_trace', {
+  stub.scriptByTool(traceScript({
     evidence: [{ sourceRef: 'ref:c1', proposition: 'p', relationship: 'SUPPORTS', strength: 'DIRECT', claimRefs: ['ref:c1'] }],
-    discoveredClaims: [],
   }))
   const crossed = await failure(() => research.trace({ claim: claimOffer, documents: [document] }))
   return crossed === undefined ? 'a claim handle was accepted as a document' : null
@@ -538,7 +579,7 @@ check('9 · no canonical id ever reaches the provider', async () => {
       () => research.decompose({ surfaceSource: sourceOffer, document })],
     ['classify', 'propose_classifications', { classifications: [] },
       () => research.classify({ claims: [claimOffer] })],
-    ['trace', 'propose_trace', { evidence: [], discoveredClaims: [] },
+    ['trace', 'propose_evidence', { evidence: [] },
       () => research.trace({ claim: claimOffer, documents: [document, notLocated] })],
     ['disconfirm', 'propose_disconfirmation', { disconfirmations: [] },
       () => research.disconfirm({ claim: claimOffer, evidence: [evidenceOffer] })],
@@ -553,9 +594,12 @@ check('9 · no canonical id ever reaches the provider', async () => {
   ]
 
   for (const [label, tool, payload, act] of calls) {
-    stub.script(toolReply(tool, payload))
+    // `trace` is three requests; every one of them must be clean, so the
+    // sweep looks at all of them rather than at the last.
+    if (label === 'trace') stub.scriptByTool(traceScript())
+    else stub.script(toolReply(tool, payload))
     await act()
-    const sent = stub.last.body
+    const sent = stub.received.map((entry) => entry.body).join('\n')
     if (sent.includes(CANONICAL_ID_SENTINEL))
       return `${label}: a canonical id was sent to the provider`
     if (sent.includes('XRAY-INVESTIGATION-ID-THAT-MUST-NOT-TRAVEL'))
@@ -1004,8 +1048,6 @@ check('14b · every operation is sent with strict schema enforcement', async () 
       () => research.decompose(DECOMPOSE_INPUT)],
     ['classify', 'propose_classifications', { classifications: [] },
       () => research.classify({ claims: [claimOffer] })],
-    ['trace', 'propose_trace', { evidence: [], discoveredClaims: [] },
-      () => research.trace({ claim: claimOffer, documents: [document] })],
     ['disconfirm', 'propose_disconfirmation', { disconfirmations: [] },
       () => research.disconfirm({ claim: claimOffer, evidence: [evidenceOffer] })],
     ['reconcile', 'propose_discrepancies', { discrepancies: [] },
@@ -1035,6 +1077,32 @@ check('14b · every operation is sent with strict schema enforcement', async () 
       return `${operation}: sent a non-strict schema (${problems[0]!.path})`
   }
 
+  /*
+   * `trace` is three requests now, and each one must carry strict enforcement
+   * on its own schema — a split that dropped `strict` from one of the three
+   * would leave that family unguarded while the other two looked fine.
+   */
+  stub.scriptByTool(traceScript())
+  await research.trace({ claim: claimOffer, documents: [document] })
+  const traced = stub.received.map((entry) => (entry.parsed.tools ?? [])[0] as {
+    name?: string; strict?: unknown; input_schema?: unknown
+  })
+  const names = traced.map((tool) => String(tool?.name)).sort()
+  if (JSON.stringify(names)
+    !== JSON.stringify(['propose_discovered_claims', 'propose_evidence', 'propose_positions']))
+    return `trace sent ${JSON.stringify(names)}`
+  for (const tool of traced) {
+    if (tool?.strict !== true)
+      return `trace/${String(tool?.name)}: strict is ${JSON.stringify(tool?.strict)}`
+    const problems = strictSchemaProblems(tool.input_schema)
+    if (problems.length > 0)
+      return `trace/${String(tool.name)}: sent a non-strict schema (${problems[0]!.path})`
+  }
+  for (const entry of stub.received) {
+    if ((entry.parsed.tool_choice as { type?: string } | undefined)?.type !== 'tool')
+      return 'trace: forced tool selection was dropped'
+  }
+
   // The reviewer too.
   stub.script(toolReply('answer_review_question', {
     flagged: false, severity: 'ADVISORY', rationale: 'r', requiredAction: 'n', targets: [],
@@ -1053,13 +1121,19 @@ check('14c · every authored schema is strict-compatible, nested objects include
    * `timeScope`, `likelyHolder` and every array item object. Special-casing
    * RECONCILE would have fixed two of the twenty-nine.
    */
+  /*
+   * Enumerated from the module, not hand-listed. A tool added to `prompts.ts`
+   * is audited the moment it exists; a hand-list is a list somebody forgets to
+   * extend — and the TRACE split added two tools in one commit.
+   */
   const tools: [string, { name: string; input_schema: unknown }][] = [
-    ['DECOMPOSE', PROMPTS.DECOMPOSE.tool], ['CLASSIFY', PROMPTS.CLASSIFY.tool],
-    ['TRACE', PROMPTS.TRACE.tool], ['DISCONFIRM', PROMPTS.DISCONFIRM.tool],
-    ['RECONCILE', PROMPTS.RECONCILE.tool], ['GRADE', PROMPTS.GRADE.tool],
-    ['IDENTIFY_GAPS', PROMPTS.IDENTIFY_GAPS.tool], ['REVIEW', PROMPTS.REVIEW_TOOL],
+    ...Object.entries(PROMPTS)
+      .filter((entry): entry is [string, PROMPTS.OperationPrompt] =>
+        typeof entry[1] === 'object' && entry[1] !== null && 'tool' in entry[1])
+      .map(([name, prompt]) => [name, prompt.tool] as [string, { name: string; input_schema: unknown }]),
+    ['REVIEW', PROMPTS.REVIEW_TOOL],
   ]
-  if (tools.length !== 8) return `${tools.length} tools audited, expected 8`
+  if (tools.length !== 10) return `${tools.length} tools audited, expected 10`
 
   for (const [label, tool] of tools) {
     const problems = strictSchemaProblems(tool.input_schema)
@@ -1162,7 +1236,15 @@ check('14d · a non-strict schema is refused before any request is sent', async 
   } catch (err) { threw = err as Error }
 
   if (threw === undefined) return 'an incompatible schema was sent'
-  if (threw.name !== 'StrictSchemaRejected') return `threw ${threw.name}`
+  /*
+   * A `PERMANENT` failure, not a bare `StrictSchemaRejected`. The audit still
+   * refuses the schema and still names the path; what changed is that the
+   * refusal leaves the adapter classified, because `runPipeline` would
+   * otherwise treat an unrecognised error as worth another attempt and send
+   * the same impossible request again.
+   */
+  if (!isAdapterFailure(threw)) return `threw ${threw.name}`
+  if (threw.disposition !== 'PERMANENT') return `threw ${threw.disposition}`
   if (!/rows\.items\.additionalProperties/.test(threw.message))
     return `the refusal does not name the path: ${threw.message}`
   return stub.received.length === 0
@@ -1451,7 +1533,7 @@ check('23 · an unobtained document is presented as unobtained', async () => {
   // XR-INV-006 turns on the difference between a record that was read and one
   // that was only identified. A provider that cannot see the difference cannot
   // respect it, so the outcome travels and absent content stays absent.
-  stub.script(toolReply('propose_trace', { evidence: [], discoveredClaims: [] }))
+  stub.scriptByTool(traceScript())
   await model().trace({
     claim: offer('c1', claim('C1', 'x')), documents: [document, notLocated],
   })

@@ -34,6 +34,25 @@
  */
 
 export async function register(): Promise<void> {
+  /*
+   * The cross-realm error check's seam (#20, 20k), and nothing else.
+   *
+   * This function runs in the host bundle — the one Next compiles separately
+   * from the route handlers — which is the whole subject of that check. So it
+   * is the only place that can hand a route handler an object built here.
+   * Guarded by an explicit variable: an ordinary deployment publishes nothing.
+   */
+  if (process.env.XRAY_REALM_CHECK === '1') {
+    const { AdapterFailure } = await import('@/lib/xray/capability')
+    const { REALM_PROBE } = await import('@/lib/xray/host/realm-probe')
+    ;(globalThis as unknown as Record<symbol, unknown>)[REALM_PROBE] = {
+      adapterFailureClass: AdapterFailure,
+      permanentFailure: () => new AdapterFailure(
+        'research-model:decompose', 'PERMANENT',
+        'the provider refused this request and will refuse it again'),
+    }
+  }
+
   const { hostDatabase, hostDatabaseConfigured } = await import('@/lib/xray/host/database')
   const { setDatabaseProvider, setExecutionRuntimeProvider, setReviewerModelProvider } =
     await import('@/lib/xray/application/runtime')

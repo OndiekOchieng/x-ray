@@ -135,6 +135,11 @@ Break the given record into atomic claims. An atomic claim states one thing
 that could be checked on its own; if a sentence asserts two things, produce two
 claims. Do not produce claims the record does not make. Do not merge, soften or
 extend what it says.
+
+For each claim, give its text and the passage you read it from. Nothing else is
+asked for here: classification, entities and measurement are a later step's
+work, and answering them now would be guessing at a reading before the claim
+has been stated.
 `,
   {
     name: 'propose_claims',
@@ -145,7 +150,10 @@ extend what it says.
       properties: {
         claims: {
           type: 'array',
-          items: obj(CLAIM_FIELDS, { required: ['text'] }),
+          items: obj({
+            text: CLAIM_FIELDS.text,
+            sourcePassage: CLAIM_FIELDS.sourcePassage,
+          }, { required: ['text', 'sourcePassage'] }),
         },
       },
       required: ['claims'],
@@ -194,7 +202,36 @@ INTERPRETATION.
   8_000,
 )
 
-export const TRACE: OperationPrompt = prompt(
+/*
+ * TRACE IS THREE CALLS, AND WHY
+ * =============================
+ * One `propose_trace` tool carried four proposal families — evidence,
+ * discovered claims, source positions, suggested searches — and Anthropic
+ * refused it under `strict: true`:
+ *
+ *   "Schemas contains too many optional parameters (43), which would make
+ *    grammar compilation inefficient … (limit: 24)."
+ *
+ * 43 is exactly what X-Ray's own count gives, so the provider counts
+ * optionality the way we do. `$defs`/`$ref` sharing was measured and does not
+ * help: it lowers the counted total — the provider counts a `$def` once — but
+ * the schema is still refused, as "Schema is too complex"
+ * (`verification/issue-20-20k`).
+ *
+ * The alternative was to make optional fields required, which would be worse
+ * than the limit: a `measurement` the model must fill is a measurement it will
+ * invent. So the *request* is split and the *contract* is not.
+ * `ResearchModel.trace()` is one operation, `TRACE` is one stage, and the
+ * split lives entirely inside this adapter — three narrow tools, one per
+ * family, combined in `research-model.ts` before the stage sees anything.
+ * Grouping is conceptual rather than arithmetic: each call asks for one kind
+ * of proposal, which is also a better question than asking for four at once.
+ *
+ * Evidence keeps `measurement` and `timeScope`. Same-measure reconciliation
+ * depends on them and nothing else carries them.
+ */
+
+export const TRACE_EVIDENCE: OperationPrompt = prompt(
   `
 You are given one claim and the documents that were actually retrieved for it.
 Propose the propositions those documents establish about the claim.
@@ -203,96 +240,141 @@ Every proposition must come from a document you were given, named by its
 handle. Do not propose a proposition from a document with no content — a record
 that was identified but not obtained supports nothing yet.
 
-You may also report claims the documents make that the original record did not,
-and further searches worth running. You may describe a source's position
-relative to the claim (for example, that it is the subject or the regulator)
-where the document shows it.
-
 You may not state where a document's information originally came from, or
 whether two documents are independent of each other. X-Ray decides that.
 `,
   {
-    name: 'propose_trace',
-    description: 'Propositions, discovered claims and further searches.',
+    name: 'propose_evidence',
+    description: 'What the retrieved documents establish about the claim.',
     input_schema: {
       type: 'object',
       additionalProperties: false,
       properties: {
         evidence: {
           type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              sourceRef: handle('The document this came from.'),
-              proposition: { type: 'string', description: 'What the document establishes.' },
-              relationship: enumOf(VOCABULARY.evidenceRelationship,
-                'How it bears on the claim.'),
-              strength: enumOf(VOCABULARY.evidenceStrength,
-                'DIRECT: addresses the claim itself. STRONG_INDIRECT: bears on it closely. '
-                + 'CONTEXTUAL: background. WEAK: little probative force.'),
-              knowledgeBasis: enumOf(VOCABULARY.knowledgeBasis,
-                'How the document knows what it states.'),
-              claimRefs: handles('Claims this bears on. At least one.'),
-              quotedPassage: { type: 'string', description: 'Verbatim, if quoting.' },
-              locationInSource: { type: 'string' },
-              measurement: MEASUREMENT,
-              timeScope: TIME_SCOPE,
-            },
+          items: obj({
+            sourceRef: handle('The document this came from.'),
+            proposition: { type: 'string', description: 'What the document establishes.' },
+            relationship: enumOf(VOCABULARY.evidenceRelationship,
+              'How it bears on the claim.'),
+            strength: enumOf(VOCABULARY.evidenceStrength,
+              'DIRECT: addresses the claim itself. STRONG_INDIRECT: bears on it closely. '
+              + 'CONTEXTUAL: background. WEAK: little probative force.'),
+            knowledgeBasis: enumOf(VOCABULARY.knowledgeBasis,
+              'How the document knows what it states.'),
+            claimRefs: handles('Claims this bears on. At least one.'),
+            quotedPassage: { type: 'string', description: 'Verbatim, if quoting.' },
+            locationInSource: { type: 'string' },
+            measurement: MEASUREMENT,
+            timeScope: TIME_SCOPE,
+          }, {
             required: ['sourceRef', 'proposition', 'relationship', 'strength', 'claimRefs'],
-          },
+          }),
         },
+      },
+      required: ['evidence'],
+    },
+  },
+  12_000,
+)
+
+export const TRACE_DISCOVERED: OperationPrompt = prompt(
+  `
+You are given one claim and the documents that were actually retrieved for it.
+Report claims those documents make that the original record did not.
+
+Each one must come from a document you were given, named by its handle. A
+claim the original record already makes is not a discovery. Do not report a
+claim from a document with no content.
+
+Give the claim's text and the passage you read it from, and classify it: which
+layer it operates at, what kind of assertion it is, and how much the
+investigation turns on it.
+`,
+  {
+    name: 'propose_discovered_claims',
+    description: 'Claims the retrieved documents make that the original record did not.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
         discoveredClaims: {
           type: 'array',
-          description: 'Claims the retrieved documents make that the original record did not.',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            properties: { ...CLAIM_FIELDS, sourceRef: handle('The document it surfaced from.') },
-            required: ['text', 'sourceRef'],
-          },
+          items: obj({
+            text: CLAIM_FIELDS.text,
+            sourcePassage: CLAIM_FIELDS.sourcePassage,
+            sourceRef: handle('The document it surfaced from.'),
+            layer: CLAIM_FIELDS.layer,
+            type: CLAIM_FIELDS.type,
+            priority: CLAIM_FIELDS.priority,
+            entities: CLAIM_FIELDS.entities,
+            ambiguities: CLAIM_FIELDS.ambiguities,
+          }, { required: ['text', 'sourceRef'] }),
         },
+      },
+      required: ['discoveredClaims'],
+    },
+  },
+  12_000,
+)
+
+export const TRACE_POSITIONS: OperationPrompt = prompt(
+  `
+You are given one claim and the documents that were actually retrieved for it.
+
+Describe a source's position relative to the claim — for example that it is the
+subject, the regulator, or the body that paid — where the document shows it.
+Say whether the document states the position or whether you are reading it off
+context.
+
+You may also propose further searches worth running. They are advisory.
+
+You may not state where a document's information originally came from, or
+whether two documents are independent of each other. X-Ray decides that.
+`,
+  {
+    name: 'propose_positions',
+    description: "Source positions relative to the claim, and further searches.",
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
         sourcePositions: {
           type: 'array',
           description: "A source's position relative to the claim, where the document shows it.",
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              sourceRef: handle('The document whose position this is.'),
-              claimRefs: handles('Claims the position bears on.'),
-              relationship: enumOf(VOCABULARY.positionRelationship,
-                'The position this source occupies relative to the claim.'),
-              relationshipDescription: { type: 'string' },
-              powerOrDependency: strings(
-                'Power or dependency relations the document shows, if any.'),
-              productionPurpose: { type: 'string', description: 'Why the document was produced.' },
-              basis: enumOf(VOCABULARY.positionBasis,
-                'DOCUMENTED: the document states it. INFERRED: you are reading it off context.'),
-              confidence: enumOf(VOCABULARY.rank, 'Your confidence in the position.'),
-              basisDescription: { type: 'string' },
-              supportingEvidenceRefs: handles('Evidence supporting the position, if offered.'),
-              timeScope: TIME_SCOPE,
-            },
+          items: obj({
+            sourceRef: handle('The document whose position this is.'),
+            claimRefs: handles('Claims the position bears on.'),
+            relationship: enumOf(VOCABULARY.positionRelationship,
+              'The position this source occupies relative to the claim.'),
+            relationshipDescription: { type: 'string' },
+            powerOrDependency: strings(
+              'Power or dependency relations the document shows, if any.'),
+            productionPurpose: { type: 'string', description: 'Why the document was produced.' },
+            basis: enumOf(VOCABULARY.positionBasis,
+              'DOCUMENTED: the document states it. INFERRED: you are reading it off context.'),
+            confidence: enumOf(VOCABULARY.rank, 'Your confidence in the position.'),
+            basisDescription: { type: 'string' },
+            supportingEvidenceRefs: handles('Evidence supporting the position, if offered.'),
+            timeScope: TIME_SCOPE,
+          }, {
             required: ['sourceRef', 'claimRefs', 'relationship', 'powerOrDependency',
               'basis', 'confidence'],
-          },
+          }),
         },
         suggestedQueries: {
           type: 'array',
           description: 'Further searches worth running. Advisory.',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            properties: { terms: { type: 'string' }, constraints: strings('Narrowing to apply.') },
-            required: ['terms'],
-          },
+          items: obj({
+            terms: { type: 'string' },
+            constraints: strings('Narrowing to apply.'),
+          }, { required: ['terms'] }),
         },
       },
-      required: ['evidence', 'discoveredClaims'],
+      required: ['sourcePositions', 'suggestedQueries'],
     },
   },
-  12_000,
+  8_000,
 )
 
 export const DISCONFIRM: OperationPrompt = prompt(

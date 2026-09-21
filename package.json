@@ -54,7 +54,9 @@
     "check:ati-responses": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/ati-response-checks.ts",
     "check:ati-research": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/ati-research-checks.ts",
     "check:ati-surface": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/ati-surface-checks.ts",
-    "check:query-plan": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/providers/query-plan-checks.ts"
+    "check:query-plan": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/providers/query-plan-checks.ts",
+    "check:schema-acceptance": "node --import ./scripts/register-ts-resolve.mjs --no-warnings --env-file-if-exists=.env lib/xray/providers/anthropic/acceptance-checks.ts",
+    "check:realms": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/host/realm-checks.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

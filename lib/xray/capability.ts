@@ -97,6 +97,16 @@ export function notConfigured(operation: string, resolvedBy: string): Capability
 // ---------------------------------------------------------------------------
 
 /**
+ * The brand that makes `AdapterFailure` recognisable across bundles.
+ *
+ * `Symbol.for`, not `Symbol`: a registered symbol is shared by every copy of
+ * this module in the process, which is the whole point. The name is namespaced
+ * per error type rather than shared, so branding one type never accidentally
+ * answers for another.
+ */
+const ADAPTER_FAILURE = Symbol.for('xray.error.AdapterFailure')
+
+/**
  * Whether retrying could plausibly succeed.
  *
  * 6a's retry loop is the only consumer: it re-attempts `TRANSIENT` and stops
@@ -117,6 +127,14 @@ export class AdapterFailure extends Error {
   readonly operation: string
   readonly disposition: FailureDisposition
 
+  /**
+   * A cross-realm brand. See `isAdapterFailure`.
+   *
+   * On the instance, set by the constructor, so it survives being thrown
+   * across a bundle boundary that `instanceof` does not.
+   */
+  readonly [ADAPTER_FAILURE] = true
+
   constructor(operation: string, disposition: FailureDisposition, message: string) {
     super(message)
     this.name = 'AdapterFailure'
@@ -125,5 +143,43 @@ export class AdapterFailure extends Error {
   }
 }
 
+/**
+ * Whether this is one of ours, asked in a way that survives two bundles.
+ *
+ * WHY NOT `instanceof`
+ * ====================
+ * Next compiles `instrumentation.ts` separately from the app's route handlers
+ * and server components, so one process holds **two instances of this module**
+ * and therefore two `AdapterFailure` classes. `runtime.ts` records the same
+ * fact from #11b, where two instances of the provider seam meant a database
+ * registered into one copy was invisible to the other.
+ *
+ * The provider adapters are constructed at instrumentation time, so every
+ * failure they throw is the *other* class. `instanceof` answered false for a
+ * genuine `PERMANENT` failure, `runPipeline` retried it, and the Eastleigh
+ * Voice run spent three minutes re-sending a request Anthropic had already
+ * refused — twice — before failing anyway. Reproduced in a production build:
+ * `verification/issue-20-20k/realm-probe.txt`.
+ *
+ * `Symbol.for` is registered process-wide, so both copies of this module ask
+ * for the same symbol and both find it on the instance. That is the same
+ * mechanism the provider seam already uses, applied to the other thing that
+ * crosses the boundary.
+ *
+ * WHY NOT A NAME CHECK
+ * ====================
+ * `err.name === 'AdapterFailure'` would also cross, and would also be true of
+ * anything that sets that string — including, in principle, decoded provider
+ * output. The brand is a symbol we choose and only our constructor sets.
+ */
+export function isAdapterFailure(err: unknown): err is AdapterFailure {
+  return typeof err === 'object' && err !== null
+    && (err as Record<symbol, unknown>)[ADAPTER_FAILURE] === true
+}
+
 export const isTransient = (err: unknown): boolean =>
-  err instanceof AdapterFailure && err.disposition === 'TRANSIENT'
+  isAdapterFailure(err) && err.disposition === 'TRANSIENT'
+
+/** Not worth another attempt. The decision `runPipeline`'s retry loop reads. */
+export const isPermanent = (err: unknown): boolean =>
+  isAdapterFailure(err) && err.disposition === 'PERMANENT'

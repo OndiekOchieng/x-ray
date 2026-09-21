@@ -7,3 +7,17 @@
 === without the nested sub-objects ===
   item props=9 required=1 subs=0               optional= 8  ACCEPTED
   item props=13 required=1 subs=0              optional=12  Schema is too complex.
+  item props=15 required=1 subs=0              optional=14  Schema is too complex.
+
+=== does $defs/$ref sharing reduce the cost? ===
+  inlined   subs=2x5                           optional=20  no response: TimeoutError
+  $ref      subs=2x5                           optional=15  no response: TimeoutError
+  inlined   subs=3x5                           optional=26  Schemas contains too many optional parameters (26), which would make grammar compilation inefficient. Reduce the number of optional parameters in your tool sche
+  $ref      subs=3x5                           optional=16  no response: TimeoutError
+
+=== the real DECOMPOSE shape, and two ways to trim it ===
+  9 props, 1 required, measurement+timeScope   optional=20  no response: TimeoutError
+  7 props, 1 required, no sub-objects          optional= 6  ACCEPTED
+  9 props, 9 required, measurement+timeScope   optional=12  ACCEPTED
+
+[exited with code 0]

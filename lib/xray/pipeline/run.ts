@@ -55,7 +55,7 @@ import {
   type ReviewResult,
 } from '@/lib/xray/review'
 
-import { AdapterFailure, type CapabilityUnavailable } from '@/lib/xray/capability'
+import { isPermanent, type CapabilityUnavailable } from '@/lib/xray/capability'
 
 import { GraphAccumulator, PipelineContractError } from './accumulator'
 import { CorrelationLedger } from './correlation'
@@ -434,9 +434,18 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
         // same identities the failed attempt did.
         accumulator.restore(restorePoint)
 
-        // A permanent adapter failure is not retried. Re-sending a request the
-        // provider has already refused produces the same refusal.
-        if (err instanceof AdapterFailure && err.disposition === 'PERMANENT') {
+        /*
+         * A permanent adapter failure is not retried. Re-sending a request the
+         * provider has already refused produces the same refusal.
+         *
+         * `isPermanent`, not `instanceof`: the adapters are constructed in the
+         * host's instrumentation bundle and this module runs in the app's, so
+         * the failure that arrives here is an instance of the *other* copy of
+         * `AdapterFailure`. `instanceof` answered false, this branch never
+         * ran, and the Eastleigh Voice run re-sent a rejected request for
+         * ninety seconds before failing the same way (#20, 20k).
+         */
+        if (isPermanent(err)) {
           attempt = maxAttempts
         }
 

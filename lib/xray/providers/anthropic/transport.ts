@@ -58,7 +58,7 @@
  */
 
 import { AdapterFailure, unavailable, type CapabilityUnavailable } from '@/lib/xray/capability'
-import { assertStrictSchema } from './strict-schema'
+import { assertStrictSchema, StrictSchemaRejected } from './strict-schema'
 
 /** The stable Messages API version. Not configurable: it is a contract, not a preference. */
 const ANTHROPIC_VERSION = '2023-06-01'
@@ -218,7 +218,18 @@ async function send(request: CallBase, body: unknown): Promise<SendResult> {
  * refused here, naming the path, before anything is sent.
  */
 export async function callMessages(request: MessagesRequest): Promise<MessagesOutcome> {
-  assertStrictSchema(request.tool.name, request.tool.input_schema)
+  /*
+   * A schema outside the subset cannot succeed on a second attempt, so it
+   * leaves here as a `PERMANENT` failure rather than as an unclassified
+   * error the pipeline would retry. The message is ours — the paths of the
+   * offending keywords — and no provider prose is in it.
+   */
+  try {
+    assertStrictSchema(request.tool.name, request.tool.input_schema)
+  } catch (error) {
+    if (!(error instanceof StrictSchemaRejected)) throw error
+    throw new AdapterFailure(request.operation, 'PERMANENT', error.message)
+  }
 
   const sent = await send(request, {
     model: request.modelId,

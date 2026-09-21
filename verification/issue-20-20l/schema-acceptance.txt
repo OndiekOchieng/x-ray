@@ -1,0 +1,15 @@
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings --env-file-if-exists=.env lib/xray/providers/anthropic/acceptance-checks.ts
+10 shipped tool schemas
+
+ok    CLASSIFY         propose_classifications    optional=13  accepted under strict
+ok    DECOMPOSE        propose_claims             optional= 0  accepted under strict
+ok    DISCONFIRM       propose_disconfirmation    optional= 3  accepted under strict
+ok    GRADE            propose_findings           optional= 4  accepted under strict
+ok    IDENTIFY_GAPS    propose_gaps               optional= 5  accepted under strict
+ok    RECONCILE        propose_discrepancies      optional= 1  accepted under strict
+ok    TRACE_DISCOVERED propose_discovered_claims  optional= 6  accepted under strict
+ok    TRACE_EVIDENCE   propose_evidence           optional=14  accepted under strict
+ok    TRACE_POSITIONS  propose_positions          optional=10  accepted under strict
+ok    REVIEW           answer_review_question     optional= 0  accepted under strict
+
+10/10 production schemas accepted

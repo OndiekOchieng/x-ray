@@ -50,7 +50,7 @@
  * artifact.
  */
 
-import { isAvailable, isUnavailable, AdapterFailure } from '@/lib/xray/capability'
+import { isAvailable, isUnavailable, isAdapterFailure } from '@/lib/xray/capability'
 import type { CapabilityUnavailable } from '@/lib/xray/capability'
 import type {
   ResearchAdapter, RetrievalQuery, RetrievedDocument,
@@ -188,7 +188,9 @@ async function obtain(
      * record stays unobtained with the reason recorded — and a `PERMANENT`
      * failure is not swallowed silently, it is what the note says.
      */
-    return unreadable(discovered, err instanceof AdapterFailure
+    // Branded, not `instanceof`: this runs in the app bundle and the adapter
+    // that threw was constructed in the host's. See `isAdapterFailure`.
+    return unreadable(discovered, isAdapterFailure(err)
       ? `retrieval failed (${err.disposition.toLowerCase()}): ${err.message}`
       : 'retrieval failed')
   }

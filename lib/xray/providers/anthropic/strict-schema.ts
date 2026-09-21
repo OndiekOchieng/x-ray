@@ -19,6 +19,17 @@
  * Every authored schema states its own compliance, and this refuses the ones
  * that do not — before a request is sent, not after a 400 comes back.
  *
+ * WHAT THIS MODULE DOES AND DOES NOT ESTABLISH
+ * ============================================
+ * It validates **the documented subset plus the local budgets recorded
+ * below**. Passing it is not a guarantee that Anthropic will accept a schema,
+ * and #20's 20k run is why that sentence is here: DECOMPOSE and TRACE passed
+ * this audit and were both refused with a 400, by limits that appear in no
+ * documentation and only in the error messages. A schema that reaches
+ * production therefore needs **acceptance coverage** — a live strict request
+ * per tool, which `pnpm check:schema-acceptance` is — and this file is the
+ * cheap guard in front of it, not a substitute for it.
+ *
  * THE SUBSET, VERIFIED 2026-09-21
  * ===============================
  * https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use
@@ -83,6 +94,18 @@ export interface StrictSchemaProblem {
 export function strictSchemaProblems(schema: unknown, path = 'input_schema'): StrictSchemaProblem[] {
   const out: StrictSchemaProblem[] = []
   walk(schema, path, out)
+
+  // The budget is a property of the whole schema, so it is checked once here
+  // rather than at every node.
+  const optional = optionalParameters(schema)
+  if (optional > MAX_OPTIONAL_PARAMETERS) {
+    out.push({
+      path,
+      problem: `${optional} optional parameters; Anthropic's stated limit is`
+        + ` ${MAX_OPTIONAL_PARAMETERS}. Narrow the tool or split the request rather than`
+        + ' making semantic fields required to fit.',
+    })
+  }
   return out
 }
 
@@ -181,6 +204,63 @@ function walk(node: unknown, path: string, out: StrictSchemaProblem[]): void {
       walk(child, `${path}.${container}.${name}`, out)
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Local budgets, measured rather than documented
+// ---------------------------------------------------------------------------
+
+/**
+ * The optional-parameter ceiling Anthropic states in its own refusal.
+ *
+ * Verbatim, from the TRACE schema before it was split (20k):
+ *
+ *   "Schemas contains too many optional parameters (43), which would make
+ *    grammar compilation inefficient. Reduce the number of optional
+ *    parameters in your tool schemas (limit: 24)."
+ *
+ * Encoded because the provider states it as a number and because its count
+ * matched `optionalParameters` below exactly, at 26, 32, 38 and 43 across four
+ * probe schemas. That is a stated limit with a reproducible definition, which
+ * is the bar for putting a constant in this file.
+ *
+ * The *other* refusal seen in 20k — a bare "Schema is too complex." — is
+ * deliberately **not** encoded. It has no stated threshold, and what was
+ * measured does not reduce to one number: an object of 15 all-required
+ * properties was refused while three objects holding 14 optional between them
+ * were accepted. Guessing a constant from that would produce a validator that
+ * refuses schemas the API accepts and accepts schemas it refuses, with equal
+ * confidence. Acceptance coverage answers that question honestly; a made-up
+ * constant would answer it plausibly.
+ */
+const MAX_OPTIONAL_PARAMETERS = 24
+
+/**
+ * Properties absent from their object's `required`, summed over every object.
+ *
+ * Counted the way the provider counts: a `$def` is counted once, as the
+ * provider's own total for a `$ref`-shared schema showed.
+ */
+export function optionalParameters(schema: unknown): number {
+  let total = 0
+  const walk = (node: unknown): void => {
+    if (typeof node !== 'object' || node === null) return
+    if (Array.isArray(node)) { node.forEach(walk); return }
+    const object = node as Record<string, unknown>
+    if (object['type'] === 'object') {
+      const names = Object.keys((object['properties'] ?? {}) as object)
+      const required = new Set((object['required'] ?? []) as string[])
+      total += names.filter((name) => !required.has(name)).length
+    }
+    for (const container of ['properties', '$defs', 'definitions'] as const) {
+      const value = object[container]
+      if (typeof value === 'object' && value !== null) Object.values(value).forEach(walk)
+    }
+    walk(object['items'])
+    for (const combinator of ['anyOf', 'allOf'] as const) walk(object[combinator])
+  }
+  walk(schema)
+  return total
 }
 
 /** Thrown when a tool schema would be rejected by the API. */
