@@ -42,4 +42,29 @@ check:persistence-versioning               PASS  7c: stale expected predecessor 
 check:source-position-versioning           PASS  15c: stale predecessor rejects without partial v2 change PASS
 check:persistence-workspace                PASS  7d-a: resumed run skips success, retains failure, clears stale/capab
 check:persistence-audit                    PASS  7d-b: missing ReviewerModel remains NOT_EVALUATED and capability-inc
-check:persistence-ati                      
+check:persistence-ati                      PASS  7d-d ATI: version-scoped eligible origin, invalid references, lifecy
+check:persistence-durable-integration      PASS  7d-d: restart → resume → gates → audit → graduation → comm
+check:persistence-graduation               PASS  7c: stale expected predecessor conflicts without overwrite PASS
+check:investigation-service                PASS  8a: owner-scoped run/candidate reads; exact v1/v2 snapshots; ordered
+check:inline-execution                     PASS  8b: the surface Source appears only from actual INGEST output PASS
+check:api-routes                           PASS  23/23 passed
+check:lifecycle                            PASS  21/21 passed
+check:publication                          PASS  26/26 passed
+check:public-resolver                      PASS  25/25 passed
+check:public-routes                        PASS  31/31 passed
+check:public-library                       PASS  25/25 passed
+check:version-lineage                      PASS  15/15 passed
+check:ati-lifecycle                        PASS  28/28 passed
+check:ati-commands                         PASS  
+check:ati-responses                        PASS  
+check:ati-research                         PASS  
+check:ati-surface                          PASS  
+check:benchmark-corpus                     PASS  benchmark corpus: 12 cases, 1 executable fixture(s), registry integr
+
+check:persistence-postgres-concurrency     NOT RUN — XRAY_POSTGRES_URL unset for this sweep
+
+=== tsc + build ===
+tsc clean
+◐  (Partial Prerender)  prerendered as static HTML with dynamic server-streamed content
+ƒ  (Dynamic)            server-rendered on demand
+
