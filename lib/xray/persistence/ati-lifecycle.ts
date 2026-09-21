@@ -89,11 +89,17 @@ export interface RevisionContent {
  * Deliberately permits several requests against one gap: a missing record may
  * be sought from two institutions with plausible custody, and forcing one
  * request per gap would make the second unrepresentable (#10 C3).
+ *
+ * `inTransaction` lets a caller that already holds a transaction allocate the
+ * ordinal under a lock and insert in the same unit of work — 10b's command
+ * boundary does exactly that, so two concurrent creates cannot be handed the
+ * same ordinal. Same convention as `workspace.ts`.
  */
 export async function createRequest(
   db: SnapshotDatabase, origin: RequestOrigin, content: RevisionContent,
+  options: { inTransaction?: boolean } = {},
 ): Promise<{ requestId: string; revision: number }> {
-  await db.query('BEGIN')
+  if (!options.inTransaction) await db.query('BEGIN')
   try {
     // The mutable legacy columns are superseded by the history tables and are
     // deliberately left null: new runtime must not use them as the record.
@@ -103,10 +109,10 @@ export async function createRequest(
       [origin.requestId, origin.investigationId, origin.originVersion, origin.gapId,
         origin.ordinal, origin.jurisdiction])
     await insertRevision(db, origin.requestId, 1, content)
-    await db.query('COMMIT')
+    if (!options.inTransaction) await db.query('COMMIT')
     return { requestId: origin.requestId, revision: 1 }
   } catch (error) {
-    await db.query('ROLLBACK')
+    if (!options.inTransaction) await db.query('ROLLBACK')
     throw error
   }
 }

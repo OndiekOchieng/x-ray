@@ -1,0 +1,46 @@
+Slice 10b, commit 1 — the enforcement handoff moment.
+
+Command-level XR-INV-009 enforcement passes WHILE graph-level ATI validation is
+still present. Both layers are active in this commit; only after this does the
+graph half come out.
+
+--- graph-level ATI request validation still present ---
+lib/xray/validation/referential.ts:193:  for (const r of graph.atiRequests) {
+lib/xray/validation/structural.ts:479:  for (const request of graph.atiRequests) {
+lib/xray/validation/epistemic.ts:686:  for (const request of graph.atiRequests) {
+
+691:        code: 'XR-INV-009/ATI_REQUEST_ON_INELIGIBLE_GAP',
+705:        code: 'XR-INV-009/ATI_REQUESTED_RECORD_NOT_IN_GAP',
+
+--- command-level gate ---
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/ati-command-checks.ts
+ok    1 · an eligible exact-origin gap creates a draft
+ok    2 · a non-ATI gap is rejected at the command boundary
+ok    3 · unknown investigation, version or gap is rejected
+ok    4 · a requested record the origin gap does not name is rejected
+ok    4b · a request naming no record at all is rejected
+ok    5 · any exact subset of the origin gap's resolving evidence is accepted
+ok    6 · initial holder institution, office and basis come from the origin gap
+ok    7 · a gap with no likely holder never gets one invented
+ok    8 · a human CONFIRMED custody basis requires a stated rationale
+ok    9 · a revision stays bounded by the frozen origin after a later version exists
+ok    10 · several requests may target the same exact gap (C3)
+ok    11 · the service allocates the ordinal; the caller cannot
+ok    12 · exporting an exact existing revision succeeds
+ok    13 · exporting a revision that does not exist fails
+ok    13b · an export stamped before the revision it freezes fails
+ok    13c · acting on a request that does not exist fails
+ok    14 · an export does not imply a submission
+ok    15 · submission requires an explicit human assertion about an exact export
+ok    16 · a submission naming something that was not an export fails
+ok    17 · a submission stamped before the export it names fails
+ok    18 · an acknowledgement before any submission fails
+ok    18b · an acknowledgement stamped before the submission fails
+ok    19 · an acknowledgement after a submission succeeds
+ok    20 · closure is explicit, administrative, and unavailable from DRAFT
+ok    21 · nothing may follow a close
+ok    22 · the derived read model replays history without inventing anything
+ok    23 · every action write leaves committed snapshots byte-identical
+ok    26 · the command boundary emits XR-INV-009's own violation codes
+
+28/28 ATI command checks passed

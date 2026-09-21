@@ -1,0 +1,38 @@
+Adversarial run: the requested-record grounding check disabled in ati-service.ts
+(buildContent's XR-INV-009 membership test short-circuited to false).
+
+This is the evidence that the 10b gate is load-bearing: with command-level
+grounding removed, an invented record name is accepted and persisted.
+
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/ati-command-checks.ts
+ok    1 · an eligible exact-origin gap creates a draft
+ok    2 · a non-ATI gap is rejected at the command boundary
+ok    3 · unknown investigation, version or gap is rejected
+FAIL  4 · a requested record the origin gap does not name is rejected — accepted; expected XR-INV-009/ATI_REQUESTED_RECORD_NOT_IN_GAP
+ok    4b · a request naming no record at all is rejected
+ok    5 · any exact subset of the origin gap's resolving evidence is accepted
+ok    6 · initial holder institution, office and basis come from the origin gap
+ok    7 · a gap with no likely holder never gets one invented
+ok    8 · a human CONFIRMED custody basis requires a stated rationale
+FAIL  9 · a revision stays bounded by the frozen origin after a later version exists — accepted; expected XR-INV-009/ATI_REQUESTED_RECORD_NOT_IN_GAP
+FAIL  10 · several requests may target the same exact gap (C3) — 0 request(s) anchored to v3
+ok    11 · the service allocates the ordinal; the caller cannot
+ok    12 · exporting an exact existing revision succeeds
+ok    13 · exporting a revision that does not exist fails
+ok    13b · an export stamped before the revision it freezes fails
+ok    13c · acting on a request that does not exist fails
+ok    14 · an export does not imply a submission
+ok    15 · submission requires an explicit human assertion about an exact export
+ok    16 · a submission naming something that was not an export fails
+ok    17 · a submission stamped before the export it names fails
+ok    18 · an acknowledgement before any submission fails
+ok    18b · an acknowledgement stamped before the submission fails
+ok    19 · an acknowledgement after a submission succeeds
+ok    20 · closure is explicit, administrative, and unavailable from DRAFT
+ok    21 · nothing may follow a close
+FAIL  22 · the derived read model replays history without inventing anything — content is not the latest revision
+ok    23 · every action write leaves committed snapshots byte-identical
+FAIL  26 · the command boundary emits XR-INV-009's own violation codes — emitted ["XR-INV-009/ATI_REQUEST_ON_INELIGIBLE_GAP",null]
+
+23/28 ATI command checks passed
+[ELIFECYCLE] Command failed with exit code 1.
