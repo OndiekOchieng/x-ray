@@ -13,7 +13,9 @@ import type { RevisionRequest } from '@/lib/xray/review'
 import { appendExecutionAudit, readExecutionAudit } from '@/lib/xray/persistence/execution-audit'
 import { loadCandidateCheckpoint, saveCandidateCheckpoint } from '@/lib/xray/persistence/workspace'
 import { readSnapshot, type SnapshotDatabase } from '@/lib/xray/persistence/snapshot'
-import { recordExecutionCause, type ExecutionCause } from '@/lib/xray/persistence/execution-cause'
+import {
+  readExecutionCause, recordExecutionCause, type ExecutionCause,
+} from '@/lib/xray/persistence/execution-cause'
 import { VersionConflict } from '@/lib/xray/persistence/version-commit'
 import { InvestigationService, type ExecutionStatusDto, type SubmissionMetadata,
   InvestigationResourceNotFound } from './investigation-service'
@@ -97,6 +99,33 @@ export class InlineExecutionService {
     this.clock = clock
     this.newRunId = newRunId
     this.read = new InvestigationService(db)
+  }
+
+  /**
+   * Whether this run re-researches an already-committed version.
+   *
+   * Reconstructed from the run's own durable cause, and read the same way on
+   * every path that starts a pipeline. That is the whole point: the run mode is
+   * a property of the durable record, not of the call that happened to begin
+   * the work.
+   *
+   * An earlier version set the flag literally in `startReevaluation` and left
+   * `resumeExecution` without it, which was wrong in a way only a restart
+   * showed: a re-evaluation interrupted after `TRACE` checkpointed a state that
+   * was legal when written, and then failed at `PROVENANCE` after restart
+   * because the resumed pipeline no longer knew what kind of run it was. The
+   * flag belongs to the run, so it is derived from the run.
+   *
+   * Never inferred from graph shape. A candidate that happens to carry graded
+   * findings, or an investigation whose `currentVersion` is above 1, proves
+   * nothing about what this run was started to do — and inferring it would
+   * hand the exemption to anything that looked similar enough.
+   */
+  private async isSuccessorReevaluation(executionRunId: string): Promise<boolean> {
+    const cause = await readExecutionCause(this.db, executionRunId)
+    // No recorded cause is a first research run. `INITIAL_RESEARCH` would be
+    // one too, so the trigger is checked rather than the row's mere presence.
+    return cause !== undefined && cause.intendedTrigger !== 'INITIAL_RESEARCH'
   }
 
   private async checkpoint(executionRunId: string, startedAt: string, boundary: PipelineBoundary): Promise<void> {
@@ -212,9 +241,10 @@ export class InlineExecutionService {
 
     await runPipeline({ investigation, stages: plan.stages,
       adapters: plan.adapters, stopEvidence: plan.stopEvidence, maxAttempts: plan.maxAttempts,
-      // This candidate carries the predecessor's graded findings, so a
-      // pre-GRADE evidence change owes GRADE a repair. See `isStagedDebt`.
-      successorReevaluation: true,
+      // Read back from the cause just written, not asserted here. Start and
+      // resume then cannot disagree about what kind of run this is, because
+      // both ask the same durable row.
+      successorReevaluation: await this.isSuccessorReevaluation(executionRunId),
       resume: { accumulator, journal, ledger }, clock: this.clock,
       onBoundary: (boundary) => this.checkpoint(executionRunId, startedAt, boundary) })
 
@@ -230,6 +260,9 @@ export class InlineExecutionService {
    * An explicit `revision` takes precedence over anything the runtime plans.
    * The caller asking for a revision is a decision about this run; the runtime
    * only knows how to execute stages.
+   *
+   * The run mode comes from `isSuccessorReevaluation`, so an interrupted
+   * re-evaluation resumes under the rules it was interrupted under.
    */
   async resumeExecution(investigationId: string, executionRunId: string,
     options: { revision?: RevisionRequest } = {}): Promise<ExecutionStatusDto> {
@@ -256,6 +289,10 @@ export class InlineExecutionService {
     await runPipeline({ investigation: checkpoint.accumulator.snapshot().investigation,
       stages: plan.stages, adapters: plan.adapters, stopEvidence: plan.stopEvidence,
       maxAttempts: plan.maxAttempts, revision: plan.revision,
+      // Reconstructed, so a resumed re-evaluation carries the same staged-debt
+      // rules the interrupted one did. A checkpoint that was legal when
+      // written must stay legal when restored.
+      successorReevaluation: await this.isSuccessorReevaluation(executionRunId),
       resume: { accumulator: checkpoint.accumulator,
         journal: checkpoint.journal, ledger: checkpoint.ledger },
       reviewHistory: prior.reviewHistory, startArtifactVersion: checkpoint.artifactVersion,

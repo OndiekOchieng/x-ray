@@ -44,7 +44,12 @@ import {
   AT, ATI_MIGRATIONS, MIGRATIONS, commitFurtherVersion, seedLineage,
 } from '@/lib/xray/persistence/publication-check-support'
 import { readExecutionAudit } from '@/lib/xray/persistence/execution-audit'
-import { loadCandidateCheckpoint } from '@/lib/xray/persistence/workspace'
+import { loadCandidateCheckpoint, saveCandidateCheckpoint } from '@/lib/xray/persistence/workspace'
+import { appendExecutionAudit } from '@/lib/xray/persistence/execution-audit'
+import { GraphAccumulator } from '@/lib/xray/pipeline/accumulator'
+import { CorrelationLedger } from '@/lib/xray/pipeline/correlation'
+import { RunJournal } from '@/lib/xray/pipeline/journal'
+import { emptyReviewHistory } from '@/lib/xray/review'
 import { readExecutionCause } from '@/lib/xray/persistence/execution-cause'
 import { readReEvaluationAudit, VersionConflict } from '@/lib/xray/persistence/version-commit'
 import { ATIActionService } from './ati-service'
@@ -148,7 +153,14 @@ async function main(): Promise<void> {
     let seenContext: ReevaluationContext | undefined
     const runtime: ExecutionRuntime = {
       async initial() { throw new Error('not used by this gate') },
-      async resume() { throw new Error('not used by this gate') },
+      // A resumed run gets the same stage plan a real runtime would rebuild.
+      async resume() {
+        return {
+          stages: atiStagePlan(planOptions),
+          adapters: { research: intakeResearchAdapter(currentMaterial, ATI_PROPOSAL) },
+          stopEvidence: { saturationObserved: true },
+        }
+      },
       async reevaluation(context) {
         seenContext = context
         return {
@@ -887,6 +899,150 @@ async function main(): Promise<void> {
         "!alreadyDone.has('GRADE')", "RESEARCH_STAGES.indexOf('GRADE')"]
       const missing = guards.filter((guard) => !runSource.includes(guard))
       return missing.length === 0 ? null : `the exemption lacks: ${missing.join(', ')}`
+    })
+
+    // === the run mode must survive a restart ==============================
+
+    await check('D1 · an interrupted successor re-evaluation resumes under the same rules', async () => {
+      const probe = await filedWithRecords('ATI-D-RESTART',
+        [{ describedAs: 'Award notice bearing on a graded claim', material: RECORD }])
+      const probeId = probe.intakeIds[0]
+      currentMaterial = material(probeId)
+      const ran: string[] = []
+      // TRACE creates the staged debt, then PROVENANCE dies once.
+      planOptions = { sources: 1, bearOnExistingClaim: true, regradeExisting: true,
+        interruptAfterTrace: { failures: 1 }, ran }
+
+      const interrupted = await bridge.processIntake({
+        intakeId: probeId, material: currentMaterial, behaviors: XRAY_KE_001_ACCEPTANCE })
+      if (interrupted.result !== 'NOT_COMMITTABLE') return `first pass: ${interrupted.result}`
+      const runId = interrupted.executionRunId
+
+      // The checkpoint holds a graph that is only legal under the
+      // successor-re-evaluation rules: TRACE's evidence is banked and the
+      // inherited finding does not mirror it yet.
+      const parked = await loadCandidateCheckpoint(db, runId)
+      const parkedGraph = parked.accumulator.rebuild()
+      const debt = validateXRayGraph(parkedGraph, { mode: 'STAGED' }).violations
+        .filter((violation) => violation.code === 'XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH')
+      if (debt.length === 0) return 'the checkpoint carries no staged debt, so this proves nothing'
+      if (!parkedGraph.sources.some((item) => item.id.startsWith('SRC-')
+        && !seedGraph!.sources.some((seed) => seed.id === item.id)))
+        return 'TRACE did not bank a new source before the interruption'
+
+      // A FRESH service, with nothing in memory about what kind of run this is.
+      const restarted = new InlineExecutionService(
+        db, runtime, () => AT, () => 'RUN-ATI-D-UNUSED')
+      const resumed = await restarted.resumeExecution(INV, runId)
+      if (resumed.status !== 'COMPLETED') {
+        const audit = await readExecutionAudit(db, runId)
+        const failed = audit.journal.entries
+          .map((entry) => (entry as { run?: { stage?: string; error?: string } }).run)
+          .filter((run) => run?.error !== undefined)
+        return `resumed to ${resumed.status}: ${JSON.stringify(failed)}`
+      }
+      // The pre-GRADE stages ran again after the restart and passed, and GRADE
+      // repaired what TRACE owed.
+      for (const stage of ['PROVENANCE', 'DISCONFIRM', 'RECONCILE', 'GRADE', 'GAPS']) {
+        if (!ran.includes(stage)) return `${stage} did not run after the restart`
+      }
+      const finished = (await loadCandidateCheckpoint(db, runId)).accumulator.rebuild()
+      const full = validateXRayGraph(finished, { mode: 'FULL' })
+      if (!full.valid || full.summary.errorCount > 0)
+        return `FULL reports ${full.summary.errorCount} error(s) after the restart`
+
+      // And it goes on to commit, so the restart produced a real successor.
+      const promoted = await graduation.promote(INV, runId, {
+        expectedPredecessor: (await db.query<{ v: number }>(
+          'SELECT latest_committed_version AS v FROM investigations WHERE id=$1', [INV]))
+          .rows[0].v,
+        trigger: 'ATI_RESPONSE_RECEIVED', createdAt: AT,
+      })
+      return promoted.version!.reEvaluatedClaimIds.includes(EXISTING_CLAIM as never)
+        ? null : `re-evaluated ${JSON.stringify(promoted.version!.reEvaluatedClaimIds)}`
+    })
+
+    await check('D2 · the run mode is reconstructed from durable metadata, not graph shape', async () => {
+      const source = stripComments(
+        readFileSync(new URL('./inline-execution.ts', import.meta.url), 'utf8'))
+      // Both pipeline starts read the same durable answer; neither asserts one.
+      const literal = source.split('successorReevaluation: true').length - 1
+      if (literal !== 0) return `${literal} call site(s) assert the run mode literally`
+      const derived = source.split('successorReevaluation: await this.isSuccessorReevaluation(').length - 1
+      if (derived !== 2)
+        return `${derived} call site(s) derive the run mode, expected 2 (start and resume)`
+      // Derived from the cause row, never from the candidate's shape.
+      const helper = source.slice(source.indexOf('private async isSuccessorReevaluation'))
+        .slice(0, 600)
+      if (!helper.includes('readExecutionCause')) return 'the helper does not read the cause'
+      for (const inferred of ['currentVersion', 'findings', 'version?.version']) {
+        if (helper.includes(inferred)) return `the helper inspects ${inferred}`
+      }
+      return null
+    })
+
+    await check('D3 · a resumed first-research run gains no exemption', async () => {
+      // A run with NO durable cause, parked mid-flight over a graded seed. It
+      // is not a re-evaluation however much its candidate looks like one.
+      const seed = await readSnapshot(db, INV, 2)
+      const { index: _index, version: _version, investigation, ...collections } = seed
+      const noCause = 'RUN-ATI-D-FIRSTRUN'
+      const accumulator = new GraphAccumulator(
+        { ...investigation, status: 'RUNNING', stageRuns: [], currentVersion: 2 },
+        JSON.parse(JSON.stringify(collections)) as never)
+      const journal = new RunJournal(INV)
+      await saveCandidateCheckpoint(db, { executionRunId: noCause, investigationId: INV,
+        startedAt: AT, updatedAt: AT, status: 'PENDING', artifactVersion: 0,
+        accumulator, ledger: new CorrelationLedger(), journal })
+      await appendExecutionAudit(db, noCause,
+        { journal, validations: [], reviewHistory: emptyReviewHistory(INV) })
+      if (await readExecutionCause(db, noCause) !== undefined)
+        return 'the probe run acquired a cause'
+
+      currentMaterial = material('unused')
+      planOptions = { sources: 1, bearOnExistingClaim: true, regradeExisting: true, ran: [] }
+      const resumed = await new InlineExecutionService(db, runtime, () => AT, () => 'RUN-X')
+        .resumeExecution(INV, noCause)
+      if (resumed.status !== 'STAGE_FAILED') return `status ${resumed.status}`
+      const failure = (await readExecutionAudit(db, noCause)).journal.entries
+        .map((entry) => (entry as { run?: { stage?: string; error?: string } }).run)
+        .find((run) => run?.error !== undefined)
+      return failure?.stage === 'TRACE'
+        && failure.error?.includes('XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH')
+        ? null : `failed as ${JSON.stringify(failure)}`
+    })
+
+    await check('D4 · a generic non-ATI re-evaluation gets the same treatment, across a restart', async () => {
+      // NEW_SOURCE_RECEIVED, no intake and no ATI reference anywhere. The
+      // primitive is generic, so the rules that apply to it must be too.
+      const ran: string[] = []
+      currentMaterial = material('generic-material')
+      planOptions = { sources: 1, bearOnExistingClaim: true, regradeExisting: true,
+        interruptAfterTrace: { failures: 1 }, ran }
+      const predecessor = (await db.query<{ v: number }>(
+        'SELECT latest_committed_version AS v FROM investigations WHERE id=$1', [INV])).rows[0].v
+      const started = await execution.startReevaluation({
+        investigationId: INV, expectedPredecessorVersion: predecessor,
+        trigger: 'NEW_SOURCE_RECEIVED',
+        cause: { kind: 'NEW_SOURCE', reference: 'a source that arrived by another route' },
+      })
+      if (started.status.status !== 'STAGE_FAILED')
+        return `first pass: ${started.status.status}`
+      const cause = await readExecutionCause(db, started.executionRunId)
+      if (cause?.atiIntakeId !== undefined) return 'the generic cause carries an ATI intake'
+
+      const resumed = await new InlineExecutionService(db, runtime, () => AT, () => 'RUN-Y')
+        .resumeExecution(INV, started.executionRunId)
+      if (resumed.status !== 'COMPLETED') {
+        const failed = (await readExecutionAudit(db, started.executionRunId)).journal.entries
+          .map((entry) => (entry as { run?: { stage?: string; error?: string } }).run)
+          .filter((run) => run?.error !== undefined)
+        return `resumed to ${resumed.status}: ${JSON.stringify(failed)}`
+      }
+      const finished = (await loadCandidateCheckpoint(db, started.executionRunId))
+        .accumulator.rebuild()
+      return validateXRayGraph(finished, { mode: 'FULL' }).summary.errorCount === 0
+        ? null : 'FULL rejected the generic re-evaluation'
     })
 
     void seeded

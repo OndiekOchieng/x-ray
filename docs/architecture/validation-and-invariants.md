@@ -172,6 +172,17 @@ A conclusion that cannot describe how it could be overturned is invalid.
 > stage that will pay it has not yet had a turn to pay.
 >
 > Both live in one predicate, `isStagedDebt` in `pipeline/run.ts`.
+>
+> **The run mode is durable.** `successorReevaluation` is reconstructed from the
+> run's own `execution_run_causes` row, by one helper that every path starting a
+> pipeline calls — start and resume alike. It is never inferred from graph
+> shape: a candidate carrying graded findings, or a `currentVersion` above 1,
+> says nothing about what the run was started to do.
+>
+> This is not a detail. A re-evaluation interrupted after `TRACE` checkpoints a
+> state that is legal *only* under these rules. If the resumed pipeline did not
+> know what kind of run it was, it would fail at `PROVENANCE` on debt that was
+> perfectly legal when it was written — a checkpoint that cannot be restored.
 
 ---
 

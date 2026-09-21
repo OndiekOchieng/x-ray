@@ -402,7 +402,9 @@ it because it does not own `findings`. `runPipeline` therefore permits exactly
 that mismatch as bounded staged debt until `GRADE` takes its turn — see the
 XR-INV-007 amendment in
 [validation-and-invariants.md](validation-and-invariants.md#xr-inv-007--findings-must-be-reversible).
-The rule is generic to all successor re-evaluation, not ATI-specific.
+The rule is generic to all successor re-evaluation, not ATI-specific, and the
+run mode is reconstructed from the run's durable cause so an interrupted
+re-evaluation resumes under the rules it was interrupted under.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Released from:** `25e26c7` · **blocker decided, remediated**
 **Commits:** `5df8944` persistence → `75f2635` execution primitive → `6cf3357` bridge → `bc04331` gate → `bdbeb65` docs → `feat(pipeline)` staged debt + `test(ati)` bounds
-**Gate:** `pnpm check:ati-research` — **31/31**
+**Gate:** `pnpm check:ati-research` — **35/35**
 **Migration:** `0013_ati_response_identity_and_execution_cause`
 
 ---
@@ -91,6 +91,63 @@ tolerating it.
 Checks 16/18/19 still prove the converse on the discovered-claim path: the gap
 names claims, none changed, the recorded set is empty, and the newly discovered
 claim is absent from it.
+
+---
+
+## The second blocker: the run mode was not durable
+
+**Found in review of `01a14bb`, and real.** `startReevaluation` set
+`successorReevaluation: true`; `resumeExecution` did not. So a re-evaluation
+interrupted after `TRACE` checkpointed a state that was legal when written, and
+then failed on restart because the resumed pipeline no longer knew what kind of
+run it was:
+
+```text
+stage PROVENANCE introduced 1 validation error(s): XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH
+```
+
+A checkpoint that cannot be restored. Preserved verbatim in
+[`resume-loses-run-mode.txt`](resume-loses-run-mode.txt), which reverts
+`resumeExecution` to the reviewed state and fails D1, D2 and D4.
+
+**Fixed as directed: reconstructed from durable execution metadata.**
+`isSuccessorReevaluation(executionRunId)` reads the run's own
+`execution_run_causes` row and answers from its `intendedTrigger` — no row, or
+`INITIAL_RESEARCH`, means a first research run.
+
+Both paths that start a pipeline now call that one helper, and
+`startReevaluation` **stopped asserting the flag** and reads it back from the
+cause it just wrote. That is the structural half of the fix: the defect was two
+call sites where one forgot, so there is no longer a literal to forget. D2
+asserts `successorReevaluation: true` appears nowhere and the derived form
+appears exactly twice.
+
+**Never inferred from graph shape.** D2 also asserts the helper reads the cause
+and inspects no `currentVersion`, no `findings`, no version number. A candidate
+that happens to carry graded findings says nothing about what the run was
+started to do, and inferring it would hand the exemption to anything that
+looked similar enough.
+
+### The required proofs
+
+| Check | What it drives |
+| --- | --- |
+| **D1** | graded predecessor → `TRACE` banks the debt → `PROVENANCE` dies → checkpoint → **fresh `InlineExecutionService`** → resume → `PROVENANCE`/`DISCONFIRM`/`RECONCILE` pass → `GRADE` repairs → FULL clean → promotes with `C001` re-evaluated |
+| **D3** | a run with **no** cause row, parked mid-flight over a graded seed, resumed: fails at `TRACE`. Not a re-evaluation however much its candidate looks like one |
+| **D4** | `NEW_SOURCE_RECEIVED`, no intake and no ATI reference, interrupted and resumed: completes with FULL clean. The primitive is generic, so the rules that apply to it are too |
+
+D1 first asserts the checkpoint genuinely carries the debt — `STAGED` reports
+the mismatch on the parked graph, and `TRACE`'s new source is banked — so a
+passing restart cannot be a run that simply had nothing to restore.
+
+### One consequence worth flagging
+
+Three gates now migrate the full chain through `0013` rather than a subset:
+`check:inline-execution`, `check:api-routes`, `check:lifecycle`. The execution
+layer's resume path genuinely reads `execution_run_causes`, so a gate
+exercising resume must have the schema the code requires. I did **not** make
+`readExecutionCause` tolerant of a missing table: swallowing that error would
+return `false` and silently reintroduce exactly this class of bug.
 
 ---
 
@@ -317,7 +374,7 @@ exactly one committed.
 | 34 | acceptance atomic with commit | 29/34 + variant C |
 | 35 | duplicate after accepted rejected | 35 |
 | 36 | failed prior run does not poison the intake | 36 |
-| 37 | execution audit restart/resume compatible | 37 |
+| 37 | execution audit restart/resume compatible | 37, and D1/D4 for the real restart |
 | 38 | historical findings addressable | 28/38 |
 | 39 | ATI lifecycle rows unchanged | 39 |
 | 40 | 10a/10b/10c gates green | 28/28, 32/32, 25/25 |
@@ -328,7 +385,7 @@ exactly one committed.
 
 ## Changes to existing green gates
 
-Two.
+Three.
 
 1. `pipeline/run.ts` — the approved staged-debt exemption. The two existing
    exemptions now live in one documented predicate, `isStagedDebt`, instead of
@@ -338,6 +395,9 @@ Two.
    `reEvaluationAudit` override, so a gate can exercise a specific reason and
    cause. The claim ids must still match what the candidate changed;
    `commitNextVersion` checks that itself.
+3. `check:inline-execution`, `check:api-routes` and `check:lifecycle` migrate
+   through `0013` instead of a subset, because `resumeExecution` reads
+   `execution_run_causes`. All three green: `PASS`, 23/23, 21/21.
 
 ## Stop line (release §W) — nothing added
 
@@ -354,6 +414,7 @@ notification delivery, no publication changes, no demo workflow.
 
 ## Files
 
+- `verification/issue-10-10d/resume-loses-run-mode.txt` — the reviewed state failing the restart proofs
 - `verification/issue-10-10d/exemption-bounds.txt` — five runs widening or removing the staged-debt exemption
 - `verification/issue-10-10d/gate-bites.txt` — three adversarial runs, one per released constraint
-- `verification/issue-10-10d/final-gate.txt` — 31/31 plus the full sweep
+- `verification/issue-10-10d/final-gate.txt` — 35/35 plus the full sweep

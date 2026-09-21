@@ -1,4 +1,4 @@
-Slice 10d final gate — after the approved staged-debt exemption.
+Slice 10d final gate — after durable run-mode reconstruction.
 
 === pnpm check:ati-research (10d) ===
 ok    1 · an unknown intake is rejected before any run exists
@@ -32,8 +32,12 @@ ok    E2 · the debt ends at GRADE: a GRADE that does not repair it fails
 ok    E3 · no GRADE in the plan means no exemption at all
 ok    E4 · PROVENANCE survives the inherited mismatch one stage later
 ok    E5 · no validator was weakened: both modes still report the mismatch
+ok    D1 · an interrupted successor re-evaluation resumes under the same rules
+ok    D2 · the run mode is reconstructed from durable metadata, not graph shape
+ok    D3 · a resumed first-research run gains no exemption
+ok    D4 · a generic non-ATI re-evaluation gets the same treatment, across a restart
 
-31/31 ATI research checks passed
+35/35 ATI research checks passed
 
 === the ATI slices ===
 check:ati-lifecycle        28/28 passed

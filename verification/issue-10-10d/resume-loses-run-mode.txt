@@ -1,0 +1,45 @@
+Failing evidence — the reviewed state, where the run mode was not durable.
+
+resumeExecution() restored to not passing successorReevaluation, exactly as
+at 01a14bb. startReevaluation() still sets it, so the first pass is legal and
+the checkpoint is legal when written — and the restart is not.
+
+$ node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/application/ati-research-checks.ts
+ok    1 · an unknown intake is rejected before any run exists
+ok    2 · material that names another intake is rejected
+ok    3 · material whose digest differs from the receipt is rejected before execution
+ok    4/5/6 · receipt digests are checked, and their provenance is never rewritten
+ok    happy path · one intake yields one committed successor version
+ok    7 · the run carries a durable cause naming the exact intake and response
+ok    8/9 · the candidate was seeded from the exact latest committed predecessor
+ok    11 · the predecessor's completion state is not carried into the new run
+ok    12/13 · material enters at the retrieval boundary and cannot be a Source
+ok    14 · every research stage and both control gates ran
+ok    15 · added Source ids come from stage allocation, never from the intake
+ok    16/18/19 · the audit set is evidence-driven, not the origin gap's claims
+ok    20/21/22 · an ATI_RESPONSE cause is written, read back exactly, and is a real key
+ok    23 · the committed version carries the ATI trigger and its exact predecessor
+ok    26/27 · graduation is required before commit, on #7's existing rules
+ok    28/38 · the predecessor stays byte-identical and its findings addressable
+ok    29/34 · a stale predecessor conflicts and writes no version or acceptance
+ok    30 · a response yielding nothing commits no version and accepts nothing
+ok    31 · one added Source maps exactly one acceptance
+ok    32 · several added Sources map all and only those Sources
+ok    33 · an inherited Source can never be accepted
+ok    35 · an intake already accepted is not researched a second time
+ok    36 · an uncommitted prior run leaves the intake processable
+ok    37 · the run's execution audit stays restart and resume compatible
+ok    39 · research changed no ATI action-lifecycle row
+ok    17/20/21 · a re-graded existing claim is recorded with its exact response cause
+ok    E1 · the exemption is unavailable outside a successor re-evaluation
+ok    E2 · the debt ends at GRADE: a GRADE that does not repair it fails
+ok    E3 · no GRADE in the plan means no exemption at all
+ok    E4 · PROVENANCE survives the inherited mismatch one stage later
+ok    E5 · no validator was weakened: both modes still report the mismatch
+FAIL  D1 · an interrupted successor re-evaluation resumes under the same rules — resumed to STAGE_FAILED: [{"id":"SR-003","investigationId":"XRAY-ATI-RESEARCH","stage":"PROVENANCE","status":"FAILED","inputArtifactVersion":2,"startedAt":"2026-09-20T12:00:00Z","completedAt":"2026-09-20T12:00:00Z","error":"synthetic interruption after TRACE"},{"id":"SR-004","investigationId":"XRAY-ATI-RESEARCH","stage":"PROVENANCE","status":"FAILED","inputArtifactVersion":2,"startedAt":"2026-09-20T12:00:00Z","completedAt":"2026-09-20T12:00:00Z","error":"stage PROVENANCE introduced 1 validation error(s): XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH"}]
+FAIL  D2 · the run mode is reconstructed from durable metadata, not graph shape — 1 call site(s) derive the run mode, expected 2 (start and resume)
+ok    D3 · a resumed first-research run gains no exemption
+FAIL  D4 · a generic non-ATI re-evaluation gets the same treatment, across a restart — resumed to STAGE_FAILED: [{"id":"SR-003","investigationId":"XRAY-ATI-RESEARCH","stage":"PROVENANCE","status":"FAILED","inputArtifactVersion":2,"startedAt":"2026-09-20T12:00:00Z","completedAt":"2026-09-20T12:00:00Z","error":"synthetic interruption after TRACE"},{"id":"SR-004","investigationId":"XRAY-ATI-RESEARCH","stage":"PROVENANCE","status":"FAILED","inputArtifactVersion":2,"startedAt":"2026-09-20T12:00:00Z","completedAt":"2026-09-20T12:00:00Z","error":"stage PROVENANCE introduced 1 validation error(s): XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH"}]
+
+32/35 ATI research checks passed
+[ELIFECYCLE] Command failed with exit code 1.

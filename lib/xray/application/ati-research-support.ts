@@ -51,6 +51,15 @@ export interface AtiStagePlanOptions {
   regradeExisting?: boolean
   /** TRACE also writes a finding, which it does not own. For the same reason. */
   traceWritesFinding?: boolean
+  /**
+   * Fail `PROVENANCE` on its first attempt, once.
+   *
+   * The interruption point that matters: `TRACE` has already created the
+   * staged debt and checkpointed it, so a restart has to resume into a state
+   * that is only legal under the successor-re-evaluation rules.
+   */
+  interruptAfterTrace?: { failures: number }
+
   /** Collects what each stage did, so a gate can assert the stages ran. */
   ran?: string[]
   /** Called once with the graph TRACE was handed, to inspect the seed. */
@@ -175,7 +184,18 @@ export function atiStagePlan(options: AtiStagePlanOptions = {}): readonly StageD
         return claims.length > 0 ? { sources, evidence, claims } : { sources, evidence }
       },
     },
-    { stage: 'PROVENANCE', run() { note('PROVENANCE'); return {} } },
+    {
+      stage: 'PROVENANCE',
+      run() {
+        note('PROVENANCE')
+        // Interrupt here, after TRACE has banked the debt.
+        if (options.interruptAfterTrace && options.interruptAfterTrace.failures > 0) {
+          options.interruptAfterTrace.failures -= 1
+          throw new Error('synthetic interruption after TRACE')
+        }
+        return {}
+      },
+    },
     {
       stage: 'DISCONFIRM',
       run(ctx) {

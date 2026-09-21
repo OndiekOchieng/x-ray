@@ -69,9 +69,16 @@ const get = (url: string) => new Request(url)
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
 async function migrate(db: PGlite) {
+  // 0008-0013 are included because `resumeExecution` reconstructs the run mode
+  // from `execution_run_causes`, which 0013 creates. The execution layer now
+  // genuinely requires that table, so a gate exercising resume must have the
+  // schema the code requires rather than a subset of it.
   for (const name of ['0001_version_ownership', '0002_source_retrieval_precision',
     '0003_reevaluation_audit', '0004_source_position_knowledge_basis', '0005_execution_audit',
-    '0006_graduation_audit', '0007_investigation_submissions'])
+    '0006_graduation_audit', '0007_investigation_submissions', '0008_publication_events',
+    '0009_ati_lifecycle', '0010_ati_origin_and_acceptance',
+    '0011_ati_acceptance_requires_added_source', '0012_ati_intake_digest_provenance',
+    '0013_ati_response_identity_and_execution_cause'])
     await db.exec(readFileSync(new URL(`../../../db/migrations/${name}.up.sql`, import.meta.url), 'utf8'))
 }
 
