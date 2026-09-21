@@ -20,6 +20,7 @@
  */
 
 import { VersionConflict } from '@/lib/xray/persistence/version-commit'
+import { atiErrorStatus } from './ati-routes'
 import { InvalidSubmissionInput, InvestigationResourceNotFound } from './investigation-service'
 import { ExecutionNotRetryable } from './inline-execution'
 import { HostNotConfigured } from './runtime'
@@ -85,6 +86,12 @@ export function toResponse(error: unknown): Response {
 
   if (error instanceof VersionConflict)
     return failure('VERSION_CONFLICT', error.message, 409)
+
+  // The ATI services refuse with a stable code and an authored message, so
+  // both cross the boundary as they are. 422 for a refusal the caller could
+  // have avoided, 409 for state that moved, 404 for what is not there.
+  const ati = atiErrorStatus(error)
+  if (ati) return failure(ati.code, ati.message, ati.status)
 
   // The deployment is missing a seam. Report it as unavailable rather than as
   // a defect in the request, and say nothing about what is missing internally.

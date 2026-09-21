@@ -7,7 +7,12 @@ import { readExecutionAudit } from '@/lib/xray/persistence/execution-audit'
 import { readSnapshot, type SnapshotDatabase } from '@/lib/xray/persistence/snapshot'
 export { VersionConflict } from '@/lib/xray/persistence/version-commit'
 
-export type MissingResource = 'INVESTIGATION' | 'EXECUTION_RUN' | 'CANDIDATE_WORKSPACE' | 'COMMITTED_VERSION'
+export type MissingResource = 'INVESTIGATION' | 'EXECUTION_RUN' | 'CANDIDATE_WORKSPACE'
+  | 'COMMITTED_VERSION'
+  // #10 slice 10e. A request or intake addressed under the wrong
+  // investigation is not found, rather than forbidden: saying "wrong owner"
+  // would confirm it exists somewhere else.
+  | 'ATI_REQUEST' | 'ATI_INTAKE' | 'GAP'
 export class InvestigationResourceNotFound extends Error {
   readonly resource: MissingResource
   readonly id: string
