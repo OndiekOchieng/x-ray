@@ -29,6 +29,8 @@ present in v0.1; where scaffold reconciliation
 | [0014](./0014-withdrawal-is-a-presentation-event.md) | Withdrawal Is a Presentation Event, Not an Erasure | Named reasons, a 410 tombstone, no auto-withdrawal, canonical state untouched. |
 | [0015](./0015-public-retrieval-is-a-separate-trust-boundary.md) | Public Retrieval Is a Separate Trust Boundary | Publication resolves first; draft existence is never observable publicly. |
 | [0016](./0016-cache-the-version-projection-not-the-response.md) | Cache the Version Projection, Not the Public Response | Presentation state stays fresh; the immutable projection is cached. |
+| [0017](./0017-ati-action-history-is-append-only.md) | ATI Action History Is Append-Only, and Outside Research State | Events are the record; export freezes a revision; closure is administrative. |
+| [0018](./0018-received-records-enter-research-as-intake.md) | Received Records Enter Research as Intake, Not as Canonical Sources | A response logs an intake; research decides whether it becomes evidence. |
 
 ## Numbering
 
@@ -38,7 +40,7 @@ recorded in each file's header.
 
 ## Adding an ADR
 
-Next number is `0017`. Use the same four sections, and state Status as
+Next number is `0019`. Use the same four sections, and state Status as
 `Proposed` until accepted. An ADR that replaces an earlier one sets
 `Supersedes:` and the superseded ADR is marked `Superseded by:` rather than
 deleted — the same preservation rule the system applies to its own findings

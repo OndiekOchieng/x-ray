@@ -91,6 +91,15 @@ Pipeline slice 6b (2026-09-18) specified the two adapter boundaries:
 20. [ADR-0010 amendment](../adr/0010-research-retrieval-boundary.md) — bounded
     content crosses the retrieval boundary, in memory only; retention is #7
 
+Issue #10 formalization (2026-09-21) specified the ATI lifecycle:
+
+21. [ADR-0017](../adr/0017-ati-action-history-is-append-only.md) — ATI action
+    history is append-only and outside research state
+22. [ADR-0018](../adr/0018-received-records-enter-research-as-intake.md) —
+    received records enter research as intake, not as canonical Sources
+23. [ati-lifecycle.md](./ati-lifecycle.md) — the gap → request → response →
+    version loop, and the language constraints on the action surface
+
 Protocol v0.3 architecture checkpoint (2026-09-19) added one accepted architecture delta:
 
 21. [ADR-0012](../adr/0012-source-position-and-evidentiary-reach.md) and [source-position-and-evidentiary-reach.md](./source-position-and-evidentiary-reach.md) — SourcePosition is canonical contextual state; KnowledgeBasis is proposition-specific on Evidence; no trust score or new research stage.
