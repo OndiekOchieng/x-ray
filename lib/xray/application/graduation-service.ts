@@ -35,7 +35,8 @@ import { GraphAccumulator } from '@/lib/xray/pipeline/accumulator'
 import { appendGraduationAudit, readLatestGraduation, type GraduationAuditRecord } from '@/lib/xray/persistence/graduation-audit'
 import { readSnapshot, type SnapshotDatabase } from '@/lib/xray/persistence/snapshot'
 import {
-  changedClaimIds, commitNextVersion, type ReEvaluationAudit,
+  changedClaimIds, commitNextVersion,
+  type IntakeSourceAcceptance, type ReEvaluationAudit,
 } from '@/lib/xray/persistence/version-commit'
 import { loadCandidateCheckpoint, saveCandidateCheckpoint } from '@/lib/xray/persistence/workspace'
 
@@ -156,6 +157,14 @@ export class GraduationService {
   async commit(investigationId: string, executionRunId: string, options: {
     expectedPredecessor: number
     reEvaluationAudit: readonly ReEvaluationAudit[]
+    /**
+     * Links to write inside the same commit transaction.
+     *
+     * Passed straight through: the rule that a link may only name a source
+     * this version added is `commitNextVersion`'s, and 10a's trigger checks it
+     * again from below.
+     */
+    intakeAcceptances?: readonly IntakeSourceAcceptance[]
   }): Promise<{ version: number }> {
     const assessment = await this.latestAssessment(executionRunId)
     if (!assessment)
@@ -171,6 +180,8 @@ export class GraduationService {
       assessment,
       reEvaluationAudit: options.reEvaluationAudit,
       executionRunId,
+      ...(options.intakeAcceptances
+        ? { intakeAcceptances: options.intakeAcceptances } : {}),
     })
     return { version: options.expectedPredecessor + 1 }
   }
