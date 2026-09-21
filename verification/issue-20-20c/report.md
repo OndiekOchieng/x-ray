@@ -1,7 +1,14 @@
 # 20c — Anthropic retrieval adapter
 
 Branch `feat/live-provider-composition`, from `52d1c9b`.
-The `ResearchAdapter` seam only. **No runtime registration, no live URL, no
+The `ResearchAdapter` seam only.
+
+> **Amendment (review response).** Deduplication now uses exact equality of
+> normalised locators — path case, query, and trailing slash are all
+> significant. `content_too_large` is added to the closed fetch vocabulary and
+> maps to `NOT_RETRIEVED`. `allowed_callers: ['direct']` is stated on web fetch
+> as well as search. And the `pause_turn` decision is recorded in the source.
+> See *Amendment* below. First submission `5314235`. **No runtime registration, no live URL, no
 first live X-Ray run.** Every 20a/20b boundary is preserved; five earlier
 checks were re-aimed rather than relaxed (see *Earlier gates*).
 
@@ -48,6 +55,120 @@ the source.
 - web fetch can only reach a URL that already appeared in the conversation.
 - web fetch does not render JavaScript.
 - `stop_reason: "pause_turn"` is continued by resending the assistant message.
+
+## Amendment
+
+### 1 · Deduplication was collapsing distinct resources
+
+A real defect, and worse than reported: the report argued that path case and
+query strings must be preserved *because tidying them would silently address a
+different document* — and then `duplicateKey` lowercased the whole locator and
+stripped trailing slashes for the dedup comparison. The reasoning was right and
+the code did the opposite.
+
+Worse still, **check 9 asserted the wrong behaviour**. It fed
+`https://example.invalid/a/` alongside `/a` and asserted they collapsed, so the
+gate encoded the defect it should have caught. A green check is not evidence
+when the check agrees with the bug.
+
+`duplicateKey` is gone. `sameRecord(a, b)` is `a === b` over already-normalised
+locators: `normalizeLocator` has removed everything safely removable — scheme
+and host case, a default port, a fragment — so anything still different is a
+difference in the resource itself.
+
+Check **9b** is the adversarial table, asserted directly against the comparison
+rather than through a search:
+
+| must stay distinct | |
+|---|---|
+| `/Records/Award.PDF` | `/records/award.pdf` |
+| `/record` | `/record/` |
+| `?id=ABC` | `?id=abc` |
+| `?DocumentId=42` | `?documentId=42` |
+
+| must still collapse | |
+|---|---|
+| `HTTPS://EXAMPLE.invalid/a` | `https://example.invalid/a` |
+| `https://example.invalid:443/a` | `https://example.invalid/a` |
+| `http://example.invalid:80/a` | `http://example.invalid/a` |
+| `https://example.invalid/a#part-2` | `https://example.invalid/a` |
+
+It also asserts the four distinct locators are returned *unrewritten* by
+`normalizeLocator`, and that the comparison is literally `a === b` — so a
+future case-fold cannot creep back in. Check **9** now runs the same cases
+through a real two-search response: four variants collapse, three genuinely
+different records survive, handles stay dense (`ref:s1…s4`).
+
+Why this mattered: collapsing two distinct records drops one **before anyone
+tried to retrieve it**. That is a gap in the search that nothing downstream can
+see — the search reports fewer records than it found, and XR-INV-006's question
+about the extent of the search gets a quietly wrong answer.
+
+### 2 · The fetch vocabulary was incomplete, from the narrower source
+
+`content_too_large` was missing. Verifying it produced a finding worth
+recording: **the tool guide and the API reference do not agree.**
+
+- `…/tool-use/web-fetch-tool` lists **nine** error codes.
+- `…/api/messages` lists **ten**, adding `content_too_large`.
+
+The first submission was built from the guide alone. The vocabulary now follows
+the reference, which is the wider and therefore safer source, and the contract
+records both URLs and the discrepancy.
+
+**`content_too_large` → `NOT_RETRIEVED`**, and specifically *not* `PARTIAL`:
+partial means some content arrived and a stage may read it knowing it is
+incomplete, whereas here the record was reached and **no content was returned
+at all**. Not `DEAD_LINK` either — the location resolved — and nothing about
+whether the record exists.
+
+Each record-describing code now carries a distinguishable note, so a stage
+reading `NOT_RETRIEVED` can tell policy refusal from an unreadable format from
+an oversized record:
+
+```
+content_too_large: the record was reached but no content was returned,
+                   so nothing was inspected and nothing may be quoted
+```
+
+Check **17** asserts the outcome, that no extract exists, that the document is
+neither inspectable nor quotable, that the note names the code and says nothing
+arrived, that the serialised document contains none of `partial` / `dead_link`
+/ non-existence phrasing, and that the three record-describing codes produce
+three *distinct* notes. Check **21** asserts the declared vocabulary matches
+the reference's ten codes exactly.
+
+### 3 · `allowed_callers` is now stated on fetch too
+
+The pinned `web_fetch_20250910` already defaults to direct invocation, so this
+changes no behaviour today. It makes the no-dynamic-filtering invariant survive
+a version bump instead of depending on which version's default applies —
+exactly the reason it was already stated on search. Check **3** asserts it
+appears **twice** in the contract; check **23** asserts the fetch request
+carries it and forces no `tool_choice`.
+
+### `pause_turn` — the decision, recorded
+
+Carried forward for 20d, with the reasoning written into
+`retrieval-contract.ts` so it is not re-decided by accident:
+
+- It is **continuation, not a pipeline retry.** The pipeline's retry re-drives
+  a whole stage from its prior state; continuation resumes one provider turn
+  that is still in progress.
+- The final implementation **resends the paused assistant message unchanged**,
+  including every `encrypted_content`, which the API decrypts to restore the
+  results already gathered. Modifying or dropping it is a documented 400.
+- It belongs at the **Anthropic server-tool transport/session boundary** — a
+  bounded continuation loop over one turn, inside this provider — and **not**
+  in generic pipeline retry logic, which knows nothing about provider turns and
+  must not learn. Putting it there would make `runPipeline` aware of a
+  provider-specific protocol, which #20's non-goals forbid.
+
+20c still reports `TRANSIENT`, but the thrown message now says *"not
+implemented in 20c, so the stage will be re-driven; the searches already run
+are discarded"* — a disclosed placeholder rather than something that reads like
+a normal transient. Check **26** asserts the message discloses the gap and that
+all four parts of the decision are recorded in the source.
 
 ## The boundary: a search result → a `RetrievedDocument`
 
@@ -128,6 +249,7 @@ host-derived publisher appears in the decoder.
 | base64 / non-text (a PDF) | `NOT_RETRIEVED`, no extract, reason disclosed |
 | `url_not_accessible` | `DEAD_LINK` |
 | `url_not_allowed`, `unsupported_content_type` | `NOT_RETRIEVED` |
+| `content_too_large` | `NOT_RETRIEVED` — reached, no content returned |
 
 `PARTIAL` is used properly rather than decoratively: truncated content stays
 inspectable — it is real content — and a stage quoting from part of a record
@@ -173,11 +295,9 @@ Rejection costs one result, not the search: check **8** feeds seven entries of
 which five are unusable, keeps two, and asserts the rejection count is
 *disclosed* in diagnostics rather than silently swallowed.
 
-**Duplicates** are collapsed on a key that ignores a trailing slash and case but
-not a query string — a trailing slash is not a different record, `?id=1` versus
-`?id=2` is. Check **9** feeds the same record four ways across two searches,
-keeps two documents, asserts handles stay dense and positional (`ref:s1`,
-`ref:s2`), and asserts the collapse is reported.
+**Duplicates** are collapsed on *exact equality of normalised locators* — see
+*Amendment 1* for why anything looser is wrong, and what the first submission
+got wrong here.
 
 ## Search failures, and two shapes worth naming
 
@@ -221,7 +341,7 @@ and says the prose is discarded.
 
 ## Gate
 
-`pnpm check:anthropic-retrieval` — **26/26**, in `retrieval-gate.txt`. Every
+`pnpm check:anthropic-retrieval` — **27/27**, in `retrieval-gate.txt`. Every
 call goes to a stub on `127.0.0.1` through the `ANTHROPIC_BASE_URL` the registry
 entry declares. **No request left this machine.**
 
@@ -241,6 +361,11 @@ honest.
 | O · truncated content reported `RETRIEVED` | FAIL 15 |
 | P · an unsearched answer reported as empty | FAIL 13 |
 | Q · narration-derived claims written into metadata | FAIL 5, 6 |
+| **R · dedup reverted to lowercase + slash-strip** | **FAIL 9, 9b** |
+| **S · `content_too_large` mapped to `PARTIAL`** | **FAIL 17** |
+| **T · `allowed_callers` dropped from fetch** | **FAIL 3, 23** |
+| **U · the `pause_turn` decision removed** | **FAIL 26** |
+| **V · `content_too_large` removed from the vocabulary** | **FAIL 17, 21** |
 
 ## Composition
 
@@ -311,16 +436,26 @@ check:acceptance BLOCKED (0 reason(s) against the graph, 6 capability blocker(s)
 - **A spurious "typecheck clean".** Mid-slice I piped `tsc` through `head`,
   which masked its exit code, and the adapter gate passes regardless because
   Node only strips types. Both sweeps now report `tsc` exit status directly.
+- **Three silent `.replace()` no-ops** while amending — a docblock anchor that
+  omitted a trailing line, and twice a vocabulary array whose entries wrap
+  across lines. Two of them made control V "pass" without having changed
+  anything, and one made the `pause_turn` decision appear recorded when the
+  file was untouched. The gate caught the second; the first only surfaced
+  because I probed the value at runtime. **A control that did not modify what
+  it claims to modify is not evidence**, so control V's third attempt asserts
+  each edit applied separately and prints `FETCH_ERROR_CODES.length` before the
+  gate runs.
+- **An assertion that tested formatting.** Check 26's recorded-decision test
+  matched raw comment text and failed on a phrase that wrapped across two
+  lines. It now strips comment prefixes and collapses whitespace first — the
+  same lesson as the `DOES_NOT_EXIST` comment scan, one layer along.
 
 ## Carried forward
 
-- **`pause_turn` is reported as retryable, not continued.** The documented
-  continuation requires resending the assistant message, and this adapter is
-  single-shot by design — 20b established that the pipeline owns retry. So a
-  paused turn fails `TRANSIENT` and `runPipeline` re-drives the whole search,
-  which is wasteful. Whether continuation belongs in the runtime is 20d's
-  decision; building it here would have been scope expansion into a transport
-  that has been reviewed twice.
+- **`pause_turn` is a disclosed placeholder.** The decision for 20d is recorded
+  in `retrieval-contract.ts` and asserted by check 26 — see *Amendment*. 20c
+  still re-drives the stage, discarding searches already run; wasteful and
+  visible, rather than wrong and quiet.
 - **Untested against the real API.** Every call went to a stub, so what is
   proven is the contract, the normalisation and the outcome mapping — not that
   the live API's responses match the documented shapes. A mismatch surfaces as

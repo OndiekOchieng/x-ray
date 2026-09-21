@@ -91,15 +91,22 @@ export function normalizeLocator(raw: unknown): string | undefined {
 }
 
 /**
- * The key two results are the same record under.
+ * Whether two normalised locators address the same record.
  *
- * Only for de-duplication, never as the locator: a trailing slash is not worth
- * treating as a different record, but neither is it worth rewriting the
- * locator the provider actually returned.
+ * Exact equality, deliberately. `normalizeLocator` has already removed
+ * everything that is safely removable — scheme and host case, a default port,
+ * a fragment — so anything still different is a difference in the resource
+ * itself.
+ *
+ * An earlier version lowercased the whole locator and stripped trailing
+ * slashes for this comparison. Both are wrong on real HTTP resources:
+ * `/Records/Award.PDF` and `/records/award.pdf` are different paths,
+ * `?id=ABC` and `?id=abc` are different queries, and `/record` and `/record/`
+ * are different resources a server may treat differently. Collapsing them
+ * would silently drop a record before anyone tried to retrieve it — which is a
+ * gap in the search that nothing downstream could see.
  */
-export function duplicateKey(locator: string): string {
-  return locator.replace(/\/+$/, '').toLowerCase()
-}
+export const sameRecord = (a: string, b: string): boolean => a === b
 
 // ---------------------------------------------------------------------------
 // Handles
@@ -220,9 +227,9 @@ export function decodeSearch(
       const locator = normalizeLocator(result['url'])
       if (locator === undefined) { resultsRejected += 1; continue }
 
-      const key = duplicateKey(locator)
-      if (seen.has(key)) { duplicatesDropped += 1; continue }
-      seen.add(key)
+      // Exact equality of normalised locators; see `sameRecord`.
+      if (seen.has(locator)) { duplicatesDropped += 1; continue }
+      seen.add(locator)
 
       documents.push(searchDocument(handleFor('s', documents.length), locator, result))
     }
@@ -323,8 +330,7 @@ export function decodeFetch(
   // the difference is recorded rather than smoothed over.
   const returned = normalizeLocator(result['url'])
   const locator = returned ?? requestedLocator
-  const redirected = returned !== undefined
-    && duplicateKey(returned) !== duplicateKey(requestedLocator)
+  const redirected = returned !== undefined && !sameRecord(returned, requestedLocator)
 
   const document = asBlock(result['content'])
   const source = document === undefined ? undefined : asBlock(document['source'])
@@ -421,6 +427,15 @@ export function fetchOutcomeFor(code: FetchErrorCode): RetrievalOutcome | undefi
       return 'DEAD_LINK'
     case 'url_not_allowed':
     case 'unsupported_content_type':
+    /*
+     * `content_too_large` is a record that was reached and whose content was
+     * never returned. So it is `NOT_RETRIEVED`, and specifically **not**
+     * `PARTIAL`: partial means some content arrived and a stage may read it
+     * knowing it is incomplete, whereas here none arrived at all. It is not a
+     * dead link either — the location resolved — and it says nothing about
+     * whether the record exists.
+     */
+    case 'content_too_large':
       return 'NOT_RETRIEVED'
     case 'invalid_tool_input':
     case 'url_too_long':
@@ -429,6 +444,32 @@ export function fetchOutcomeFor(code: FetchErrorCode): RetrievalOutcome | undefi
     case 'max_uses_exceeded':
     case 'unavailable':
       return undefined
+  }
+}
+
+/**
+ * What to record about a code that describes the record.
+ *
+ * Generic enough to be truthful for each, specific enough to be useful: a
+ * stage reading `NOT_RETRIEVED` should be able to tell "policy would not let us
+ * fetch it" from "it was too big to return" from "we cannot read that format".
+ */
+export function fetchOutcomeNote(code: FetchErrorCode): string {
+  switch (code) {
+    case 'url_not_accessible':
+      return 'the provider reported url_not_accessible: the location did not resolve'
+        + ' to anything it could read, which says nothing about whether the record exists'
+    case 'url_not_allowed':
+      return 'the provider reported url_not_allowed: fetching was refused by domain'
+        + ' policy or robots.txt, so the record was never obtained'
+    case 'unsupported_content_type':
+      return 'the provider reported unsupported_content_type: the record was reached'
+        + ' but its format is not one the provider returns'
+    case 'content_too_large':
+      return 'the provider reported content_too_large: the record was reached but no'
+        + ' content was returned, so nothing was inspected and nothing may be quoted'
+    default:
+      return `the provider reported "${code}"`
   }
 }
 

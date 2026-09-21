@@ -13,7 +13,7 @@ Every call went to 127.0.0.1. No request left this machine.
 
 === check:anthropic-retrieval ===
 
-26/26 Anthropic retrieval checks passed
+27/27 Anthropic retrieval checks passed
 Every call went to 127.0.0.1. No request left this machine.
 
 === check:fixtures ===

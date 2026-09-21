@@ -7,7 +7,8 @@ ok    5 · the model narration is never read
 ok    6 · a provider cannot assert independence, provenance or a class
 ok    7 · locators are normalised conservatively, and junk is rejected
 ok    8 · an unusable URL costs one result, not the search
-ok    9 · duplicate results are collapsed, and the collapse is reported
+ok    9 · duplicates collapse only on exact normalised equality
+ok    9b · the pairs that must stay distinct, and the variants that must collapse
 ok    10 · page_age never becomes a publication date
 ok    11 · a search that matched nothing is not an error, and mints nothing
 ok    12 · search error codes map without inventing a record
@@ -26,7 +27,7 @@ ok    24 · the key reaches a header and nothing else
 ok    25 · diagnostics stay off the document and off the graph
 ok    26 · the adapter never retries; the pipeline owns that
 
-26/26 Anthropic retrieval checks passed
+27/27 Anthropic retrieval checks passed
 Every call went to 127.0.0.1. No request left this machine.
 
 === pnpm check:anthropic-adapters (20b, re-aimed) ===
@@ -41,9 +42,17 @@ Every call went to 127.0.0.1. No request left this machine.
 Verified against official documentation on 2026-09-21:
   https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
   https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool
+  https://platform.claude.com/docs/en/api/messages          <- the reference
+
+The guide and the reference DO NOT AGREE on the web-fetch error vocabulary.
+The tool guide lists nine codes; the API reference lists ten, adding
+content_too_large. The vocabulary follows the reference, which is the wider and
+therefore safer source. The first 20c submission was built from the guide alone
+and was missing a documented code.
 
 Implemented:  web_search_20250305   with allowed_callers: ["direct"]
-              web_fetch_20250910    with citations disabled, max_content_tokens
+              web_fetch_20250910    with allowed_callers: ["direct"],
+                                    citations disabled, max_content_tokens
 
 Available but deliberately NOT used:
   web_search_20260209 / web_search_20260318
@@ -87,6 +96,10 @@ FETCH
   url_not_accessible                       DEAD_LINK
   url_not_allowed                          NOT_RETRIEVED
   unsupported_content_type                 NOT_RETRIEVED
+  content_too_large                        NOT_RETRIEVED  (reached; no content returned.
+                                                           NOT PARTIAL: partial means a
+                                                           stage may read incomplete
+                                                           content, and none arrived)
   too_many_requests / max_uses_exceeded
     / unavailable                          AdapterFailure TRANSIENT
   invalid_tool_input / url_too_long        Capability REFUSED_FOR_INPUT
@@ -99,11 +112,55 @@ adapter: a search that matched nothing yields no document rather than one
 claiming absence, and a 404 is DEAD_LINK. DOES_NOT_EXIST is unreachable — the
 type has no such member and no mapping produces one.
 
-=== negative controls (each reverted immediately) ===
+DEDUPLICATION
+  Exact equality of normalised locators. normalizeLocator has already removed
+  everything safely removable (scheme/host case, default port, fragment), so
+  anything still different is a difference in the resource.
+
+  distinct:   /Records/Award.PDF   vs  /records/award.pdf
+              /record              vs  /record/
+              ?id=ABC              vs  ?id=abc
+              ?DocumentId=42       vs  ?documentId=42
+  collapses:  HTTPS://EXAMPLE.invalid/a, https://example.invalid:443/a,
+              http://example.invalid:80/a, https://example.invalid/a#part-2,
+              "  https://example.invalid/a  "
+
+PAUSE_TURN — decision recorded in retrieval-contract.ts, asserted by check 26
+  It is continuation, not a pipeline retry.
+  The final implementation resends the paused assistant message unchanged,
+  including every encrypted_content, to resume the same turn.
+  It belongs at the Anthropic server-tool transport/session boundary, NOT in
+  generic pipeline retry logic, which knows nothing about provider turns.
+  20c reports TRANSIENT as a disclosed placeholder; the thrown message says
+  "not implemented in 20c" so a re-driven stage is not read as a completed
+  search.
+
+=== negative controls (each verified to apply, then reverted) ===
 K  a search result claims RETRIEVED                  → FAIL 4, 6
 L  page_age becomes publishedAt                      → FAIL 10  (publishedAt is "April 30, 2026")
-M  duplicates are no longer collapsed                → FAIL 9   (five locators kept, three of them the same record)
+M  duplicates are no longer collapsed                → FAIL 9
 N  any URL scheme accepted as a locator              → FAIL 7   ("ftp://..." was accepted)
 O  truncated content reported as RETRIEVED           → FAIL 15
 P  an answer with no search reported as empty        → FAIL 13  ("an unsearched answer was accepted")
-Q  narration-derived claims written into metadata    → FAIL 5, 6  ("INDEPENDENT" / "PRIMARY" crossed the boundary)
+Q  narration-derived claims written into metadata    → FAIL 5, 6  ("INDEPENDENT" / "PRIMARY" crossed)
+
+amendment controls:
+R  dedup reverted to lowercase + slash-strip         → FAIL 9, 9b
+     9   kept only 2 of 4 distinct records
+     9b  "/Records/Award.PDF" and "/records/award.pdf" treated as the same record
+S  content_too_large mapped to PARTIAL               → FAIL 17
+     (the three record-describing codes share one return, so all became PARTIAL)
+T  allowed_callers dropped from web fetch            → FAIL 3, 23
+     3   "stated 1 time(s), expected 2 (search and fetch)"
+     23  "fetch allowed_callers is undefined"
+U  the pause_turn decision removed from the contract → FAIL 26
+V  content_too_large removed from the vocabulary     → FAIL 17, 21
+     17  "returned an error code this adapter does not recognise"
+     21  "declared codes [...9 codes...]"
+
+Control V took three attempts to run at all: the vocabulary array wraps across
+lines, so two `.replace()` edits were silent no-ops and the control "passed"
+without having changed anything. The third attempt asserted each edit applied
+separately and probed FETCH_ERROR_CODES at runtime (length 9) before running
+the gate. A control that did not modify what it claims to modify is not
+evidence.

@@ -7,6 +7,13 @@
  *
  *   https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
  *   https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool
+ *   https://platform.claude.com/docs/en/api/messages
+ *
+ * The last of those matters: the tool guide and the API reference do not
+ * agree. The guide lists nine web-fetch error codes; the reference lists ten,
+ * adding `content_too_large`. The reference is the wider and therefore the
+ * safer source, so the vocabulary below follows it. An earlier version of this
+ * file was built from the guide alone and was missing a documented code.
  *
  * Implemented:  `web_search_20250305`  and  `web_fetch_20250910`
  *
@@ -52,6 +59,31 @@
  * - The API can return `stop_reason: "pause_turn"`, continued by sending the
  *   assistant message back unchanged.
  *
+ * PAUSE_TURN: THE DECISION, RECORDED FOR 20d
+ * ==========================================
+ * A paused turn is **continuation, not retry**. 20c reports it as a
+ * `TRANSIENT` adapter failure, which is a placeholder and is honest about
+ * being one: it lets `runPipeline` re-drive the stage, which discards the
+ * searches the provider already ran and pays for them again.
+ *
+ * The decision for the final implementation, recorded so it is not made by
+ * accident later:
+ *
+ *   - Continuing a paused turn is **not** a pipeline retry. The pipeline's
+ *     retry re-drives a whole stage from its prior state; continuation resumes
+ *     one provider turn that is still in progress.
+ *   - It is done by resending the paused assistant message **unchanged**,
+ *     including every `encrypted_content`, which the API decrypts to restore
+ *     the results already gathered. Modifying or dropping it is a documented
+ *     400.
+ *   - It therefore belongs at the Anthropic server-tool transport/session
+ *     boundary — a bounded continuation loop over one turn, inside this
+ *     provider — and **not** in generic pipeline retry logic, which knows
+ *     nothing about provider turns and must not learn.
+ *
+ * Putting it in the pipeline would make `runPipeline` aware of a
+ * provider-specific protocol, which is what #20's non-goals forbid.
+ *
  * PURITY: constants and types. No I/O, no SDK.
  */
 
@@ -94,13 +126,14 @@ export type FetchErrorCode =
   | 'url_not_accessible'
   | 'too_many_requests'
   | 'unsupported_content_type'
+  | 'content_too_large'
   | 'max_uses_exceeded'
   | 'unavailable'
 
 export const FETCH_ERROR_CODES = [
   'invalid_tool_input', 'url_too_long', 'url_not_allowed', 'url_not_in_prior_context',
   'url_not_accessible', 'too_many_requests', 'unsupported_content_type',
-  'max_uses_exceeded', 'unavailable',
+  'content_too_large', 'max_uses_exceeded', 'unavailable',
 ] as const satisfies readonly FetchErrorCode[]
 
 type UncoveredSearchCode = Exclude<SearchErrorCode, (typeof SEARCH_ERROR_CODES)[number]>
@@ -134,6 +167,11 @@ export function searchTool(maxUses: number): Readonly<Record<string, unknown>> {
  * `max_content_tokens` bounds what the API puts in context. It is not the
  * boundary limit: `MAX_EXTRACT_LENGTH` is, and `bound()` applies it to what
  * actually crosses.
+ *
+ * `allowed_callers: ["direct"]` is stated here for the same reason as on
+ * search. The pinned version already behaves this way, but stating it makes
+ * the no-dynamic-filtering invariant survive a version bump instead of
+ * depending on which version's default happens to apply.
  */
 export function fetchTool(maxUses: number, maxContentTokens: number):
 Readonly<Record<string, unknown>> {
@@ -143,5 +181,6 @@ Readonly<Record<string, unknown>> {
     max_uses: maxUses,
     citations: { enabled: false },
     max_content_tokens: maxContentTokens,
+    allowed_callers: ['direct'],
   }
 }

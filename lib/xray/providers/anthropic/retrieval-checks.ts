@@ -30,8 +30,10 @@ import {
 import { composeProviders, DEFAULT_REGISTRY } from '../registry'
 import { PROVIDER_ENV } from '../config'
 import { AnthropicResearchAdapter } from './index'
-import { duplicateKey, normalizeLocator } from './retrieval-decode'
-import { WEB_FETCH_TOOL_TYPE, WEB_SEARCH_TOOL_TYPE } from './retrieval-contract'
+import { normalizeLocator, sameRecord } from './retrieval-decode'
+import {
+  FETCH_ERROR_CODES, WEB_FETCH_TOOL_TYPE, WEB_SEARCH_TOOL_TYPE,
+} from './retrieval-contract'
 
 type Check = { name: string; run: () => string | null | Promise<string | null> }
 const checks: Check[] = []
@@ -290,9 +292,16 @@ check('3 · the pinned tool contract is the basic, unfiltered one', () => {
   if (WEB_FETCH_TOOL_TYPE !== 'web_fetch_20250910')
     return `fetch tool is ${WEB_FETCH_TOOL_TYPE}`
 
+  /*
+   * Both tools state the caller explicitly. The pinned versions already
+   * default to direct invocation, but stating it means the
+   * no-dynamic-filtering invariant survives a version bump rather than
+   * depending on which version's default applies.
+   */
   const contract = read('lib/xray/providers/anthropic/retrieval-contract.ts')
-  if (!/allowed_callers: \['direct'\]/.test(contract))
-    return 'search does not state allowed_callers: direct'
+  const stated = contract.match(/allowed_callers: \['direct'\]/g) ?? []
+  if (stated.length !== 2)
+    return `allowed_callers: ['direct'] is stated ${stated.length} time(s), expected 2 (search and fetch)`
   if (/code_execution/.test(stripComments(contract).replace(/'[^']*'/g, '')))
     return 'the contract wires code execution'
   // The documentation URLs and the date they were read are recorded.
@@ -450,8 +459,13 @@ check('7 · locators are normalised conservatively, and junk is rejected', () =>
    */
   const preserved = [
     'https://example.invalid/records?documentId=42&rev=2',
+    'https://example.invalid/records?DocumentId=42&rev=2',
     'https://example.invalid/Records/Award.PDF',
+    'https://example.invalid/records/award.pdf',
+    'https://example.invalid/r?id=ABC',
+    'https://example.invalid/r?id=abc',
     'https://example.invalid/a/',
+    'https://example.invalid/a',
   ]
   for (const raw of preserved) {
     if (normalizeLocator(raw) !== raw) return `"${raw}" was rewritten`
@@ -497,35 +511,96 @@ check('8 · an unusable URL costs one result, not the search', async () => {
   return /5 unusable result\(s\) rejected/.test(note) ? null : `note is "${note}"`
 })
 
-check('9 · duplicate results are collapsed, and the collapse is reported', async () => {
+check('9 · duplicates collapse only on exact normalised equality', async () => {
+  /*
+   * What normalisation already removed may safely collapse; nothing else may.
+   * The four host/port/fragment variants below are the same record. The
+   * path-case, trailing-slash and query-case variants are not, and collapsing
+   * them would drop a record before anyone tried to retrieve it — a gap in the
+   * search that nothing downstream could see.
+   */
   stub.script(envelope([
     searchUse('q'),
-    searchResults([result('https://example.invalid/a')]),
+    searchResults([result('https://example.invalid/records/award')]),
     searchUse('q refined'),
     searchResults([
-      result('https://EXAMPLE.invalid/a'),
-      result('https://example.invalid/a/'),
-      result('https://example.invalid/a#part-2'),
-      result('https://example.invalid/b'),
+      // Same record: only what normalisation removes differs.
+      result('https://EXAMPLE.invalid/records/award'),
+      result('https://example.invalid:443/records/award'),
+      result('https://example.invalid/records/award#part-2'),
+      result('  https://example.invalid/records/award  '),
+      // Different records, every one of them.
+      result('https://example.invalid/records/award/'),
+      result('https://example.invalid/Records/Award.PDF'),
+      result('https://example.invalid/records/award.pdf'),
     ]),
   ]))
   const outcome = await adapter().search(QUERY)
   if (!isAvailable(outcome)) return `resolved ${outcome.kind}`
   const locators = outcome.value.documents.map((document) => document.locator)
-  if (locators.length !== 2) return `kept ${JSON.stringify(locators)}`
-  if (locators[0] !== 'https://example.invalid/a') return `kept ${String(locators[0])} first`
+
+  const expected = [
+    'https://example.invalid/records/award',
+    'https://example.invalid/records/award/',
+    'https://example.invalid/Records/Award.PDF',
+    'https://example.invalid/records/award.pdf',
+  ]
+  if (JSON.stringify(locators) !== JSON.stringify(expected))
+    return `kept ${JSON.stringify(locators)}`
 
   // Handles stay dense and positional after a collapse.
   const refs = outcome.value.documents.map((document) => document.ref)
-  if (JSON.stringify(refs) !== JSON.stringify(['ref:s1', 'ref:s2']))
+  if (JSON.stringify(refs) !== JSON.stringify(['ref:s1', 'ref:s2', 'ref:s3', 'ref:s4']))
     return `handles are ${JSON.stringify(refs)}`
 
   const note = outcome.value.diagnostics?.note ?? ''
-  if (!/3 duplicate result\(s\) dropped/.test(note)) return `note is "${note}"`
-  // A trailing slash is not a different record; a different query string is.
-  return duplicateKey('https://example.invalid/a/') === duplicateKey('https://example.invalid/a')
-    && duplicateKey('https://e.invalid/a?id=1') !== duplicateKey('https://e.invalid/a?id=2')
-    ? null : 'the duplicate key is wrong'
+  return /4 duplicate result\(s\) dropped/.test(note) ? null : `note is "${note}"`
+})
+
+check('9b · the pairs that must stay distinct, and the variants that must collapse', () => {
+  /*
+   * The adversarial table, stated directly against the comparison rather than
+   * through a search. An earlier version of this gate asserted that `/a/`
+   * collapsed with `/a` — it encoded the defect it was supposed to catch,
+   * which is why this check compares normalised locators explicitly.
+   */
+  const distinct: [string, string][] = [
+    ['https://example.invalid/Records/Award.PDF', 'https://example.invalid/records/award.pdf'],
+    ['https://example.invalid/record', 'https://example.invalid/record/'],
+    ['https://example.invalid/r?id=ABC', 'https://example.invalid/r?id=abc'],
+    ['https://example.invalid/r?DocumentId=42', 'https://example.invalid/r?documentId=42'],
+  ]
+  for (const [left, right] of distinct) {
+    const a = normalizeLocator(left)
+    const b = normalizeLocator(right)
+    if (a === undefined || b === undefined) return `"${left}" or "${right}" was rejected`
+    if (a !== left || b !== right) return `"${left}"/"${right}" were rewritten to "${a}"/"${b}"`
+    if (sameRecord(a, b)) return `"${left}" and "${right}" were treated as the same record`
+  }
+
+  // And what normalisation removes still collapses.
+  const collapsing: [string, string][] = [
+    ['https://EXAMPLE.invalid/a', 'https://example.invalid/a'],
+    ['https://example.invalid:443/a', 'https://example.invalid/a'],
+    ['http://example.invalid:80/a', 'http://example.invalid/a'],
+    ['https://example.invalid/a#part-2', 'https://example.invalid/a'],
+    ['  https://example.invalid/a  ', 'https://example.invalid/a'],
+    ['HTTPS://example.invalid/a', 'https://example.invalid/a'],
+  ]
+  for (const [left, right] of collapsing) {
+    const a = normalizeLocator(left)
+    const b = normalizeLocator(right)
+    if (a === undefined || b === undefined) return `"${left}" or "${right}" was rejected`
+    if (!sameRecord(a, b)) return `"${left}" and "${right}" did not collapse (${a} vs ${b})`
+  }
+
+  // Dedup compares normalised locators exactly; nothing case-folds or trims.
+  const decode = stripComments(read('lib/xray/providers/anthropic/retrieval-decode.ts'))
+  const comparison = decode.slice(decode.indexOf('export const sameRecord'))
+  if (/toLowerCase|toUpperCase|replace\(/.test(comparison.split('\n')[0]!))
+    return 'the comparison still transforms the locator'
+  return /export const sameRecord = \(a: string, b: string\): boolean => a === b/.test(decode)
+    ? null : 'the comparison is not exact equality'
 })
 
 // ---------------------------------------------------------------------------
@@ -733,6 +808,7 @@ check('17 · fetch error codes split facts about a record from facts about the r
     ['url_not_accessible', 'DEAD_LINK'],
     ['url_not_allowed', 'NOT_RETRIEVED'],
     ['unsupported_content_type', 'NOT_RETRIEVED'],
+    ['content_too_large', 'NOT_RETRIEVED'],
   ]
   for (const [code, expected] of aboutTheRecord) {
     stub.script(envelope([fetchUse('https://example.invalid/a'), fetchError(code)]))
@@ -765,8 +841,46 @@ check('17 · fetch error codes split facts about a record from facts about the r
   const ours = await failure(act)
   if (ours?.disposition !== 'PERMANENT')
     return `url_not_in_prior_context: ${String(ours?.disposition)}`
-  return /built the request wrongly/.test(ours.message)
-    ? null : 'the message blames the record rather than the adapter'
+  if (!/built the request wrongly/.test(ours.message))
+    return 'the message blames the record rather than the adapter'
+
+  /*
+   * `content_too_large` deserves its own assertions. It is a record that was
+   * reached and whose content never arrived, so it must not become PARTIAL —
+   * partial means a stage may read incomplete content, and here there is none
+   * — and it must not read as a dead link or as non-existence.
+   */
+  stub.script(envelope([
+    fetchUse('https://example.invalid/a'), fetchError('content_too_large'),
+  ]))
+  const tooLarge = await act()
+  if (!isAvailable(tooLarge)) return `content_too_large resolved ${tooLarge.kind}`
+  const document = tooLarge.value
+  if (document.outcome !== 'NOT_RETRIEVED')
+    return `content_too_large gave ${document.outcome}`
+  if (document.extract !== undefined) return 'content_too_large carried an extract'
+  if (isInspectable(document) || isQuotable(document))
+    return 'content_too_large was inspectable'
+  const note = document.diagnostics?.note ?? ''
+  if (!/content_too_large/.test(note)) return `the note does not name the code: "${note}"`
+  if (!/no content was returned/.test(note))
+    return `the note does not say nothing arrived: "${note}"`
+  const crossed = JSON.stringify(document).toLowerCase()
+  for (const forbidden of ['partial', 'dead_link', 'does not exist', 'not exist']) {
+    if (crossed.includes(forbidden)) return `content_too_large reads as "${forbidden}"`
+  }
+
+  // Each record-describing code gets a distinguishable note, so a stage can
+  // tell policy refusal from an unreadable format from an oversized record.
+  const notes = new Set<string>()
+  for (const [code] of aboutTheRecord) {
+    stub.script(envelope([fetchUse('https://example.invalid/a'), fetchError(code)]))
+    const outcome = await act()
+    if (!isAvailable(outcome)) return `${code}: resolved ${outcome.kind}`
+    notes.add(outcome.value.diagnostics?.note ?? '')
+  }
+  return notes.size === aboutTheRecord.length
+    ? null : `${aboutTheRecord.length} codes produced ${notes.size} distinct notes`
 })
 
 check('18 · a provider that never fetched yields no document', async () => {
@@ -863,10 +977,24 @@ check('21 · every outcome is in the existing vocabulary, and DOES_NOT_EXIST is 
 
   // And the one mapping function only ever produces vocabulary members.
   const decode = stripComments(read('lib/xray/providers/anthropic/retrieval-decode.ts'))
-  const mapper = decode.slice(decode.indexOf('export function fetchOutcomeFor'))
+  const mapper = decode.slice(decode.indexOf('export function fetchOutcomeFor'),
+    decode.indexOf('export function fetchOutcomeNote'))
   for (const match of mapper.matchAll(/return '([A-Z_]+)'/g)) {
     if (!vocabulary.includes(match[1]!)) return `fetchOutcomeFor returns '${match[1]}'`
   }
+
+  /*
+   * The documented fetch error vocabulary, from the API reference rather than
+   * the tool guide — the guide lists nine codes and the reference ten. Every
+   * code must be handled, and `fetchOutcomeFor` is exhaustive over the union,
+   * so a code added to the type without a branch is a compile error.
+   */
+  const documented = ['invalid_tool_input', 'url_too_long', 'url_not_allowed',
+    'url_not_in_prior_context', 'url_not_accessible', 'too_many_requests',
+    'unsupported_content_type', 'content_too_large', 'max_uses_exceeded', 'unavailable']
+  const declared = [...FETCH_ERROR_CODES] as string[]
+  if (JSON.stringify([...declared].sort()) !== JSON.stringify([...documented].sort()))
+    return `declared codes ${JSON.stringify(declared)}`
   return null
 })
 
@@ -931,6 +1059,10 @@ check('23 · the request pins the basic tools and states the cutoff', async () =
   const fetchTools = fetched.parsed.tools ?? []
   if (fetchTools[0]?.['type'] !== 'web_fetch_20250910')
     return `fetch tool is ${String(fetchTools[0]?.['type'])}`
+  if (JSON.stringify(fetchTools[0]?.['allowed_callers']) !== JSON.stringify(['direct']))
+    return `fetch allowed_callers is ${JSON.stringify(fetchTools[0]?.['allowed_callers'])}`
+  if (fetched.parsed.tool_choice !== undefined)
+    return 'the fetch request forced a tool choice'
   return (fetched.parsed.messages?.[0]?.content ?? '').includes('https://example.invalid/a')
     ? null : 'the URL was not placed in the conversation'
 })
@@ -997,8 +1129,36 @@ check('26 · the adapter never retries; the pipeline owns that', async () => {
   const paused = await failure(() => adapter().search(QUERY))
   if (paused?.disposition !== 'TRANSIENT')
     return `a paused turn gave ${String(paused?.disposition)}`
-  return stub.received.length === 1
-    ? null : `a paused turn produced ${stub.received.length} requests`
+  if (stub.received.length !== 1)
+    return `a paused turn produced ${stub.received.length} requests`
+  // The placeholder says it is one, so a re-driven stage is not mistaken for
+  // a completed search.
+  if (!/not implemented in 20c/.test(paused.message))
+    return `the paused message does not disclose the gap: "${paused.message}"`
+
+  /*
+   * And the decision is recorded where the next slice will look: continuation
+   * is not retry, it resends the paused message unchanged, and it belongs at
+   * this provider's transport boundary rather than in pipeline retry logic.
+   */
+  /*
+   * Comment prefixes and line wrapping are normalised away before matching.
+   * An earlier version tested the raw text and failed on a phrase that
+   * happened to wrap across two lines — an assertion about prose has to be
+   * robust to how the prose is formatted, or it tests the formatting.
+   */
+  const contract = read('lib/xray/providers/anthropic/retrieval-contract.ts')
+    .replace(/^\s*\*+/gm, ' ').replace(/[*`]/g, '').replace(/\s+/g, ' ')
+  for (const recorded of [
+    /continuation, not retry/i,
+    /resending the paused assistant message unchanged/i,
+    /transport\/session boundary/i,
+    /not in generic pipeline retry logic/i,
+  ]) {
+    if (!recorded.test(contract))
+      return `the pause_turn decision is not recorded: ${String(recorded)}`
+  }
+  return null
 })
 
 // ---------------------------------------------------------------------------

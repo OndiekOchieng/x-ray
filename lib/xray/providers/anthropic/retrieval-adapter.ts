@@ -31,7 +31,7 @@ import type {
   RetrievedDocument,
 } from '@/lib/xray/pipeline/retrieval-port'
 import {
-  decodeFetch, decodeSearch, fetchOutcomeFor, normalizeLocator,
+  decodeFetch, decodeSearch, fetchOutcomeFor, fetchOutcomeNote, normalizeLocator,
   retrievalCapability, unobtained,
 } from './retrieval-decode'
 import { fetchTool, searchTool } from './retrieval-contract'
@@ -119,14 +119,21 @@ export class AnthropicResearchAdapter implements ResearchAdapter {
     this.calls.push(outcome.value.diagnostics)
 
     if (outcome.value.stopReason === 'pause_turn') {
-      // Documented: continue by sending the paused assistant message back
-      // unchanged. This adapter is single-shot by design (20b: the pipeline
-      // owns retry), so the turn is reported as retryable rather than
-      // continued here. 20d decides whether continuation belongs in the
-      // runtime.
+      /*
+       * A placeholder, and honest about being one. Continuation is not retry:
+       * the correct handling resends this paused assistant message unchanged
+       * to resume the same turn, and belongs at this provider's transport /
+       * session boundary rather than in pipeline retry logic. See
+       * `retrieval-contract.ts`, which records the decision for 20d.
+       *
+       * Until then `TRANSIENT` re-drives the stage, which discards searches
+       * the provider already ran. Wasteful and visible, rather than wrong and
+       * quiet.
+       */
       throw new AdapterFailure(operation, 'TRANSIENT',
-        'Anthropic paused the search turn before it completed. The search may'
-        + ' complete on another attempt.')
+        'Anthropic paused the search turn before it completed. Continuing a paused'
+        + ' turn is not implemented in 20c, so the stage will be re-driven; the'
+        + ' searches already run are discarded.')
     }
 
     const decoded = decodeSearch(operation, outcome.value.blocks)
@@ -224,9 +231,10 @@ export class AnthropicResearchAdapter implements ResearchAdapter {
     this.calls.push(outcome.value.diagnostics)
 
     if (outcome.value.stopReason === 'pause_turn') {
+      // Same placeholder, same reasoning as `search`.
       throw new AdapterFailure(operation, 'TRANSIENT',
-        'Anthropic paused the fetch turn before it completed. The fetch may'
-        + ' complete on another attempt.')
+        'Anthropic paused the fetch turn before it completed. Continuing a paused'
+        + ' turn is not implemented in 20c, so the stage will be re-driven.')
     }
 
     const decoded = decodeFetch(operation, outcome.value.blocks, normalized)
@@ -250,8 +258,7 @@ export class AnthropicResearchAdapter implements ResearchAdapter {
       if (outcomeForRecord !== undefined) {
         // A fact about the record: reached for, not obtained. `DEAD_LINK` for
         // a location that did not resolve — never a claim of non-existence.
-        return available(unobtained(normalized, outcomeForRecord,
-          `the provider reported "${code}"`))
+        return available(unobtained(normalized, outcomeForRecord, fetchOutcomeNote(code)))
       }
       switch (code) {
         case 'too_many_requests':
@@ -273,6 +280,7 @@ export class AnthropicResearchAdapter implements ResearchAdapter {
         case 'url_not_accessible':
         case 'url_not_allowed':
         case 'unsupported_content_type':
+        case 'content_too_large':
           throw new AdapterFailure(operation, 'PERMANENT',
             `Unreachable: "${code}" is a fact about the record and is handled above.`)
       }
