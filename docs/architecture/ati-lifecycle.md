@@ -305,6 +305,105 @@ about what either shows.
 
 ---
 
+## From intake to a successor version
+
+**Recorded 2026-09-21 · #10 slice 10d.**
+
+```text
+durable intake + supplied material
+  → generic re-evaluation run over the exact committed predecessor
+  → affected-claim re-evaluation
+  → graduation
+  → immutable successor version
+  → intake → added-Source acceptance
+```
+
+**One generic primitive, not an ATI version writer.**
+`InlineExecutionService.startReevaluation` takes an investigation, an exact
+expected predecessor, a trigger and an opaque cause. `ATI_RESPONSE_RECEIVED` is
+one trigger among `NEW_SOURCE_RECEIVED`, `RE_EVALUATION` and `CORRECTION`;
+nothing in the primitive knows what ATI is. A second path to
+`commitNextVersion` would be a second set of rules about immutable history.
+
+Before any stage runs it checks the expected predecessor is *currently* latest,
+reads that exact snapshot, records the run's cause durably, and seeds the
+candidate from the snapshot's canonical collections. Run-owned state is reset —
+`status` `RUNNING`, no `completedAt`, no `researchStop`, no stage runs — because
+`commitNextVersion` reads exactly those fields to decide whether research is
+complete, and a candidate inheriting them would be a finished run before doing
+anything.
+
+**Material is explicit runtime input.** 10c retains no document body, so 10d
+takes the bytes against a durable intake id and binds the two before anything
+executes:
+
+1. load the intake and resolve its response, request and investigation;
+2. compute the digest of what was supplied;
+3. where a receipt digest exists, require equality;
+4. reject before any run or workspace is created.
+
+A `SUPPLIED` receipt digest that matches is **not** promoted to `COMPUTED`, and
+no receipt row is rewritten. Equality proves correspondence to the stored
+receipt claim — not that the document is authentic, complete, or shows anything.
+
+**Why the run is durably caused.** `execution_run_causes` records, before the
+run executes, that it was seeded from vN because intake I of response R was
+processed, with `ATI_RESPONSE_RECEIVED` intended. Without it the chain was only
+reconstructable backwards from the acceptance mapping, which does not exist
+while a run is going — and legitimately never exists for a run that adds
+nothing.
+
+**A response that adds nothing.** ADR-0018 allows zero sources, so a successful
+run may conclude `NO_CANONICAL_CHANGE`. No Source is manufactured, no acceptance
+written, and no empty version committed to mark the intake handled. The intake
+stays received and unaccepted; the run and its cause stay readable.
+
+**Acceptance is part of the commit.** The intake → added-Source links are
+written inside `commitNextVersion`'s own transaction, after the committed
+pointer advances — 10a's acceptance trigger requires
+`latest_committed_version >= committed_version`, so within one transaction the
+order is load-bearing. Nothing is written if the commit rolls back, which closes
+the window where an acceptance could outlive the version it points at.
+
+**No rebase.** A run seeded from vN commits only while vN is latest. If another
+version commits first the ATI run gets `VersionConflict`, no acceptance is
+written, and nothing replays against vN+1. Restarting from the new latest is a
+human act. This is #7's rule, unchanged.
+
+**One command, one intake, one run.** Several intakes are several runs and
+several versions, because `run → exact response/intake` is only exact if it is
+one-to-one. An intake already accepted is refused a second pass; one whose prior
+run failed or never committed stays processable.
+
+### A gap's claims are planning context, not the audit set
+
+The origin gap says which claims someone expected the record to bear on. A
+response routinely bears on a claim nobody predicted, and routinely fails to
+move one everybody did. Using the gap would record both mistakes as fact.
+
+So the re-evaluation set comes from `changedClaimIds(predecessor, candidate)`,
+and each such claim is recorded as:
+
+```text
+reason = EXTERNAL_RECORD_RESPONSE
+cause  = { kind: ATI_RESPONSE, id: ATI_RESPONSE:{request}:{sequence} }
+```
+
+`claim_reevaluation_causes.ati_response_ref` is a foreign key to
+`ati_responses.id`, so the link is relationally real rather than a string that
+happens to look like one. Newly discovered claims receive their first
+evaluation and are not listed as re-evaluated; `changedClaimIds` already filters
+to claims present in the predecessor.
+
+> **Known blocker, recorded 2026-09-21.** New evidence bearing on an
+> already-graded claim cannot currently cross a stage boundary: `TRACE` trips
+> `XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH` because the finding cannot mirror
+> evidence that appeared after it was graded, and `TRACE` cannot repair that
+> because it does not own `findings`. This affects every re-evaluation trigger,
+> not only ATI. See `verification/issue-10-10d/report.md`.
+
+---
+
 ## Re-evaluation
 
 Affected claims come from what the new evidence bears on, computed by #7's

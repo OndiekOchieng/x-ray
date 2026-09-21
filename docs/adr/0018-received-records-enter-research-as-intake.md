@@ -152,3 +152,35 @@ not a hash comparison.
 command writes a canonical id. `receivedSourceIds` stays empty until research
 commits a version that introduced a source, and no application command exposes
 the acceptance bridge — an operator cannot declare an intake to be `SRC-123`.
+
+---
+
+## Amendment — how the material actually reaches research
+
+**Recorded:** 2026-09-21 · #10 slice 10d
+
+The bridge this ADR described is built, and two of its consequences are worth
+recording as decisions rather than as implementation detail.
+
+**Supplied material is bound to the receipt before anything executes.** The
+digest of the bytes handed over must equal the digest 10c recorded, where one
+exists, and the rejection happens before any execution run or candidate
+workspace is created. A `SUPPLIED` receipt digest that matches is not promoted
+to `COMPUTED`: what equality establishes is correspondence to the stored receipt
+claim, not that the document is authentic, complete, or shows anything at all.
+No receipt row is rewritten by processing.
+
+**A response that yields nothing produces no version.** This ADR's
+zero-sources case is now an explicit terminal result, `NO_CANONICAL_CHANGE`. No
+Source is manufactured, no acceptance is written, and no empty successor version
+is committed to mark the intake handled — an empty version would be a false
+research record. The run and its durable cause remain readable, so the outcome
+is legible as a research result rather than as an absence, and the intake stays
+received and unaccepted.
+
+**Affected claims are what changed, not what was expected to change.** The
+origin gap's `claimIds` are planning context. The audit set comes from
+`changedClaimIds`, so a claim the response unexpectedly bore on is recorded and
+a gap claim it failed to move is not. Each is recorded as
+`EXTERNAL_RECORD_RESPONSE` with an exact `ATI_RESPONSE` cause, and that cause is
+a foreign key to `ati_responses.id` rather than a string resembling one.

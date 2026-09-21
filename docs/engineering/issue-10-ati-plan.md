@@ -229,6 +229,24 @@ origin gap's claim list; no required epistemic step is bypassed; historical
 findings remain addressable; the previous version is byte-identical afterwards;
 a response yielding no new evidence commits no version.
 
+**Delivered 2026-09-21, with one recorded blocker** —
+`InlineExecutionService.startReevaluation` (the C6 primitive),
+`application/ati-research-bridge.ts`, migration
+`0013_ati_response_identity_and_execution_cause`, `pnpm check:ati-research`
+28/28. This closes **C6**, and wires `ati_response_ref` as a real foreign key
+to a new `ati_responses.id`.
+
+**Blocker: new evidence cannot enter an already-graded investigation at a stage
+boundary.** `TRACE` adding evidence that bears on a claim already graded in the
+predecessor trips `XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH` — the finding
+cannot mirror evidence that appeared after it was graded — and `TRACE` cannot
+repair it, because `STAGE_OUTPUTS` does not give it `findings`. This is a
+property of #6's per-stage validation transition rule, it affects every
+re-evaluation trigger rather than only ATI, and resolving it means one more
+narrow `STAGED` exemption in `pipeline/run.ts` beside the `GRADE`/`GAPS` one
+6a already added. Not 10d's to change. Proven three ways and recorded in
+`verification/issue-10-10d/report.md`.
+
 ---
 
 ## 10e — Surfaces and integrated gate
