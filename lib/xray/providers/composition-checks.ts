@@ -120,16 +120,79 @@ async function main(): Promise<void> {
       ? null : `named ${composed.reviewer.variable}`
   })
 
-  check('4 · a retrieval selection requires no model id', () => {
+  check('4 · a retrieval selection requires no composition model id', () => {
+    /*
+     * The property is about the *composition contract*: there is no
+     * `XRAY_RETRIEVAL_MODEL_ID`, because a search provider is not a model, and
+     * resolution must never demand one. What a particular entry needs to do
+     * its job is the entry's own declaration.
+     */
+    if ((PROVIDER_ENV as Record<string, string>)['retrievalModelId'] !== undefined)
+      return 'the composition contract grew a retrieval model id'
+    for (const variable of Object.values(PROVIDER_ENV)) {
+      if (/RETRIEVAL.*MODEL_ID/.test(variable)) return `${variable} exists`
+    }
+
+    // A fully configured retrieval selection resolves without one being set.
     const composed = composeProviders({
-      ...ANTHROPIC_CONFIGURED, [PROVIDER_ENV.retrieval]: 'anthropic',
+      ANTHROPIC_API_KEY: SECRET,
+      XRAY_ANTHROPIC_SEARCH_MODEL_ID: 'a-search-model',
+      [PROVIDER_ENV.retrieval]: 'anthropic',
     })
-    // Recognised, configured, and awaiting 20c's adapter — not incomplete.
-    if (composed.retrieval.status !== 'NOT_IMPLEMENTED')
+    if (composed.retrieval.status !== 'AVAILABLE')
       return `resolved ${composed.retrieval.status}`
+    // And no MODEL_ID_REQUIRED can ever be reported for retrieval, because
+    // that state is typed to a model slot.
+    if ((composed.retrieval as { status: string }).status === 'MODEL_ID_REQUIRED')
+      return 'retrieval reported MODEL_ID_REQUIRED'
+
+    /*
+     * The entry's own requirement is reported as incomplete configuration, not
+     * as availability that throws later. An entry whose factory would throw
+     * for a missing variable must not resolve AVAILABLE.
+     */
+    const missing = composeProviders({
+      ANTHROPIC_API_KEY: SECRET, [PROVIDER_ENV.retrieval]: 'anthropic',
+    })
+    if (missing.retrieval.status !== 'CONFIGURATION_INCOMPLETE')
+      return `without its search model id, retrieval resolved ${missing.retrieval.status}`
+    if (!missing.retrieval.missing.includes('XRAY_ANTHROPIC_SEARCH_MODEL_ID'))
+      return `missing names ${JSON.stringify(missing.retrieval.missing)}`
+
+    // `custom` is still reserved without a factory.
     const custom = composeProviders({ [PROVIDER_ENV.retrieval]: 'custom' })
     return custom.retrieval.status === 'NOT_IMPLEMENTED'
       ? null : `custom resolved ${custom.retrieval.status}`
+  })
+
+  check('4b · every AVAILABLE resolution can actually be constructed', async () => {
+    /*
+     * The general form of the wart check 4 caught: a resolution that reports
+     * AVAILABLE and then throws on construction is a resolution that lies.
+     * Every default row that resolves AVAILABLE under a fully configured
+     * environment is actually constructed here.
+     */
+    const composed = composeProviders({
+      ANTHROPIC_API_KEY: SECRET,
+      XRAY_ANTHROPIC_SEARCH_MODEL_ID: 'a-search-model',
+      [PROVIDER_ENV.researchModel]: 'anthropic',
+      [PROVIDER_ENV.researchModelId]: 'a-research-model',
+      [PROVIDER_ENV.reviewerModel]: 'anthropic',
+      [PROVIDER_ENV.reviewerModelId]: 'a-reviewer-model',
+      [PROVIDER_ENV.retrieval]: 'anthropic',
+    })
+    for (const slot of ['research', 'reviewer', 'retrieval'] as const) {
+      const resolution = composed[slot]
+      if (resolution.status !== 'AVAILABLE') return `${slot} resolved ${resolution.status}`
+      try {
+        const port = await resolution.create()
+        if (typeof (port as { name?: unknown }).name !== 'string')
+          return `${slot} constructed something without a name`
+      } catch (err) {
+        return `${slot} resolved AVAILABLE but threw: ${(err as Error).message}`
+      }
+    }
+    return null
   })
 
   // === unknown names ====================================================
@@ -314,9 +377,9 @@ async function main(): Promise<void> {
       return 'reviewer did not carry its own model id'
     /*
      * Which default rows are implemented, stated exactly. 20a implemented
-     * none; 20b implements the two Anthropic *model* rows and nothing else.
+     * none, 20b the two Anthropic model rows, 20c Anthropic retrieval.
      * Asserting the whole table rather than a count means a row that quietly
-     * gains a factory — retrieval especially, which is 20c's — fails here.
+     * gains a factory — `openai` or `custom` — fails here.
      */
     const implemented = (entries: readonly { provider: string; create?: unknown }[]) =>
       entries.filter((entry) => entry.create !== undefined)
@@ -324,7 +387,8 @@ async function main(): Promise<void> {
     const expected = {
       researchModels: ['anthropic'],
       reviewerModels: ['anthropic'],
-      retrieval: [] as string[],
+      // 20c implements Anthropic retrieval. `custom` stays reserved.
+      retrieval: ['anthropic'],
     }
     for (const slot of ['researchModels', 'reviewerModels', 'retrieval'] as const) {
       const actual = implemented(DEFAULT_REGISTRY[slot])
@@ -666,16 +730,29 @@ async function main(): Promise<void> {
     const sdk = installed.filter((name) => /anthropic|openai|langchain|ai-sdk/i.test(name))
     if (sdk.length > 0) return `a provider SDK is installed: ${sdk.join(', ')}`
 
-    // Retrieval is 20c's. No web search, no URL fetching for INGEST, and no
-    // factory on any retrieval row — so a deployment selecting retrieval still
-    // gets NOT_IMPLEMENTED rather than a half-built search.
+    /*
+     * Retrieval exists as of 20c, so the clause that forbade it is re-aimed at
+     * what must still hold: the documented server-tool contract lives in one
+     * file, and no provider file can mint canonical evidence.
+     */
+    const toolFiles = implementation.filter((file) =>
+      /web_search_\d|web_fetch_\d/.test(stripComments(readFileSync(file, 'utf8'))))
+      .map((file) => file.slice(file.indexOf('lib/xray')))
+    if (JSON.stringify(toolFiles)
+      !== JSON.stringify(['lib/xray/providers/anthropic/retrieval-contract.ts'])) {
+      return `files naming a server-tool version: ${JSON.stringify(toolFiles)}`
+    }
+
+    // No provider file constructs canonical graph state. Proposals and
+    // material are the only things that cross.
     for (const file of implementation) {
       const source = stripComments(readFileSync(file, 'utf8'))
       const relative = file.slice(file.indexOf('lib/xray'))
-      if (/web_search|server_tool_use|\bsearch\s*\(/.test(source))
-        return `${relative} performs retrieval, which is 20c`
-      if (/implements ResearchAdapter/.test(source))
-        return `${relative} implements the retrieval port`
+      const canonical = /\b(?:Evidence|Source|Finding|Claim|Gap)\b(?!Proposal|Ref|Refs|Class|Position|Accessibility|Layer|Type|Status|Relationship|Strength|Judgment|Id|Ids)\s*=\s*\{/
+        .exec(source)
+      if (canonical !== null) return `${relative} builds a canonical ${canonical[0]}`
+      if (/from '@\/lib\/xray\/persistence/.test(source))
+        return `${relative} reaches persistence`
     }
     return null
   })

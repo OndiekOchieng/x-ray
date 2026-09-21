@@ -13,6 +13,7 @@
     "check:rendered": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/host/rendered-checks.ts",
     "check:providers": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/providers/composition-checks.ts",
     "check:anthropic-adapters": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/providers/anthropic/adapter-checks.ts",
+    "check:anthropic-retrieval": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/providers/anthropic/retrieval-checks.ts",
     "check:fixtures": "tsc --noEmit && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/fixtures/xray-ke-001/integrity.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/query-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/validation-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/review-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/acceptance-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/pipeline-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/adapter-checks.ts && node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/fixtures/xray-ke-001/replay-checks.ts",
     "check:replay": "node --import ./scripts/register-ts-resolve.mjs --no-warnings lib/xray/fixtures/xray-ke-001/replay-checks.ts",
     "check:persistence-schema": "node scripts/check-persistence-schema.mjs",

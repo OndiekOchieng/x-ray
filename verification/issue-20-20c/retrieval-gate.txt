@@ -1,0 +1,109 @@
+=== pnpm check:anthropic-retrieval ===
+ok    1 · the adapter implements the retrieval port and nothing wider
+ok    2 · the registry composes it from configuration alone
+ok    3 · the pinned tool contract is the basic, unfiltered one
+ok    4 · a search result is NOT_RETRIEVED material, never inspectable
+ok    5 · the model narration is never read
+ok    6 · a provider cannot assert independence, provenance or a class
+ok    7 · locators are normalised conservatively, and junk is rejected
+ok    8 · an unusable URL costs one result, not the search
+ok    9 · duplicate results are collapsed, and the collapse is reported
+ok    10 · page_age never becomes a publication date
+ok    11 · a search that matched nothing is not an error, and mints nothing
+ok    12 · search error codes map without inventing a record
+ok    13 · a provider that never searched is refused, not reported as empty
+ok    14 · a fetched document is RETRIEVED, bounded and digested by us
+ok    15 · truncated content is PARTIAL, not RETRIEVED
+ok    16 · a dead link is DEAD_LINK, never a claim of non-existence
+ok    17 · fetch error codes split facts about a record from facts about the run
+ok    18 · a provider that never fetched yields no document
+ok    19 · non-text content is not presented as inspectable
+ok    20 · a redirect is recorded, not smoothed over
+ok    21 · every outcome is in the existing vocabulary, and DOES_NOT_EXIST is unreachable
+ok    22 · no canonical artifact is constructed anywhere in retrieval
+ok    23 · the request pins the basic tools and states the cutoff
+ok    24 · the key reaches a header and nothing else
+ok    25 · diagnostics stay off the document and off the graph
+ok    26 · the adapter never retries; the pipeline owns that
+
+26/26 Anthropic retrieval checks passed
+Every call went to 127.0.0.1. No request left this machine.
+
+=== pnpm check:anthropic-adapters (20b, re-aimed) ===
+
+28/28 Anthropic adapter checks passed
+Every call went to 127.0.0.1. No request left this machine.
+=== pnpm check:providers (20a, re-aimed) ===
+
+21/21 provider composition checks passed
+
+=== API contract implemented ===
+Verified against official documentation on 2026-09-21:
+  https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
+  https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool
+
+Implemented:  web_search_20250305   with allowed_callers: ["direct"]
+              web_fetch_20250910    with citations disabled, max_content_tokens
+
+Available but deliberately NOT used:
+  web_search_20260209 / web_search_20260318
+  web_fetch_20260209  / web_fetch_20260309 / web_fetch_20260318
+Their headline feature is dynamic filtering: the model writes and runs code
+that filters results before they reach the context window. On those versions
+allowed_callers defaults to ["code_execution_20260120"], so filtering is the
+default rather than an opt-in. That is a provider pruning a result set by
+relevance before anything crosses the retrieval boundary — an evidentiary
+judgement made where no invariant can see it. XR-INV-006 turns on the extent of
+the search and 6c's stop assessment on "we stopped" vs "nothing left"; neither
+question can be answered about an already-pruned set.
+
+Documented facts that shaped the code:
+  - a search/fetch error returns HTTP 200 with a *_tool_result_error block
+  - a search matching nothing returns an EMPTY content list, not an error
+  - page_age is "when the site was last updated", example "April 30, 2025"
+    — not a publication date, and not ISO 8601
+  - web fetch can only reach a URL already in the conversation
+  - web fetch does not render JavaScript
+  - stop_reason "pause_turn" is continued by resending the assistant message
+
+=== outcome mapping ===
+SEARCH
+  a web_search_result                      NOT_RETRIEVED   (url + title + opaque
+                                                            encrypted_content: a record
+                                                            identified, not obtained)
+  empty content list                       no document at all + no moreAvailable
+  max_uses_exceeded                        0 documents + moreAvailable: true
+  too_many_requests / unavailable          AdapterFailure TRANSIENT
+  query_too_long / invalid_tool_input
+    / request_too_large                    Capability REFUSED_FOR_INPUT
+  an unrecognised error code               AdapterFailure PERMANENT
+  no search run at all                     AdapterFailure PERMANENT
+  stop_reason pause_turn                   AdapterFailure TRANSIENT
+
+FETCH
+  text document, untruncated               RETRIEVED  + extract + our digest
+  text document, truncated by bound()      PARTIAL    + extract + our digest
+  base64 / non-text (e.g. PDF)             NOT_RETRIEVED, no extract, reason disclosed
+  url_not_accessible                       DEAD_LINK
+  url_not_allowed                          NOT_RETRIEVED
+  unsupported_content_type                 NOT_RETRIEVED
+  too_many_requests / max_uses_exceeded
+    / unavailable                          AdapterFailure TRANSIENT
+  invalid_tool_input / url_too_long        Capability REFUSED_FOR_INPUT
+  url_not_in_prior_context                 AdapterFailure PERMANENT (our defect)
+  no fetch attempted                       AdapterFailure PERMANENT
+  stop_reason pause_turn                   AdapterFailure TRANSIENT
+
+NOT_LOCATED is reachable through the vocabulary but is never asserted by this
+adapter: a search that matched nothing yields no document rather than one
+claiming absence, and a 404 is DEAD_LINK. DOES_NOT_EXIST is unreachable — the
+type has no such member and no mapping produces one.
+
+=== negative controls (each reverted immediately) ===
+K  a search result claims RETRIEVED                  → FAIL 4, 6
+L  page_age becomes publishedAt                      → FAIL 10  (publishedAt is "April 30, 2026")
+M  duplicates are no longer collapsed                → FAIL 9   (five locators kept, three of them the same record)
+N  any URL scheme accepted as a locator              → FAIL 7   ("ftp://..." was accepted)
+O  truncated content reported as RETRIEVED           → FAIL 15
+P  an answer with no search reported as empty        → FAIL 13  ("an unsearched answer was accepted")
+Q  narration-derived claims written into metadata    → FAIL 5, 6  ("INDEPENDENT" / "PRIMARY" crossed the boundary)

@@ -52,8 +52,8 @@ import type { ResearchAdapter } from '@/lib/xray/pipeline/retrieval-port'
 import type { ResearchModel } from '@/lib/xray/pipeline/model-port'
 import type { ReviewerModel } from '@/lib/xray/review'
 import {
-  ANTHROPIC_OPTIONAL, ANTHROPIC_REQUIRES,
-  createAnthropicResearchModel, createAnthropicReviewerModel,
+  ANTHROPIC_OPTIONAL, ANTHROPIC_REQUIRES, ANTHROPIC_RETRIEVAL_REQUIRES,
+  createAnthropicResearchModel, createAnthropicRetrieval, createAnthropicReviewerModel,
 } from './anthropic'
 import {
   hostEnvironment, narrowEnvironment, readProviderSelections,
@@ -114,14 +114,11 @@ export interface ProviderRegistry {
  * `NOT_IMPLEMENTED` before now resolves `AVAILABLE`, and nothing that consumes
  * the registry changed to make that happen.
  *
- * Anthropic **retrieval** is still reserved without a factory: 20b implements
- * the model port only, and search is 20c's. So a deployment selecting
- * retrieval still gets `NOT_IMPLEMENTED` — the honest answer, and the reason
- * the live journey cannot be half-claimed.
- *
- * `openai` is reserved the same way, for the same reason: a recognised name
- * that is honest about having no implementation is useful, and one that
- * pretends otherwise is worse than an unknown name.
+ * 20c implements Anthropic **retrieval**, so all three Anthropic rows now
+ * carry a factory. `custom` and `openai` remain reserved without one, for the
+ * same reason as before: a recognised name that is honest about having no
+ * implementation is useful, and one that pretends otherwise is worse than an
+ * unknown name.
  */
 export const DEFAULT_REGISTRY: ProviderRegistry = {
   researchModels: [
@@ -143,7 +140,12 @@ export const DEFAULT_REGISTRY: ProviderRegistry = {
     { provider: 'openai', requires: ['OPENAI_API_KEY'] },
   ],
   retrieval: [
-    { provider: 'anthropic', requires: ['ANTHROPIC_API_KEY'] },
+    {
+      provider: 'anthropic',
+      requires: ANTHROPIC_RETRIEVAL_REQUIRES,
+      optional: ANTHROPIC_OPTIONAL,
+      create: createAnthropicRetrieval,
+    },
     { provider: 'custom', requires: [] },
   ],
 }

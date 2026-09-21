@@ -317,10 +317,15 @@ check('2 · the registry composes both adapters from configuration alone', async
 
   if (composed.research.status !== 'AVAILABLE') return `research ${composed.research.status}`
   if (composed.reviewer.status !== 'AVAILABLE') return `reviewer ${composed.reviewer.status}`
-  // Retrieval is 20c's. A live model with no retrieval is exactly the state
-  // 20b should produce, and claiming otherwise would fake the live journey.
-  if (composed.retrieval.status !== 'NOT_IMPLEMENTED')
-    return `retrieval ${composed.retrieval.status}, expected NOT_IMPLEMENTED`
+  /*
+   * Retrieval is 20c's, and is now implemented. What this check still holds is
+   * that the model slots resolve independently of it: retrieval here is
+   * unconfigured (no search model id), and that must not affect either model.
+   * Before 20c this read NOT_IMPLEMENTED; CONFIGURATION_INCOMPLETE is the same
+   * statement about a row that now has a factory.
+   */
+  if (composed.retrieval.status !== 'CONFIGURATION_INCOMPLETE')
+    return `retrieval ${composed.retrieval.status}, expected CONFIGURATION_INCOMPLETE`
 
   const research = await composed.research.create()
   const reviewerModel = await composed.reviewer.create()
@@ -586,11 +591,18 @@ check('10 · a provider cannot assert what a stage owns', () => {
     if (new RegExp(`${forbidden}\\s*:`).test(prompts))
       return `a tool schema requests ${forbidden}`
   }
-  // And nothing in the layer can spell the state XR-INV-006 forbids.
+  /*
+   * And nothing in the layer can spell the state XR-INV-006 forbids.
+   *
+   * Comments are stripped first. An earlier version scanned raw source and
+   * flagged `retrieval-decode.ts` for a comment explaining *why*
+   * DOES_NOT_EXIST is unreachable — documentation of the rule read as a
+   * violation of it.
+   */
   for (const file of sources('lib/xray/providers')) {
     if (/-checks\.ts$/.test(file)) continue
-    if (/DOES_NOT_EXIST/.test(readFileSync(file, 'utf8')))
-      return `${file.slice(file.indexOf('lib/xray'))} mentions DOES_NOT_EXIST`
+    if (/DOES_NOT_EXIST/.test(stripComments(readFileSync(file, 'utf8'))))
+      return `${file.slice(file.indexOf('lib/xray'))} spells DOES_NOT_EXIST in code`
   }
   return null
 })

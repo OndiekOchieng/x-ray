@@ -60,7 +60,8 @@ export interface ToolSchema {
   readonly input_schema: Readonly<Record<string, unknown>>
 }
 
-export interface MessagesRequest {
+/** What every call needs, whatever shape its tools take. */
+export interface CallBase {
   /** For failure attribution, e.g. `research-model:grade`. */
   readonly operation: string
   readonly modelId: string
@@ -68,9 +69,27 @@ export interface MessagesRequest {
   readonly baseUrl?: string
   readonly system: string
   readonly userContent: string
-  readonly tool: ToolSchema
   readonly maxTokens: number
   readonly timeoutMs?: number
+}
+
+/** A call that forces one structured answer. Used by the two model adapters. */
+export interface MessagesRequest extends CallBase {
+  readonly tool: ToolSchema
+}
+
+/**
+ * A call that enables Anthropic-executed server tools (#20 slice 20c).
+ *
+ * Structurally different from `MessagesRequest` in one way that matters: there
+ * is no `tool_choice`. A server tool is executed by the API during the request
+ * and its results arrive as content blocks, so what the caller wants is the
+ * *blocks*, not a forced answer from the model. `callServerTools` returns them
+ * unread for `retrieval-decode.ts` to normalise.
+ */
+export interface ServerToolRequest extends CallBase {
+  /** Documented server-tool definitions, passed through verbatim. */
+  readonly tools: readonly Readonly<Record<string, unknown>>[]
 }
 
 /**
@@ -113,7 +132,24 @@ export type MessagesOutcome =
 const RESOLVE_CONFIG =
   'Check XRAY_RESEARCH_MODEL_ID / XRAY_REVIEWER_MODEL_ID and ANTHROPIC_API_KEY for this deployment.'
 
-export async function callMessages(request: MessagesRequest): Promise<MessagesOutcome> {
+/** What one HTTP exchange produced, before anyone reads the content. */
+type SendResult =
+  | {
+    readonly kind: 'ENVELOPE'
+    readonly envelope: unknown
+    readonly requestId: string | undefined
+    readonly latencyMs: number
+  }
+  | { readonly kind: 'CAPABILITY'; readonly value: CapabilityUnavailable }
+
+/**
+ * Send one request and hand back its envelope.
+ *
+ * The single place a request is made. Both entry points share it so they share
+ * the failure classification too — a second sender would be a second place for
+ * the 20b review's conclusions to drift out of.
+ */
+async function send(request: CallBase, body: unknown): Promise<SendResult> {
   const url = `${(request.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '')}/v1/messages`
   const startedAt = performance.now()
 
@@ -126,14 +162,7 @@ export async function callMessages(request: MessagesRequest): Promise<MessagesOu
         'anthropic-version': ANTHROPIC_VERSION,
         'x-api-key': request.apiKey,
       },
-      body: JSON.stringify({
-        model: request.modelId,
-        max_tokens: request.maxTokens,
-        system: request.system,
-        messages: [{ role: 'user', content: request.userContent }],
-        tools: [request.tool],
-        tool_choice: { type: 'tool', name: request.tool.name },
-      }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(request.timeoutMs ?? 120_000),
     })
   } catch (err) {
@@ -164,7 +193,92 @@ export async function callMessages(request: MessagesRequest): Promise<MessagesOu
     )
   }
 
-  return readEnvelope(request, envelope, requestId, latencyMs)
+  return { kind: 'ENVELOPE', envelope, requestId, latencyMs }
+}
+
+/** Ask for one forced structured answer. */
+export async function callMessages(request: MessagesRequest): Promise<MessagesOutcome> {
+  const sent = await send(request, {
+    model: request.modelId,
+    max_tokens: request.maxTokens,
+    system: request.system,
+    messages: [{ role: 'user', content: request.userContent }],
+    tools: [request.tool],
+    tool_choice: { type: 'tool', name: request.tool.name },
+  })
+  if (sent.kind === 'CAPABILITY') return sent
+  return readEnvelope(request, sent.envelope, sent.requestId, sent.latencyMs)
+}
+
+/** What a server-tool call produced: the content blocks, unread. */
+export interface ServerToolSuccess {
+  /** The assistant content blocks exactly as they arrived. */
+  readonly blocks: readonly unknown[]
+  readonly stopReason?: string
+  readonly diagnostics: CallDiagnostics
+  /** `usage.server_tool_use`, for cost accounting outside the graph. */
+  readonly serverToolUse?: Readonly<Record<string, number>>
+}
+
+export type ServerToolOutcome =
+  | { readonly kind: 'BLOCKS'; readonly value: ServerToolSuccess }
+  | { readonly kind: 'CAPABILITY'; readonly value: CapabilityUnavailable }
+
+/**
+ * Enable server tools and return the content blocks.
+ *
+ * Nothing here interprets a block. That matters more than it looks: the model
+ * also writes prose about what it found, and that prose is where an
+ * evidentiary conclusion would live. Handing back unread blocks is what lets
+ * `retrieval-decode.ts` read the tool results and ignore the narration.
+ */
+export async function callServerTools(
+  request: ServerToolRequest,
+): Promise<ServerToolOutcome> {
+  const sent = await send(request, {
+    model: request.modelId,
+    max_tokens: request.maxTokens,
+    system: request.system,
+    messages: [{ role: 'user', content: request.userContent }],
+    tools: request.tools,
+  })
+  if (sent.kind === 'CAPABILITY') return sent
+
+  const message = sent.envelope as {
+    content?: unknown
+    stop_reason?: unknown
+    usage?: { input_tokens?: unknown; output_tokens?: unknown; server_tool_use?: unknown }
+  }
+  const stopReason = typeof message.stop_reason === 'string' ? message.stop_reason : undefined
+
+  return {
+    kind: 'BLOCKS',
+    value: {
+      blocks: Array.isArray(message.content) ? message.content : [],
+      ...(stopReason === undefined ? {} : { stopReason }),
+      diagnostics: {
+        provider: 'anthropic',
+        modelId: request.modelId,
+        operation: request.operation,
+        ...(sent.requestId === undefined ? {} : { requestId: sent.requestId }),
+        ...(stopReason === undefined ? {} : { stopReason }),
+        ...(typeof message.usage?.input_tokens === 'number'
+          ? { inputTokens: message.usage.input_tokens } : {}),
+        ...(typeof message.usage?.output_tokens === 'number'
+          ? { outputTokens: message.usage.output_tokens } : {}),
+        latencyMs: sent.latencyMs,
+      },
+      ...(isCountRecord(message.usage?.server_tool_use)
+        ? { serverToolUse: message.usage.server_tool_use } : {}),
+    },
+  }
+}
+
+/** Whether a usage sub-object is a plain record of counts. */
+function isCountRecord(value: unknown): value is Readonly<Record<string, number>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  return Object.values(value as Record<string, unknown>)
+    .every((entry) => typeof entry === 'number')
 }
 
 // ---------------------------------------------------------------------------
@@ -307,9 +421,9 @@ const RESOLVE_BILLING =
  *   PERMANENT              not worth another attempt; `runPipeline` stops.
  */
 function classifyHttpFailure(
-  request: MessagesRequest, response: Response, body: string,
+  request: CallBase, response: Response, body: string,
   requestId: string | undefined,
-): MessagesOutcome {
+): { readonly kind: 'CAPABILITY'; readonly value: CapabilityUnavailable } {
   const status = response.status
   const error = readError(body)
   const where = requestId === undefined ? '' : ` (request ${requestId})`
@@ -318,8 +432,8 @@ function classifyHttpFailure(
   const capability = (
     reason: 'NOT_CONFIGURED' | 'EXHAUSTED' | 'REFUSED_FOR_INPUT',
     detail: string, resolvedBy: string,
-  ): MessagesOutcome => ({
-    kind: 'CAPABILITY',
+  ) => ({
+    kind: 'CAPABILITY' as const,
     value: unavailable(request.operation, reason, detail, resolvedBy),
   })
 
@@ -476,7 +590,7 @@ const SPEND_LIMIT_PHRASES = [
  *      `ECHO_WINDOW` characters from the message also appears in the request,
  *      the message is an echo and is not read at all.
  */
-function isSpendLimit(error: ProviderError, request: MessagesRequest): boolean {
+function isSpendLimit(error: ProviderError, request: CallBase): boolean {
   const message = error.message
   if (message === undefined) return false
   if (error.type !== undefined && error.type !== 'invalid_request_error') return false
@@ -494,7 +608,7 @@ const ECHO_WINDOW = 24
  * disclosed either way — while a false negative would let echoed material
  * steer classification.
  */
-function echoesRequest(message: string, request: MessagesRequest): boolean {
+function echoesRequest(message: string, request: CallBase): boolean {
   const sent = `${request.userContent}\n${request.system}`
   for (let start = 0; start + ECHO_WINDOW <= message.length; start += 8) {
     if (sent.includes(message.slice(start, start + ECHO_WINDOW))) return true
