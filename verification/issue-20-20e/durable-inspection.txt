@@ -1,0 +1,30 @@
+execution run: RUN-9afec379-5ab5-4455-95d5-a45761e716e7
+
+=== full journal ===
+  [0] STAGE INGEST       SUCCEEDED  attempt=-
+  [1] STAGE DECOMPOSE    SUCCEEDED  attempt=-
+  [2] STAGE CLASSIFY     SUCCEEDED  attempt=-
+  [3] STAGE PLAN         SUCCEEDED  attempt=-
+  [4] STAGE TRACE        SUCCEEDED  attempt=-
+  [5] CAPABILITY provenance:lineage [NOT_SUPPORTED]
+  [6] STAGE PROVENANCE   PENDING    attempt=-
+  [7] STAGE DISCONFIRM   SUCCEEDED  attempt=-
+  [8] STAGE RECONCILE    FAILED     attempt=-
+        error: The provider's reconcile answer is not usable: discrepancies is a string rather than an array.
+
+=== recorded validations ===
+
+=== review history ===
+  rounds: 0
+
+=== the surface extract actually obtained ===
+  SRC-001 contentHash=sha_fnv_f3e51598_lo0
+  retrievedAt=2026-09-21T16:23:38.038Z
+
+=== every source, with accessibility ===
+  SRC-001 RETRIEVED     hash=sha_fnv_f3e51598_lo0       https://www.standardmedia.co.ke/national/article/2001512734/audit-shame-of-counties-blowing-millions-on-bogus-projects-travel
+  SRC-002 RETRIEVED     hash=sha_fnv_18bdff89_61o       https://www.auditor.on.ca/en/content/careers/ourwork.html
+  SRC-003 RETRIEVED     hash=sha_fnv_7909be64_c3x       https://www.michigancapitolconfidential.com/corporate-welfare-continues-again
+  SRC-004 RETRIEVED     hash=sha_fnv_9b968483_mw5       https://www.chrisram.net/?tag=auditor-general
+  SRC-005 RETRIEVED     hash=sha_fnv_3254c309_37xj      https://www.govinfo.gov/content/pkg/CHRG-110shrg45573/html/CHRG-110shrg45573.htm
+  SRC-006 RETRIEVED     hash=sha_fnv_f3e51598_lo0       https://www.standardmedia.co.ke/national/article/2001512734/audit-shame-of-counties-blowing-millions-on-bogus-projects-travel

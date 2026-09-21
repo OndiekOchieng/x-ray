@@ -1,0 +1,90 @@
+=== 1 · configuration actually selected ===
+composition                    COMPOSED
+summary                        Live research configured: model anthropic:claude-sonnet-5, retrieval anthropic:web:claude-sonnet-5, reviewer anthropic:claude-sonnet-5.
+database configured            true
+
+=== 2 · host registration through the real seams ===
+migrations applied             13
+registered                     ["EXECUTION_RUNTIME","REVIEWER_MODEL"]
+reviewer resolved              anthropic:claude-sonnet-5
+
+=== 3 · proof this database holds no benchmark content ===
+  investigations               0
+  claims                       0
+  sources                      0
+  evidence                     0
+  findings                     0
+
+=== 4 · submission ===
+url                            https://www.standardmedia.co.ke/national/article/2001512734/audit-shame-of-counties-blowing-millions-on-bogus-projects-travel
+investigationId                XRAY-38a5f60c-68ba-49ca-9b3c-ea56851d6643
+
+=== 5 · live execution ===
+executionRunId                 RUN-9afec379-5ab5-4455-95d5-a45761e716e7
+status                         STAGE_FAILED
+wall clock (s)                 329
+
+=== 6 · stage journal ===
+  INGEST       SUCCEEDED    in=0 out=1
+  DECOMPOSE    SUCCEEDED    in=1 out=2
+  CLASSIFY     SUCCEEDED    in=2 out=3
+  PLAN         SUCCEEDED    in=3 out=4
+  TRACE        SUCCEEDED    in=4 out=5
+  PROVENANCE   PENDING      in=5 out=-
+  DISCONFIRM   SUCCEEDED    in=5 out=6
+  RECONCILE    FAILED       in=6 out=-
+
+=== 7 · durable candidate ===
+  sources                      6
+  claims                       11
+  evidence                     3
+  sourcePositions              0
+  sourceDependencies           0
+  evidenceProvenance           0
+  discrepancies                0
+  disconfirmations             14
+  findings                     0
+  gaps                         0
+
+=== 8 · retrieval receipts (external URLs actually reached) ===
+  SRC-001  RETRIEVED      SECONDARY  UNKNOWN      https://www.standardmedia.co.ke/national/article/2001512734/audit-shame-of-counties-blowing-millions-on-bogus-projects-travel
+      title: Audit: Shame of counties blowing millions on bogus projects, travel
+  SRC-002  RETRIEVED      SECONDARY  UNKNOWN      https://www.auditor.on.ca/en/content/careers/ourwork.html
+      title: Office of the Auditor General of Ontario
+  SRC-003  RETRIEVED      SECONDARY  UNKNOWN      https://www.michigancapitolconfidential.com/corporate-welfare-continues-again
+      title: Déjà Vu All Over Again For Auditor General Report On Select Subsidy Programs
+  SRC-004  RETRIEVED      SECONDARY  UNKNOWN      https://www.chrisram.net/?tag=auditor-general
+      title: Auditor General - ChrisRam.net
+  SRC-005  RETRIEVED      SECONDARY  UNKNOWN      https://www.govinfo.gov/content/pkg/CHRG-110shrg45573/html/CHRG-110shrg45573.htm
+      title: - EXPEDIENCY VERSUS INTEGRITY: DO ASSEMBLY-LINE AUDITS AT THE DEFENSE CONTRACT AUDIT AGENCY WAST
+  SRC-006  RETRIEVED      SECONDARY  UNKNOWN      https://www.standardmedia.co.ke/national/article/2001512734/audit-shame-of-counties-blowing-millions-on-bogus-projects-travel
+      title: Audit: Shame of counties blowing millions on bogus projects, travel
+
+=== 9 · claims ===
+  C001  MEANING        OTHER        The Auditor General's findings raise questions about whether taxpayers are getting value for the
+  C002  OBSERVATION    ATTRIBUTION  The Auditor General has highlighted wastage of public funds by counties.
+  DC001  OBSERVATION    LEGAL        The Ontario Auditor General's statutory mandate defines performance audits as specifically ascer
+  DC002  OBSERVATION    QUANTITATIVE A Michigan Auditor General performance audit of the 21st Century Jobs Fund found that only 19 pe
+  DC003  INTERPRETATION OTHER        Successive Michigan Auditor General reports from 2007 to 2013 repeatedly found that the MEDC and
+  DC004  INTERPRETATION ATTRIBUTION  A commentator characterized Guyana's 2011 Auditor General report as sanitized and of poor qualit
+  DC005  INTERPRETATION ATTRIBUTION  The commentator alleges the Guyana Auditor General (acting) lacked professional accounting quali
+  DC006  OBSERVATION    QUANTITATIVE A U.S. GAO investigation found that DCAA supervisors changed audit opinions from 'inadequate' to
+  DC007  OBSERVATION    ATTRIBUTION  The Auditor General referenced in the coverage is Nancy Gathungu.
+  DC008  INTERPRETATION FINANCIAL    Counties blew millions of shillings on bogus projects and travel, according to audit findings.
+  DC009  INTERPRETATION ATTRIBUTION  The audit findings raise questions about stalled projects and county government expenditure.
+
+=== 10 · evidence ===
+  EV-001  SUPPORTS       DIRECT           src=SRC-006 claims=C002
+      The Auditor General has highlighted wastage of public funds by counties, raising questions whether taxpayers a
+  EV-002  SUPPORTS       STRONG_INDIRECT  src=SRC-006 claims=C002
+      The headline characterizes the audit findings as showing counties 'blowing millions on bogus projects, travel'
+  EV-003  CONTEXTUALIZES CONTEXTUAL       src=SRC-006 claims=C002
+      The article is tagged with topics including the Auditor General, Auditor General Nancy Gathungu, County Govern
+
+=== 11 · findings ===
+
+=== 12 · gaps ===
+
+=== 13 · capability gaps and adapter failures ===
+  CAPABILITY  provenance:lineage  [NOT_SUPPORTED]
+      No record in this run reports what it is attributed to, so origin and independence cannot be decided. Nothing was assumed.

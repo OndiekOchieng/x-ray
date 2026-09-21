@@ -1,0 +1,39 @@
+=== benchmark contamination scan ===
+  XRAY-KE-001        absent
+  Kisumu             absent
+  Siaya              absent
+  Migori             absent
+  Homa Bay           absent
+  inside-ruto        absent
+  Ruto               absent
+  five-day tour      absent
+  resurfaced 42      absent
+  520ecf67fe         absent
+
+=== duplicate records: same locator, different Source id ===
+  SRC-001 + SRC-006  ->  https://www.standardmedia.co.ke/national/article/2001512734/audit-shame-of-counties-blowing-millions-on-bogus-projects-travel
+  1 locator(s) minted more than one Source
+
+=== which Source the evidence actually cites ===
+  EV-001 -> SRC-006
+  EV-002 -> SRC-006
+  EV-003 -> SRC-006
+
+=== extract sizes, from the stage-side digest ===
+  SRC-001   28080 chars
+  SRC-002    7836 chars
+  SRC-003   15693 chars
+  SRC-004   29669 chars
+  SRC-005  150247 chars
+  SRC-006   28080 chars
+
+=== discovered claims by subject ===
+  DC001: The Ontario Auditor General's statutory mandate defines performance audits as specifically ascertaining whether taxpayer
+  DC002: A Michigan Auditor General performance audit of the 21st Century Jobs Fund found that only 19 percent of the jobs origin
+  DC003: Successive Michigan Auditor General reports from 2007 to 2013 repeatedly found that the MEDC and Michigan Strategic Fund
+  DC004: A commentator characterized Guyana's 2011 Auditor General report as sanitized and of poor quality compared to prior year
+  DC005: The commentator alleges the Guyana Auditor General (acting) lacked professional accounting qualifications, which is offe
+  DC006: A U.S. GAO investigation found that DCAA supervisors changed audit opinions from 'inadequate' to 'adequate' without adeq
+  DC007: The Auditor General referenced in the coverage is Nancy Gathungu.
+  DC008: Counties blew millions of shillings on bogus projects and travel, according to audit findings.
+  DC009: The audit findings raise questions about stalled projects and county government expenditure.

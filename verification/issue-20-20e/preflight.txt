@@ -1,0 +1,32 @@
+=== provider selection variables (presence only) ===
+  XRAY_RESEARCH_MODEL              UNSET  (researchModel)
+  XRAY_RESEARCH_MODEL_ID           UNSET  (researchModelId)
+  XRAY_REVIEWER_MODEL              UNSET  (reviewerModel)
+  XRAY_REVIEWER_MODEL_ID           UNSET  (reviewerModelId)
+  XRAY_RETRIEVAL_PROVIDER          UNSET  (retrieval)
+
+=== provider secrets / endpoints (presence only) ===
+  ANTHROPIC_API_KEY                set
+  ANTHROPIC_BASE_URL               UNSET
+  XRAY_ANTHROPIC_SEARCH_MODEL_ID   UNSET
+  OPENAI_API_KEY                   UNSET
+
+=== selections as parsed ===
+{}
+
+=== resolution ===
+  RESEARCH_MODEL NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  REVIEWER_MODEL NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  RETRIEVAL      NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+
+=== live runtime composition ===
+  status: INCOMPLETE
+  Live research is not configured: RESEARCH_MODEL, REVIEWER_MODEL, RETRIEVAL unavailable.
+    RESEARCH_MODEL: No provider is selected for this slot, so the run has no capability for it.
+    REVIEWER_MODEL: No provider is selected for this slot, so the run has no capability for it.
+    RETRIEVAL: No provider is selected for this slot, so the run has no capability for it.
+
+=== database path ===
+  XRAY_POSTGRES_URL                UNSET
+  XRAY_DEMO_PGLITE                 UNSET
+  hostDatabaseConfigured(): false
