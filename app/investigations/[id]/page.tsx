@@ -1,7 +1,8 @@
 import { notFound } from 'next/navigation'
 
+import { AtiRequestPanel } from '@/components/investigations/ati-request-panel'
 import { EvidenceExplorer } from '@/components/investigations/evidence-explorer'
-import { getExplorerPayload } from '@/lib/xray/investigations'
+import { getAtiActionSurfaces, getExplorerPayload } from '@/lib/xray/investigations'
 
 /**
  * Dynamic, exactly as before Cache Components was enabled.
@@ -10,6 +11,10 @@ import { getExplorerPayload } from '@/lib/xray/investigations'
  * under the new prerender rules rather than changing what it does: the #9
  * cache boundary is the immutable public version projection, not an
  * internal page.
+ *
+ * The ATI action surface lives here and nowhere public. Action state is
+ * mutable and this page is dynamic; a committed public version's bytes are
+ * neither, and #10 does not put one inside the other.
  */
 export const instant = false
 
@@ -26,5 +31,24 @@ export default async function EvidenceExplorerRoute({
   // The loader seam now decides what exists, and unknown ids are not-found.
   if (!payload) notFound()
 
-  return <EvidenceExplorer payload={payload} />
+  // Read separately from the explorer payload, which projects immutable
+  // research state. Carrying both in one payload would make mutable action
+  // state look like part of the evidence record.
+  const requests = await getAtiActionSurfaces(id)
+
+  return (
+    <>
+      <EvidenceExplorer payload={payload} />
+      {requests.length > 0 && (
+        <div className="mx-auto w-full max-w-5xl space-y-6 px-6 pb-16">
+          <h2 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Information requests
+          </h2>
+          {requests.map((surface) => (
+            <AtiRequestPanel key={surface.requestId} surface={surface} />
+          ))}
+        </div>
+      )}
+    </>
+  )
 }

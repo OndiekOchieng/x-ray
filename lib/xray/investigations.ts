@@ -23,6 +23,7 @@ import { createXrayKe001Graph } from './fixtures/xray-ke-001/graph'
 import { claimById, gapById } from './selectors'
 import { InvestigationResourceNotFound, InvestigationService } from './application/investigation-service'
 import { databaseConfigured, getDatabase } from './application/runtime'
+import type { ATIRequestSurface } from './projections/ati-surface'
 import {
   claimSummaryViews,
   claimView,
@@ -139,6 +140,24 @@ export async function getExplorerPayload(id: string): Promise<ExplorerPayload | 
     claims: graph.claims.map((c) => claimView(graph, c)),
     navigator: claimSummaryViews(graph),
   }
+}
+
+/**
+ * The ATI action surfaces for one investigation, newest gap first.
+ *
+ * Read from storage only. Benchmarks ship no ATI action history, and inventing
+ * one for a fixture would put a request on the screen that nobody made.
+ *
+ * Deliberately not part of `ExplorerPayload`: the explorer's payload is a
+ * projection of immutable research state, and ATI action state is mutable. One
+ * payload carrying both would make the second look like the first.
+ */
+export async function getAtiActionSurfaces(
+  investigationId: string,
+): Promise<readonly ATIRequestSurface[]> {
+  if (!databaseConfigured()) return []
+  const { readAtiActionSurfaces } = await import('./persistence/ati-surface-reader')
+  return readAtiActionSurfaces(await getDatabase(), investigationId)
 }
 
 /** Progress-screen payload for one investigation. */
