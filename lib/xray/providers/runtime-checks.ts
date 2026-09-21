@@ -37,7 +37,8 @@ import type { GraduationResult } from '@/lib/xray/acceptance'
 import { activePortChecks } from '@/lib/xray/review'
 import { assessCandidate } from '@/lib/xray/application/assessment'
 import {
-  getReviewerModel, setReviewerModelProvider,
+  getExecutionRuntime, getReviewerModel,
+  setExecutionRuntimeProvider, setReviewerModelProvider,
 } from '@/lib/xray/application/runtime'
 import { GraduationService } from '@/lib/xray/application/graduation-service'
 import { checkpointCandidate } from '@/lib/xray/persistence/graduation-check-support'
@@ -45,6 +46,7 @@ import { xrayKe001Graph } from '@/lib/xray/fixtures/xray-ke-001/graph'
 import {
   composeLiveRuntime, liveRuntime, registerLiveProviders, REQUIRED_SLOTS,
 } from './live-runtime'
+import { DEFAULT_REGISTRY, type ProviderRegistry } from './registry'
 import { gatherMaterial } from './material'
 import { newRunMaterial } from './live-stages'
 import { PROVIDER_ENV } from './config'
@@ -401,24 +403,45 @@ check('3 · a complete configuration composes, and registration is conditional',
     return `reviewer ${composition.reviewer.name}`
   if (composition.summary.includes(SECRET)) return 'the summary leaked the key'
 
-  // Registered only when complete, and both seams are installed.
-  const installed: string[] = []
+  /*
+   * Registered only when complete — and *cleared* when not.
+   *
+   * The recorder distinguishes the two, because both are calls to the same
+   * setter and only the argument says which. An earlier version of this check
+   * counted any call as an install, and started failing the moment clearing
+   * was introduced: it could not tell "installed a provider" from "took the
+   * provider out of service".
+   */
+  const calls: { slot: string; installed: boolean }[] = []
   const seams = {
-    setExecutionRuntime: () => { installed.push('EXECUTION_RUNTIME') },
-    setReviewerModel: () => { installed.push('REVIEWER_MODEL') },
+    setExecutionRuntime: (provider: unknown) =>
+      { calls.push({ slot: 'EXECUTION_RUNTIME', installed: provider !== null }) },
+    setReviewerModel: (provider: unknown) =>
+      { calls.push({ slot: 'REVIEWER_MODEL', installed: provider !== null }) },
   }
+  const installedSlots = () => calls.filter((call) => call.installed)
+    .map((call) => call.slot).sort()
+  const clearedSlots = () => calls.filter((call) => !call.installed)
+    .map((call) => call.slot).sort()
 
   const incomplete = await registerLiveProviders(seams, { environment: {} })
   if (incomplete.composition.status !== 'INCOMPLETE') return 'an empty environment composed'
-  if (installed.length !== 0)
-    return `an incomplete composition installed ${installed.join(', ')}`
+  if (installedSlots().length !== 0)
+    return `an incomplete composition installed ${installedSlots().join(', ')}`
+  // Both seams are explicitly cleared, not merely left alone — see check 3c.
+  if (JSON.stringify(clearedSlots())
+    !== JSON.stringify(['EXECUTION_RUNTIME', 'REVIEWER_MODEL']))
+    return `an incomplete composition cleared ${JSON.stringify(clearedSlots())}`
 
+  calls.length = 0
   const complete = await registerLiveProviders(seams, { environment })
   if (complete.composition.status !== 'COMPOSED')
     return 'a complete environment did not compose'
-  if (JSON.stringify([...installed].sort())
+  if (JSON.stringify(installedSlots())
     !== JSON.stringify(['EXECUTION_RUNTIME', 'REVIEWER_MODEL']))
-    return `installed ${JSON.stringify(installed)}`
+    return `installed ${JSON.stringify(installedSlots())}`
+  if (clearedSlots().length !== 0)
+    return `a complete composition cleared ${clearedSlots().join(', ')}`
   return JSON.stringify([...complete.registered].sort())
     === JSON.stringify(['EXECUTION_RUNTIME', 'REVIEWER_MODEL'])
     ? null : `reported ${JSON.stringify(complete.registered)}`
@@ -444,8 +467,10 @@ check('3b · every required slot corresponds to a CONSUMED capability', async ()
 
   const installed: string[] = []
   const complete = await registerLiveProviders({
-    setExecutionRuntime: () => { installed.push('EXECUTION_RUNTIME') },
-    setReviewerModel: () => { installed.push('REVIEWER_MODEL') },
+    setExecutionRuntime: (provider) =>
+      { if (provider !== null) installed.push('EXECUTION_RUNTIME') },
+    setReviewerModel: (provider) =>
+      { if (provider !== null) installed.push('REVIEWER_MODEL') },
   }, {
     environment: {
       ANTHROPIC_API_KEY: SECRET,
@@ -483,6 +508,175 @@ check('3b · every required slot corresponds to a CONSUMED capability', async ()
   if (plan.adapters?.model === undefined) return 'the plan carries no research model'
   return plan.adapters.research === undefined
     ? 'the plan carries no retrieval adapter' : null
+})
+
+check('3c · a later incomplete registration takes the live seams out of service', async () => {
+  /*
+   * Registration is not a one-shot event. A host may re-register when
+   * configuration changes, and an earlier version of `registerLiveProviders`
+   * returned early on an incomplete composition **without clearing** — so a
+   * re-registration that found the configuration incomplete left the
+   * *previous* runtime and reviewer live. From a fresh process that looks
+   * correct, because nothing was installed yet; the defect only appears in
+   * this order.
+   *
+   * A deployment whose key was revoked would have kept researching with the
+   * adapter it built before, while the documented contract said the
+   * unconfigured path was in force.
+   *
+   * This drives the real seams, not recorders, so the assertions are about
+   * what `getExecutionRuntime()` and `getReviewerModel()` actually return.
+   */
+  const realSeams = {
+    setExecutionRuntime: setExecutionRuntimeProvider,
+    setReviewerModel: setReviewerModelProvider,
+  }
+  const submission = {
+    sourceUrl: URL_UNDER_INVESTIGATION, createdAt: '2026-04-01T00:00:00Z',
+  }
+
+  try {
+    // 1 — a complete configuration.
+    const complete = await registerLiveProviders(realSeams, {
+      environment: {
+        ANTHROPIC_API_KEY: SECRET,
+        ANTHROPIC_BASE_URL: stub.baseUrl,
+        XRAY_ANTHROPIC_SEARCH_MODEL_ID: 'search-model',
+        [PROVIDER_ENV.researchModel]: 'anthropic',
+        [PROVIDER_ENV.researchModelId]: 'research-model',
+        [PROVIDER_ENV.reviewerModel]: 'anthropic',
+        [PROVIDER_ENV.reviewerModelId]: 'reviewer-model',
+        [PROVIDER_ENV.retrieval]: 'anthropic',
+      },
+    })
+    if (complete.composition.status !== 'COMPOSED')
+      return `the complete environment resolved ${complete.composition.status}`
+
+    // 2 — both capabilities are live.
+    const liveReviewer = await getReviewerModel()
+    if (liveReviewer === undefined) return 'the reviewer was not live after registration'
+    if (liveReviewer.name !== 'anthropic:reviewer-model')
+      return `the live reviewer is ${liveReviewer.name}`
+
+    const liveRuntimeNow = await getExecutionRuntime()
+    const livePlan = await liveRuntimeNow.initial('XRAY-LIVE-100', submission)
+    if (livePlan.adapters?.model === undefined || livePlan.adapters.research === undefined)
+      return 'the live runtime produced a plan with no adapters'
+
+    // 3 — re-register with an incomplete configuration.
+    const incomplete = await registerLiveProviders(realSeams, { environment: {} })
+    if (incomplete.composition.status !== 'INCOMPLETE')
+      return `the empty environment resolved ${incomplete.composition.status}`
+    if (incomplete.registered.length !== 0)
+      return `an incomplete re-registration reported ${incomplete.registered.join(', ')}`
+
+    // 4 — the reviewer is gone.
+    if (await getReviewerModel() !== undefined)
+      return 'the stale reviewer is still live after an incomplete re-registration'
+
+    // 5 — the runtime is the unconfigured one: no adapters, every stage a gap.
+    const afterRuntime = await getExecutionRuntime()
+    const afterPlan = await afterRuntime.initial('XRAY-LIVE-101', submission)
+    if (afterPlan.adapters !== undefined)
+      return 'the unconfigured runtime carried adapters'
+    if (afterPlan.stages.length !== 10)
+      return `${afterPlan.stages.length} stages planned after clearing`
+
+    /*
+     * 6 — and a fresh execution is capability-blocked rather than quietly
+     * using the stale provider. The stub's traffic log is reset first, so any
+     * request at all would mean the old Anthropic adapters were still reachable.
+     */
+    stub.script()
+    const result = await runPipeline({
+      investigation: afterPlan.investigation,
+      stages: afterPlan.stages,
+      ...(afterPlan.adapters === undefined ? {} : { adapters: afterPlan.adapters }),
+      maxAttempts: 1,
+    })
+    if (result.capabilityGaps.length !== 10)
+      return `${result.capabilityGaps.length} capability gaps, expected one per stage`
+    if (result.graph.sources.length !== 0)
+      return 'a stale provider produced a source after being cleared'
+    if (result.graph.claims.length !== 0 || result.graph.evidence.length !== 0)
+      return 'a stale provider produced canonical state after being cleared'
+
+    // 7 — neither old adapter was called again.
+    if (stub.received.length !== 0)
+      return `${stub.received.length} request(s) reached the old adapters after clearing`
+
+    // The reviewer too: the cleared seam is what an assessment now resolves.
+    const resolvedForAssessment = await getReviewerModel()
+    return resolvedForAssessment === undefined
+      ? null : 'an assessment would still resolve the stale reviewer'
+  } finally {
+    // Leave the process as the other checks expect to find it.
+    setExecutionRuntimeProvider(null)
+    setReviewerModelProvider(null)
+  }
+})
+
+check('3d · a composition that throws also leaves nothing live', async () => {
+  /*
+   * The other half of the symmetry. A partial configuration is one way to end
+   * up with no capability; a factory that breaks while constructing one is
+   * another, and a stale provider surviving it is the same defect.
+   *
+   * This is why `LiveRuntimeOptions` takes a registry: without it the recovery
+   * branch is unreachable by any test, and an untested recovery path is how a
+   * recovery path turns out not to work. That is not hypothetical here — the
+   * branch existed for one round with nothing exercising it, and a control
+   * that removed it passed the whole gate.
+   */
+  const realSeams = {
+    setExecutionRuntime: setExecutionRuntimeProvider,
+    setReviewerModel: setReviewerModelProvider,
+  }
+  const environment = {
+    ANTHROPIC_API_KEY: SECRET,
+    ANTHROPIC_BASE_URL: stub.baseUrl,
+    XRAY_ANTHROPIC_SEARCH_MODEL_ID: 'search-model',
+    [PROVIDER_ENV.researchModel]: 'anthropic',
+    [PROVIDER_ENV.researchModelId]: 'research-model',
+    [PROVIDER_ENV.reviewerModel]: 'anthropic',
+    [PROVIDER_ENV.reviewerModelId]: 'reviewer-model',
+    [PROVIDER_ENV.retrieval]: 'anthropic',
+  }
+
+  try {
+    const complete = await registerLiveProviders(realSeams, { environment })
+    if (complete.composition.status !== 'COMPOSED') return 'the environment did not compose'
+    if (await getReviewerModel() === undefined) return 'the reviewer was not live'
+
+    // A registry whose reviewer factory breaks while being constructed.
+    const breaking: ProviderRegistry = {
+      ...DEFAULT_REGISTRY,
+      reviewerModels: [{
+        provider: 'anthropic',
+        requires: ['ANTHROPIC_API_KEY'],
+        create: () => { throw new Error('synthetic factory failure') },
+      }],
+    }
+
+    let threw = false
+    try {
+      await registerLiveProviders(realSeams, { environment, registry: breaking })
+    } catch { threw = true }
+    if (!threw) return 'a broken factory did not surface'
+
+    // Nothing stale survived it.
+    if (await getReviewerModel() !== undefined)
+      return 'the stale reviewer survived a broken composition'
+    const runtimeNow = await getExecutionRuntime()
+    const plan = await runtimeNow.initial('XRAY-LIVE-102', {
+      sourceUrl: URL_UNDER_INVESTIGATION, createdAt: '2026-04-01T00:00:00Z',
+    })
+    return plan.adapters === undefined
+      ? null : 'the stale runtime survived a broken composition'
+  } finally {
+    setExecutionRuntimeProvider(null)
+    setReviewerModelProvider(null)
+  }
 })
 
 check('4 · re-evaluation is not planned by the live runtime', () => {

@@ -39,7 +39,10 @@ import type {
   ExecutionPlan, ExecutionRuntime, InitialExecutionPlan,
 } from '@/lib/xray/application/inline-execution'
 import { submittedInvestigation } from '@/lib/xray/application/runtime'
-import { composeProviders, describeResolution, type ComposedProviders } from './registry'
+import {
+  composeProviders, describeResolution,
+  type ComposedProviders, type ProviderRegistry,
+} from './registry'
 import type { Environment } from './config'
 import { liveStages, newRunMaterial, type RunMaterial } from './live-stages'
 
@@ -64,6 +67,15 @@ export interface LiveRuntimeOptions {
   readonly researchCutoffAt?: string
   readonly retrieveLimit?: number
   readonly now?: () => string
+  /**
+   * The registry to resolve against. Defaults to `DEFAULT_REGISTRY`.
+   *
+   * Present so a gate can drive a factory that throws. Without it the
+   * "a broken composition leaves nothing live" branch is unreachable by any
+   * test, and shipping an untested recovery path is how a recovery path turns
+   * out not to work.
+   */
+  readonly registry?: ProviderRegistry
 }
 
 /**
@@ -76,7 +88,7 @@ export interface LiveRuntimeOptions {
 export async function composeLiveRuntime(
   options: LiveRuntimeOptions = {},
 ): Promise<RuntimeComposition> {
-  const composed = composeProviders(options.environment)
+  const composed = composeProviders(options.environment, options.registry)
   return buildFrom(composed, options)
 }
 
@@ -245,28 +257,65 @@ export interface LiveRegistration {
 /**
  * Compose and register, for a host startup hook.
  *
- * Registration is conditional on a complete composition: a partial one
- * registers nothing, leaving `getExecutionRuntime()` to return the
- * unconfigured runtime and `getReviewerModel()` to return `undefined` — which
- * is the behaviour every #6–#11 gate is written against.
+ * Registration is all-or-nothing, and **so is de-registration**. A complete
+ * composition installs both seams; anything else *clears* both.
  *
- * Both seams are installed, and that is the point of the amendment. The
- * research model and the retrieval adapter reach the pipeline through the
+ * The clearing is the part that is easy to get wrong, and an earlier version
+ * of this function got it wrong: it returned early on an incomplete
+ * composition without touching the seams. From a fresh process that looks
+ * correct, because nothing was installed yet. But registration is not a
+ * one-shot event — a host may re-register when configuration changes, and a
+ * re-registration that found the configuration incomplete would leave the
+ * *previous* runtime and reviewer live. A deployment whose key was revoked
+ * would keep researching with the adapter it built before, and the
+ * documented contract — "incomplete composition registers nothing and leaves
+ * the unconfigured path" — would be quietly false.
+ *
+ * So: either every required capability is current and installed, or none is
+ * live. That holds for a partial configuration and for a composition that
+ * throws; a stale provider surviving a failed re-registration is the same
+ * defect either way.
+ *
+ * The research model and the retrieval adapter reach the pipeline through the
  * runtime's `StageAdapters`; the reviewer reaches the REVIEW gate and
  * graduation through its own seam, because `StageAdapters` deliberately has no
- * reviewer member. Composing a reviewer and installing nothing left the
- * capability dead: configured, reported, and never asked.
+ * reviewer member.
  */
 export async function registerLiveProviders(
   seams: HostSeams,
   options: LiveRuntimeOptions = {},
 ): Promise<LiveRegistration> {
-  const composition = await composeLiveRuntime(options)
-  if (composition.status !== 'COMPOSED') return { composition, registered: [] }
+  let composition: RuntimeComposition
+  try {
+    composition = await composeLiveRuntime(options)
+  } catch (err) {
+    // A composition that broke leaves nothing live either. Cleared first, so
+    // the throw cannot carry a stale provider past this point.
+    clear(seams)
+    throw err
+  }
+
+  if (composition.status !== 'COMPOSED') {
+    clear(seams)
+    return { composition, registered: [] }
+  }
 
   // One composition per process, handed out by reference. Composing per
   // request would build a new adapter for every run.
   seams.setExecutionRuntime(async () => composition.runtime)
   seams.setReviewerModel(async () => composition.reviewer)
   return { composition, registered: ['EXECUTION_RUNTIME', 'REVIEWER_MODEL'] }
+}
+
+/**
+ * Take both live capabilities out of service.
+ *
+ * `null` is what the seams read as "unconfigured", so this restores exactly
+ * the state a process with no provider configuration is in:
+ * `getExecutionRuntime()` returns `unconfiguredResearchRuntime` and
+ * `getReviewerModel()` returns `undefined`.
+ */
+function clear(seams: HostSeams): void {
+  seams.setExecutionRuntime(null)
+  seams.setReviewerModel(null)
 }

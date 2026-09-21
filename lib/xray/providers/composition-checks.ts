@@ -630,9 +630,16 @@ async function main(): Promise<void> {
       }
     }
 
-    // And the provider layer never reaches back into a host or a runtime.
+    /*
+     * And the provider layer never reaches back into a host or a runtime.
+     *
+     * Check harnesses are excluded by the `-checks.ts` convention rather than
+     * by name: an earlier version named only `composition-checks.ts`, so
+     * `runtime-checks.ts` — which registers seams *in order to test the
+     * registration* — was scanned as implementation.
+     */
     for (const file of sources('lib/xray/providers')) {
-      if (file.endsWith('composition-checks.ts')) continue
+      if (/-checks\.ts$/.test(file)) continue
       const source = stripComments(readFileSync(file, 'utf8'))
       const relative = file.slice(file.indexOf('lib/xray'))
       if (/setExecutionRuntimeProvider|setDatabaseProvider|hostConnection/.test(source))
@@ -689,12 +696,24 @@ async function main(): Promise<void> {
     // The conditional lives in `registerLiveProviders`, and each seam is
     // installed exactly once.
     const live = stripComments(read('lib/xray/providers/live-runtime.ts'))
-    if (!/if \(composition\.status !== 'COMPOSED'\)\s*return \{ composition, registered: \[\] \}/
-      .test(live))
-      return 'registration is not conditional on a complete composition'
+    if (!/if \(composition\.status !== 'COMPOSED'\) \{\s*clear\(seams\)/.test(live))
+      return 'an incomplete composition does not clear the live seams'
+
+    /*
+     * Symmetry: every path out of registration either installs both seams or
+     * clears both. An incomplete composition that merely returned would leave
+     * a previously registered runtime and reviewer live, which is the state a
+     * re-registration produces and the contract forbids.
+     */
+    if (!/clear\(seams\)\s*throw err/.test(live.replace(/\n\s*/g, ' ')))
+      return 'a composition that throws does not clear the live seams'
+    const clearBody = live.slice(live.indexOf('function clear(seams: HostSeams)'))
+    for (const seam of ['setExecutionRuntime(null)', 'setReviewerModel(null)']) {
+      if (!clearBody.includes(seam)) return `clear() does not call ${seam}`
+    }
     for (const seam of ['setExecutionRuntime', 'setReviewerModel']) {
-      const calls = live.match(new RegExp(`seams\\.${seam}\\(`, 'g')) ?? []
-      if (calls.length !== 1) return `${seam} is installed ${calls.length} times`
+      const installs = live.match(new RegExp(`seams\\.${seam}\\(async`, 'g')) ?? []
+      if (installs.length !== 1) return `${seam} is installed ${installs.length} times`
     }
 
     /*

@@ -11,7 +11,10 @@ hand-written port stub.**
 > chain still stopped at the seam** — nothing read `getReviewerModel()` — and
 > added the consuming hop. `INGEST`'s `retrievedAt`, which fell back to an
 > investigation id, now falls back to an injected clock. See *Amendment* below.
-> First submission `9703c06`; round one `5df69b8`.
+> **Round three** fixed a registration-lifecycle bug: an incomplete
+> composition returned without *clearing* previously installed seams, so a
+> re-registration could leave a stale runtime and reviewer live. First
+> submission `9703c06`; round one `5df69b8`; round two `eade206`.
 
 ## What was added
 
@@ -134,6 +137,58 @@ state round one shipped in.
 - **Check 24** — the seam is typed against the port, and no Anthropic reviewer
   type appears in `application/runtime.ts`, `graduation-service.ts`,
   `acceptance/runner.ts`, or the composition's public surface.
+
+### 3 · Registration lifecycle: installed, or cleared
+
+`registerLiveProviders` returned early on an incomplete composition **without
+touching the seams**. From a fresh process that reads as correct — nothing was
+installed yet — and my checks only ever exercised incomplete-from-clean. The
+failure appears only on **re-registration**:
+
+```
+COMPOSED registration  ->  runtime + reviewer live
+later INCOMPLETE       ->  early return, seams untouched
+                       ->  the PREVIOUS runtime and reviewer are still live
+```
+
+A deployment whose key was revoked would have kept researching with the adapter
+it built before, while the documented contract said the unconfigured path was
+in force. Both halves of that contract were false at once.
+
+Registration is now symmetric — every path out of it either installs both seams
+or clears both:
+
+| | |
+|---|---|
+| `COMPOSED` | both seams installed |
+| `INCOMPLETE` | both seams **cleared** |
+| composition throws | both seams **cleared**, then the error propagates |
+
+`clear(seams)` sets both to `null`, which is exactly the state a process with
+no provider configuration is in: `getExecutionRuntime()` returns
+`unconfiguredResearchRuntime` and `getReviewerModel()` returns `undefined`.
+
+**Check 3c** drives the real seams in the order that exposes it: register
+complete → assert the reviewer is live and the plan carries adapters →
+re-register incomplete → assert `getReviewerModel()` is `undefined`, the plan
+carries **no** adapters, a fresh `runPipeline` reports one capability gap per
+stage and zero canonical artifacts, and **the HTTP stub received no further
+requests** — so neither old adapter was reachable.
+
+**Check 3** now distinguishes an install from a clear, because both are calls
+to the same setter and only the argument says which. It had been counting any
+call as an install and started failing the moment clearing was introduced.
+
+#### The untested branch I nearly shipped
+
+Control AL removes the clearing on a thrown composition — and **passed the
+whole gate**. The recovery branch had no coverage at all, because a throw was
+unreachable through the public API.
+
+So `LiveRuntimeOptions` gained a `registry` option, and check **3d** supplies a
+registry whose reviewer factory throws. An untested recovery path is how a
+recovery path turns out not to work, and the honest choice was to make it
+reachable rather than to leave a defensive branch nobody had run.
 
 ### Requirements correspond to *consumed* capabilities
 
@@ -324,7 +379,7 @@ important thing 20e will have to report.
 
 ## Gate
 
-`pnpm check:live-runtime` — **27/27**, in `runtime-gate.txt`. Two kinds of
+`pnpm check:live-runtime` — **29/29**, in `runtime-gate.txt`. Two kinds of
 stub, deliberately: hand-written ports exercise the provider-neutral
 composition, and an HTTP stub on `127.0.0.1` exercises `pause_turn`, which is a
 property of the transport and cannot be reached through a hand-written port.
@@ -351,6 +406,9 @@ port was called in protocol order.
 | **AH · the application path stops reading the seam** | **FAIL 20, 22, 23** — *"judge() was never called"*: round one's defect, reproduced |
 | **AI · the production caller bypasses `assessCandidate`** | **FAIL 20b** |
 | **AJ · `GraduationService` reaches for the host seam** | **FAIL 20b** |
+| **AK · early return without clearing** | **FAIL 3, 3c** — *"the stale reviewer is still live after an incomplete re-registration"* |
+| **AL · a thrown composition leaves the seams alone** | **FAIL 3d** — *passed the gate before check 3d existed* |
+| **AM · only the runtime seam is cleared** | **FAIL 3, 3c, 3d** |
 
 **Control Z's first attempt was worthless and I nearly reported it as
 evidence.** It edited the `locator === undefined` branch, which the check's
@@ -422,6 +480,11 @@ check:acceptance BLOCKED (0 reason(s) against the graph, 6 capability blocker(s)
 - **A dead assertion**, again: check 21 compared `ReviewOutcome` against
   `'PASS'`/`'CLEAR'`, which the union does not contain. Replaced with the
   assertion that actually holds.
+- **A second check that excluded harnesses by name, not convention.** 20a check
+  13 skipped only `composition-checks.ts`, so `runtime-checks.ts` — which
+  registers seams in order to *test* registration — was scanned as
+  implementation and flagged. Now excluded by the `-checks.ts` suffix, as the
+  other scans already do.
 - **My round-one reviewer checks tested the wrong thing.** All four injected
   the model directly, so they proved the machinery works when handed a
   reviewer — which was never in doubt — and were blind to nothing ever handing

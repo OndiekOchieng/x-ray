@@ -3,6 +3,8 @@ ok    1 · an unconfigured environment composes nothing and says which slots
 ok    2 · a partial configuration composes nothing — no silent fallback
 ok    3 · a complete configuration composes, and registration is conditional
 ok    3b · every required slot corresponds to a CONSUMED capability
+ok    3c · a later incomplete registration takes the live seams out of service
+ok    3d · a composition that throws also leaves nothing live
 ok    4 · re-evaluation is not planned by the live runtime
 ok    5 · discovery is followed by retrieval, in that order
 ok    6 · a record that could not be obtained stays unreadable, and stays
@@ -27,7 +29,7 @@ ok    17 · the stage layer is provider-neutral and the pipeline is untouched
 ok    18 · review stays out of the pipeline adapters
 ok    19 · no secret reaches a composed runtime, a plan, or a graph
 
-27/27 live runtime checks passed
+29/29 live runtime checks passed
 Every call went to 127.0.0.1. No civic URL was used.
 
 === earlier gates ===
@@ -66,6 +68,17 @@ reviewer refuses  -> the asked checks stay NOT_EVALUATED with a reason; no revie
                      finding and no graduation reason about the graph
 reviewer throws   -> an outage, not a capability gap; propagates, no assessment is
                      appended, so commit() has nothing to stand on
+
+REGISTRATION LIFECYCLE — all current and installed, or none live
+  COMPOSED   -> both seams installed
+  INCOMPLETE -> both seams CLEARED (not merely left alone)
+  throws     -> both seams CLEARED, then the error propagates
+
+  The defect this closes: registerLiveProviders returned early on INCOMPLETE
+  without touching the seams. From a fresh process that looks correct, because
+  nothing was installed yet — the failure only appears on RE-registration, where
+  a previously COMPOSED runtime and reviewer stayed live. A deployment whose key
+  was revoked would have kept researching with the adapter it built before.
 
 Requirements <-> CONSUMED capabilities:
   REQUIRED_SLOTS = RESEARCH_MODEL, REVIEWER_MODEL, RETRIEVAL
@@ -114,3 +127,14 @@ AI the production caller bypasses assessCandidate    -> FAIL 20b
      "the bridge calls graduation.assess directly, bypassing the seam"
 AJ GraduationService reaches for the host seam       -> FAIL 20b
      'the seam is read by ["assessment.ts","graduation-service.ts"]'
+
+lifecycle amendment controls:
+AK early return without clearing                     -> FAIL 3, 3c
+     3c: "the stale reviewer is still live after an incomplete re-registration"
+AL a thrown composition leaves the seams alone       -> FAIL 3d
+     "the stale reviewer survived a broken composition"
+     AL passed the whole gate on its first run: the throw-clearing branch had
+     no coverage at all. LiveRuntimeOptions.registry was added so a factory can
+     be made to throw, and check 3d now drives it. An untested recovery path is
+     how a recovery path turns out not to work.
+AM only the runtime seam is cleared                  -> FAIL 3, 3c, 3d
