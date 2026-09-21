@@ -24,6 +24,7 @@ import { claimById, gapById } from './selectors'
 import { InvestigationResourceNotFound, InvestigationService } from './application/investigation-service'
 import { databaseConfigured, getDatabase } from './application/runtime'
 import type { ATIRequestSurface } from './projections/ati-surface'
+import { executionStateView, type ExecutionStateView } from './projections/execution-state'
 import {
   claimSummaryViews,
   claimView,
@@ -158,6 +159,28 @@ export async function getAtiActionSurfaces(
   if (!databaseConfigured()) return []
   const { readAtiActionSurfaces } = await import('./persistence/ati-surface-reader')
   return readAtiActionSurfaces(await getDatabase(), investigationId)
+}
+
+/**
+ * One execution run's durable state, for the progress surface (#11 11b).
+ *
+ * Returns `null` when there is no database or no such run — a fresh run's
+ * state lives only in storage, and there is no fixture answer for it. A
+ * storage failure propagates: reporting a run as absent because the database
+ * was unreachable would present a blocked run as one that never happened.
+ */
+export async function getExecutionStateView(
+  investigationId: string, executionRunId: string,
+): Promise<ExecutionStateView | null> {
+  if (!databaseConfigured()) return null
+  const service = new InvestigationService(await getDatabase())
+  try {
+    return executionStateView(
+      await service.getExecutionStatus(investigationId, executionRunId))
+  } catch (error) {
+    if (error instanceof InvestigationResourceNotFound) return null
+    throw error
+  }
 }
 
 /** Progress-screen payload for one investigation. */
