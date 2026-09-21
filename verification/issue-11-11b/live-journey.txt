@@ -1,0 +1,46 @@
+11b live journey — Next production build against real PostgreSQL 17.11.
+Captured 2026-09-21T10:32:54Z. Provisioned by 'pnpm demo:seed' out of band.
+
+=== provisioning (pnpm demo:seed, twice, against a fresh database) ===
+  run1  migrations: 13 newly applied
+  run1  seed:       SEEDED
+  run1  slug:       inside-ruto-s-five-day-tour-of-kisumu-siaya-migori-and-homa-bay-520ecf67fe
+  run1  version:    v1
+  run1  events:     0 → 1
+  run2  migrations: 0 newly applied
+  run2  seed:       ALREADY_SEEDED
+  run2  slug:       inside-ruto-s-five-day-tour-of-kisumu-siaya-migori-and-homa-bay-520ecf67fe
+  run2  version:    v1
+  run2  events:     1 → 1
+
+=== DEMO PATH — status and rendered markers ===
+  /                              200   17817B | See what a civic claim is standing on | Featured Investigation
+  /library                       200   14325B | MISSING:Published X-Rays | Inside Ruto
+  /xray/inside-ruto-s-five-day   307       0B -> /xray/inside-ruto-s-five-day-tour-of-kisumu-siaya-migori-and-homa-bay-520ecf67fe/v1
+  /xray/inside-ruto-s-five-day   200    5008B | Inside Ruto
+  /xray/inside-ruto-s-five-day   200    3100B
+  /investigations/XRAY-KE-001    200  316893B | Repetition is not corroboration
+  /gap/GAP-001                   200   28212B | Public record request
+
+  outage copy absent from / and /library:
+    /            0 occurrence(s)
+    /library     0 occurrence(s)
+
+=== unknown ids ===
+  /investigations/NOPE       404
+  /gap/NOPE                  404
+
+=== FRESH PATH — arbitrary URL, no research provider ===
+  create: {"investigationId":"XRAY-0abd35be-d3d0-4fe6-8516-0cb8e89e8840","latestCommittedVersion":null,"submission":{"sourceUrl":"https://example.org/a-source-xray-has-never-seen","createdAt":"2026-09-21T10:32:55.180Z"}}
+  execute: status=GATE_BLOCKED committedVersion=None stageRuns=10
+  progress page: 200
+    ok   present: Research capability unavailable
+    ok   present: Scheduled and did not run
+    ok   present: no version committed
+    ok   present: no evidence was gathered
+    ok   present: says nothing about the submitted source
+    ok   absent : Inside Ruto
+    ok   absent : Repetition is not corroboration
+
+  committed versions for the fresh investigation:
+    0
