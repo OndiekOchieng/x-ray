@@ -155,3 +155,28 @@ command overtaken while it waited would apply a decision that was sound when
 made and stale when applied, producing a history that reads past its own close.
 Every command therefore locks the request row first, re-reads the history, and
 runs every lifecycle-dependent check on that read before appending.
+
+---
+
+## Amendment — a response may follow a close
+
+**Recorded:** 2026-09-21 · #10 slice 10c
+
+The consequence above — that `CLOSED` says nothing about whether the
+institution answered — has a converse this ADR did not state: a response may
+arrive *after* closure, and must be recordable.
+
+`CLOSE` is administrative. It records that the operator stopped chasing, not a
+claim that no further external event can occur. Refusing a late reply would
+make X-Ray's history less true than the world's, so recording a received
+response is the one act permitted on a closed request. Revise, export, submit,
+acknowledge and a second close all stay refused.
+
+Recording one appends no lifecycle event, so nothing is reopened, and
+`deriveStatus` keeps `CLOSED` because closure is still where the operator left
+it. Reopening remains undesigned; this is not a transition in disguise.
+
+Correspondingly, a response requires a request that was actually **filed** —
+at least one `SUBMIT`. `EXPORTED ≠ SUBMITTED` applies to the receiving end too:
+without that rule a document found by other means could acquire ATI provenance
+because a draft existed.

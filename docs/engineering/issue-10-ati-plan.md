@@ -197,6 +197,19 @@ zero, one and many intakes across cases; no intake becomes a `Source` without an
 execution run; `receivedSourceIds` is populated only from accepted canonical
 sources.
 
+**Delivered 2026-09-21** — `ATIActionService.recordResponseReceived`,
+migration `0012_ati_intake_digest_provenance`, `pnpm check:ati-responses`
+25/25.
+
+Two semantics were made explicit at release: a response requires a request that
+was actually `SUBMIT`ted, and a response may arrive after an administrative
+`CLOSE` without reopening it (derived status stays `CLOSED`). One boundary was
+tightened: durable intake state is identity + arrival metadata + optional
+digest, and 10c does **not** add a document store — the material reaches
+research explicitly in 10d against the intake identity, with digest matching
+where available. So `response/intake ≠ Source ≠ Evidence` holds structurally,
+and `acceptIntakeSource` stays unexposed to any application command.
+
 ---
 
 ## 10d — The research bridge

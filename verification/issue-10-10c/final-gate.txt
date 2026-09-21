@@ -1,0 +1,82 @@
+Slice 10c final gate.
+
+=== pnpm check:ati-responses (10c) ===
+ok    1 · a response to a request that does not exist is rejected
+ok    2 · a DRAFT request cannot receive an ATI response
+ok    3 · an EXPORTED but unsubmitted request cannot receive an ATI response
+ok    4 · a SUBMITTED request receives a response with no prior acknowledgement
+ok    5 · an ACKNOWLEDGED request receives a response
+ok    6 · a response after CLOSE is recorded, and the status stays CLOSED
+ok    7 · a late response permits nothing else on a closed request
+ok    8/9 · PARTIAL and FINAL are preserved exactly as stated
+ok    10 · completeness is required, never defaulted, and UNSTATED is a choice
+ok    11/12/13 · zero, one and several records are all valid responses
+ok    14 · several responses may accumulate on one request, partial then later
+ok    15 · intake identity is X-Ray-owned and never a filename
+ok    16 · neither the intake table nor the read model can hold a Source id
+ok    17/24 · no response created a Source, Evidence, Finding or version
+ok    18 · receivedSourceIds stays empty until research accepts something
+ok    19 · a response stamped before the submission it answers is rejected
+ok    20 · a record stamped before the response that carried it is rejected
+ok    21 · the response command decides under the request lock
+ok    22 · authorization and chronology come from post-lock state
+ok    23 · a response and all of its records are written atomically
+ok    25 · the read model separates what arrived from what research accepted
+ok    26 · no application command exposes intake acceptance
+ok    D1 · migration 0012 round-trips, and the database holds the digest shape
+ok    D2 · a digest arrives with its provenance, computed where possible
+ok    D3 · a stated digest is never silently upgraded, and a wrong one is refused
+
+25/25 ATI response checks passed
+
+=== pnpm check:ati-commands (10b) ===
+
+32/32 ATI command checks passed
+
+=== pnpm check:ati-lifecycle (10a) ===
+28/28 passed
+
+
+=== regression sweep ===
+check:fixtures                             PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:validation                           PASS  52/52 passed
+check:query                                PASS  56/56 passed
+check:review                               PASS  32/32 passed
+check:acceptance                           PASS  32/32 passed
+check:pipeline                             PASS  54/54 passed
+check:adapters                             PASS  45/45 passed
+check:replay                               PASS  6d replay: 21/21 passed; COMPLETED; BLOCKED; 13 journal entries
+check:source-position                      PASS  14a: contextual positions, T1/T2, Evidence basis and orthogonal provenance PASS
+check:source-position-pipeline             PASS  14b: TRACE retry identity, PROVENANCE revision, orthogonal lineage PASS
+check:source-position-review               PASS  14c: characterization, agency, retrospective intent, falsifier, and revision history pass
+check:persistence-schema                   PASS  
+check:source-position-schema               PASS  15a schema: 29/29 checks passed
+check:persistence-roundtrip                PASS  15b: explicitly present empty membership round-trip PASS
+check:persistence-versioning               PASS  7c: stale expected predecessor conflicts without overwrite PASS
+check:source-position-versioning           PASS  15c: stale predecessor rejects without partial v2 change PASS
+check:persistence-workspace                PASS  7d-a: resumed run skips success, retains failure, clears stale/capability/stop, preserves ident
+check:persistence-audit                    PASS  7d-b: missing ReviewerModel remains NOT_EVALUATED and capability-incomplete PASS
+check:persistence-ati                      PASS  7d-d ATI: version-scoped eligible origin, invalid references, lifecycle isolation PASS
+check:persistence-durable-integration      PASS  7d-d: restart → resume → gates → audit → graduation → commit; failed run stays uncomm
+check:persistence-graduation               PASS  7c: stale expected predecessor conflicts without overwrite PASS
+check:investigation-service                PASS  8a: owner-scoped run/candidate reads; exact v1/v2 snapshots; ordered history/latest pointer PAS
+check:inline-execution                     PASS  8b: the surface Source appears only from actual INGEST output PASS
+check:api-routes                           PASS  23/23 passed
+check:lifecycle                            PASS  21/21 passed
+check:publication                          PASS  26/26 passed
+check:public-resolver                      PASS  25/25 passed
+check:public-routes                        PASS  31/31 passed
+check:public-library                       PASS  25/25 passed
+check:version-lineage                      PASS  15/15 passed
+check:benchmark-corpus                     PASS  benchmark corpus: 12 cases, 1 executable fixture(s), registry integrity PASS
+
+check:persistence-postgres-concurrency     NOT RUN — XRAY_POSTGRES_URL is unset
+
+=== tsc --noEmit ===
+clean
+
+=== pnpm build ===
+○  (Static)             prerendered as static content
+◐  (Partial Prerender)  prerendered as static HTML with dynamic server-streamed content
+ƒ  (Dynamic)            server-rendered on demand
+

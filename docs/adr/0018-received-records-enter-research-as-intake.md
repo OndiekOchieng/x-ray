@@ -105,3 +105,50 @@ without provenance or review has not been researched, whoever sent it.
 
 This ADR fixes the intake boundary. It authorises no schema, command, route or
 runtime change.
+
+---
+
+## Amendment — receipt identity and integrity, without a document store
+
+**Recorded:** 2026-09-21 · #10 slice 10c
+
+This ADR said what an intake is *not*. Implementing the response command forced
+the question of what it durably *is*, and the honest answer is smaller than it
+looks.
+
+**Durable intake state is identity + arrival metadata + optional digest.** No
+body, no file, no bounded content. X-Ray has no raw-document store, and 10c
+deliberately did not invent one behind this boundary — ADR-0010 already treats
+retrieved content crossing into research as bounded execution material rather
+than canonical state, and a record delivered by a ministry is no different for
+having been formally requested.
+
+The material therefore reaches research **explicitly**, in 10d, named against
+the intake identity recorded here. That bridge must load the durable intake,
+verify the supplied material corresponds to it, require a digest match where a
+digest exists, and refuse to research material that cannot be tied to that
+intake. Receipt identity and integrity without pretending to retention
+infrastructure that does not exist.
+
+**Intake identity is X-Ray's.** A caller describes what arrived — usually a
+filename — and the command allocates `intakeId` under the request lock. A
+filename is not identity: two institutions both send `scan.pdf`.
+
+**A digest carries its provenance.** `content_hash_origin` is `COMPUTED` when
+X-Ray hashed content it actually held, `SUPPLIED` when somebody else stated the
+digest. The distinction is not bookkeeping: "the digest matches" means something
+different in each case, and without the column a stated digest would be
+silently readable as a verified one. Where content is available the command
+computes and prefers its own; where both exist they must agree, and a
+disagreement is a discrepancy to surface rather than something to overwrite.
+
+**Digest equality is not epistemic identity.** Two copies of one document from
+two offices are two received records. Identical bytes say nothing about whether
+the second arrival is the same event, and nothing at all about what either
+shows. Deciding that two records are the same record is a research judgment,
+not a hash comparison.
+
+**And still: response received ≠ Source created.** Nothing in the response
+command writes a canonical id. `receivedSourceIds` stays empty until research
+commits a version that introduced a source, and no application command exposes
+the acceptance bridge — an operator cannot declare an intake to be `SRC-123`.

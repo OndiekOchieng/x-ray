@@ -142,6 +142,46 @@ it names — a submission before its export, an export before the revision it
 freezes, an acknowledgement before the submission it presupposes. No attempt is
 made at global wall-clock truth.
 
+### A response is the one thing that may follow a close
+
+**Recorded 2026-09-21 · #10 slice 10c.** Every other act is refused after
+`CLOSE`. Recording a response is not, and the distinction is deliberate.
+
+Closure is administrative. It records that the operator stopped chasing — not a
+claim that no further external event can occur. A ministry can reply after the
+thread was closed, and that reply is a fact that happened outside X-Ray.
+Refusing to record it would make the system's history less true than the world's.
+
+So:
+
+| After `CLOSE` | |
+| --- | --- |
+| revise, export, submit, acknowledge, second close | refused |
+| record a received response | **allowed** |
+
+Recording one changes nothing about the request's administrative state:
+
+- no lifecycle event is appended, so nothing is reopened;
+- derived status stays `CLOSED`, because closure is still where the operator
+  left it;
+- the response is visible in history and may later enter research.
+
+This is not a hidden reopen transition. Reopening remains undesigned.
+
+A late response may also be stamped *before* the close: it genuinely arrived
+then and was entered later. Sequence stays authoritative, and the only
+chronology refused is a response predating the submission it answers.
+
+### A response requires a request that was actually filed
+
+At least one `SUBMIT` must exist. A `DRAFT` or `EXPORTED` request cannot receive
+an ATI response, which is `EXPORTED ≠ SUBMITTED` applied to the receiving end:
+without it, a document found by other means could acquire ATI provenance
+because a draft happened to exist. Material that arrived through another channel
+belongs on the normal research/retrieval path.
+
+An acknowledgement is not required — institutions answer without one.
+
 ### A transition is decided and applied under one lock
 
 Requests are `UNIQUE (investigation_id, ordinal)` and every revision, event and
@@ -216,6 +256,53 @@ none new.
 responses — never intake identifiers, and never an id minted before the source
 exists.
 
+### Identity, integrity, and what is not stored
+
+**Recorded 2026-09-21 · #10 slice 10c.**
+
+**Identity is X-Ray's.** A caller may describe what arrived — usually a
+filename — but `intakeId` is allocated by the command under the request lock. A
+filename is not identity: two institutions both send `scan.pdf`.
+
+**Nothing that arrived is retained.** X-Ray has no durable raw-document store
+and 10c deliberately did not invent one. Durable intake state is:
+
+```text
+identity + arrival metadata + optional digest
+```
+
+No body, no file, no bounded content. ADR-0010 already treats retrieved content
+crossing into research as bounded execution material rather than canonical
+state, and this is the same rule applied to a received record.
+
+The material therefore reaches research explicitly in 10d, named against this
+intake identity, which must:
+
+1. load the durable intake;
+2. verify the supplied material corresponds to it;
+3. require a digest match where a digest exists;
+4. refuse to research material that cannot be tied to that intake.
+
+**A digest carries its provenance.**
+
+| `content_hash_origin` | Means |
+| --- | --- |
+| `COMPUTED` | X-Ray hashed content it actually held at receipt time |
+| `SUPPLIED` | Somebody else stated the digest. Recorded as their claim |
+
+The distinction exists because "the digest matches" means something different
+in each case, and a stated digest must never be silently readable as a verified
+one. Where content is available the command computes the digest and prefers it;
+where both exist they must agree, and a disagreement is a discrepancy to
+surface rather than something to overwrite. Digests are normalized to
+`sha256:<64 lowercase hex>`, the database's only accepted shape — v0 is sha256
+only, and adding an algorithm is deliberately a migration.
+
+**Digest equality is not epistemic identity.** Two copies of one document from
+two offices are two received records. The same bytes arriving twice says
+nothing about whether the second arrival is the same event, and nothing at all
+about what either shows.
+
 ---
 
 ## Re-evaluation
@@ -257,6 +344,9 @@ The action surface reports recorded events and interprets none of them
 | Custody inferred | The institution is the confirmed holder |
 | Request closed | The gap is resolved |
 | Response received | The claim is established |
+| Response recorded | The response was complete |
+| Record received | A `Source` exists |
+| Digest stated | The digest was verified |
 
 An ATI draft is generated prose and sits below the projection boundary with
 share cards, bound by responsible sharing: an unresolved gap must not become an
