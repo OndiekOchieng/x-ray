@@ -42,7 +42,7 @@
 import type { Investigation, IsoDateTime, ResearchStage } from '@/lib/xray/domain'
 import type { RevisionRequest } from '@/lib/xray/review'
 import type { XRayGraph, XRayGraphInput } from '@/lib/xray/selectors'
-import { validateXRayGraph, type ValidationResult } from '@/lib/xray/validation'
+import { validateXRayGraph, type ValidationResult, type ViolationCode } from '@/lib/xray/validation'
 import {
   appendReviewRound,
   emptyReviewHistory,
@@ -101,6 +101,26 @@ export interface RunOptions {
   adapters?: StageAdapters
   /** Affirmative research-stop observation. No observation means no inferred saturation. */
   stopEvidence?: StopEvidence
+  /**
+   * This run re-researches an already-committed version.
+   *
+   * Declared, never inferred. It permits exactly one piece of staged debt —
+   * see `isStagedDebt` — and nothing else about the run changes.
+   *
+   * A successor candidate is seeded with the predecessor's *graded* findings.
+   * The moment a pre-`GRADE` stage adds evidence bearing on one of those
+   * claims, the inherited finding stops mirroring `Evidence.relationship`, and
+   * no stage before `GRADE` can repair it because none of them owns `findings`.
+   * Without this flag, adding evidence to an already-graded investigation is
+   * unrepresentable: `TRACE` fails on the mismatch it just created, and if
+   * `TRACE` were exempted alone `PROVENANCE` would fail on the same inherited
+   * mismatch one stage later.
+   *
+   * A first research run must not set this. It has no graded findings to owe
+   * anything against, so the flag would grant it licence it cannot need.
+   */
+  successorReevaluation?: boolean
+
   /** Route a blocking reviewer request through its target and later stages. */
   revision?: RevisionRequest
   /** Prior rounds are retained across revisions. */
@@ -244,6 +264,55 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
   // Computed after invalidation: a stage marked stale must not count as done.
   const alreadyDone = new Set(journal.succeededStages())
 
+  /**
+   * Whether a staged violation is debt this exact boundary is allowed to carry.
+   *
+   * D9's rule is that a stage owns the legality of what it produced, and it
+   * stays that way: these are the only two cases where a stage may leave an
+   * error standing, both of them because the stage that will repair it has not
+   * had its turn yet, and both bounded so the debt cannot outlive that turn.
+   *
+   * Nothing here weakens a validator. `validateXRayGraph` reports both
+   * violations in both modes, unchanged; this is a rule about *when a
+   * transition is acceptable*, and the `VALIDATE` gate's FULL pass sees the
+   * final state with no exemption at all.
+   */
+  const isStagedDebt = (stage: ResearchStage, code: ViolationCode): boolean => {
+    /*
+     * 6a · GRADE cannot attach a gap GAPS has not identified yet.
+     *
+     * `Finding.gapIds` is a back-reference and GAPS is stage 9, so between
+     * GRADE and GAPS an unresolved finding necessarily names no gap.
+     */
+    if (stage === 'GRADE' && journal.staleStages().includes('GAPS') &&
+        code === 'XR-INV-008/UNRESOLVED_FINDING_WITHOUT_GAP') return true
+
+    /*
+     * 10d · a pre-GRADE evidence change during a successor re-evaluation.
+     *
+     * Bounded on every side, and each bound is load-bearing:
+     *
+     *   successor re-evaluation only — a first run has no graded findings to
+     *     owe against, so it can never claim this;
+     *   before GRADE only — GRADE itself gets no exemption, which is what
+     *     makes it fail if it does not repair the finding;
+     *   GRADE scheduled and still to run — if GRADE is omitted from the plan,
+     *     or already done and not being redone, nothing will repair the debt
+     *     and it is not debt, it is a defect;
+     *   this one code only — every other violation still fails the stage that
+     *     introduced it.
+     *
+     * So the debt exists from the first pre-GRADE evidence change until GRADE
+     * takes its turn, and not one boundary longer.
+     */
+    if (code === 'XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH' &&
+        options.successorReevaluation === true &&
+        RESEARCH_STAGES.indexOf(stage) < RESEARCH_STAGES.indexOf('GRADE') &&
+        byStage.has('GRADE') && !alreadyDone.has('GRADE')) return true
+
+    return false
+  }
+
   // -------------------------------------------------------------------------
   // Research stages
   // -------------------------------------------------------------------------
@@ -312,11 +381,7 @@ export async function runPipeline(options: RunOptions): Promise<PipelineRunResul
         // D9 — the stage owns the legality of what it produced.
         const staged = validateXRayGraph(accumulator.rebuild(), { mode: 'STAGED' })
         const transitionErrors = staged.violations.filter((v) =>
-          v.severity === 'ERROR' && !(
-            stage === 'GRADE' && journal.staleStages().includes('GAPS') &&
-            v.code === 'XR-INV-008/UNRESOLVED_FINDING_WITHOUT_GAP'
-          ),
-        )
+          v.severity === 'ERROR' && !isStagedDebt(stage, v.code))
         if (transitionErrors.length > 0) {
           throw new PipelineContractError(
             `stage ${stage} introduced ${transitionErrors.length} validation error(s): ` +

@@ -212,6 +212,9 @@ export class InlineExecutionService {
 
     await runPipeline({ investigation, stages: plan.stages,
       adapters: plan.adapters, stopEvidence: plan.stopEvidence, maxAttempts: plan.maxAttempts,
+      // This candidate carries the predecessor's graded findings, so a
+      // pre-GRADE evidence change owes GRADE a repair. See `isStagedDebt`.
+      successorReevaluation: true,
       resume: { accumulator, journal, ledger }, clock: this.clock,
       onBoundary: (boundary) => this.checkpoint(executionRunId, startedAt, boundary) })
 

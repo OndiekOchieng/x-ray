@@ -134,6 +134,45 @@ Every material finding MUST record:
 
 A conclusion that cannot describe how it could be overturned is invalid.
 
+> ### Amendment — bounded staged debt during successor re-evaluation
+>
+> **Recorded:** 2026-09-21 · #10 slice 10d
+>
+> The validator is unchanged. Both `STAGED` and `FULL` still report
+> `XR-INV-007/FINDING_EVIDENCE_LIST_MISMATCH` as an `ERROR`, and the `VALIDATE`
+> gate's FULL pass sees the final state with no exemption at all.
+>
+> What changed is a **pipeline transition rule**. A successor candidate is
+> seeded with the predecessor's already-graded findings. The moment a
+> pre-`GRADE` stage adds evidence bearing on one of those claims, the inherited
+> finding stops mirroring `Evidence.relationship` — and no stage before `GRADE`
+> can repair it, because `STAGE_OUTPUTS` gives `findings` to `GRADE` and `GAPS`
+> only. Before this amendment, adding evidence to an already-graded
+> investigation was unrepresentable: `TRACE` failed on the mismatch it had just
+> created, for every re-evaluation trigger and not only ATI.
+>
+> So `runPipeline` permits that one mismatch as explicit debt, bounded on every
+> side:
+>
+> | Bound | |
+> | --- | --- |
+> | successor re-evaluation only | a first run has no graded findings to owe against |
+> | before `GRADE` only | `GRADE` itself gets no exemption |
+> | `GRADE` scheduled and still to run | nothing to repair it means it is a defect, not debt |
+> | this one code only | every other violation still fails its stage |
+>
+> The debt therefore exists from the first pre-`GRADE` evidence change until
+> `GRADE` takes its turn, and not one boundary longer. If `GRADE` does not
+> repair the finding, `GRADE` fails.
+>
+> This is the second such exemption, and it is deliberately the same shape as
+> the first: 6a already permits `GRADE` to leave
+> `XR-INV-008/UNRESOLVED_FINDING_WITHOUT_GAP` standing while `GAPS` is still
+> pending. Both say the same thing — a stage may not be failed for debt the
+> stage that will pay it has not yet had a turn to pay.
+>
+> Both live in one predicate, `isStagedDebt` in `pipeline/run.ts`.
+
 ---
 
 ## XR-INV-008 — Gap Preservation
