@@ -16,9 +16,12 @@ node_modules
 
 # --- Repository hygiene (added at baseline; nothing else in the scaffold was modified) ---
 
-# Environment variables (broadened: plain .env would otherwise be committable)
+# Environment variables (broadened: plain .env would otherwise be committable,
+# and .envrc is where direnv users keep exported provider keys)
 .env
 .env.*
+.env*
+.envrc
 
 # Credentials / keys
 *.pem

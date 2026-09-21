@@ -1,0 +1,39 @@
+=== pnpm check:providers ===
+ok    1 · an empty environment selects no provider
+ok    2 · an Anthropic research selection with no model id is incomplete
+ok    3 · an Anthropic reviewer selection with no model id is incomplete
+ok    4 · a retrieval selection requires no model id
+ok    5/6/7 · an unknown provider is rejected in every slot, and named
+ok    8/9 · the slots may name different providers and different models
+ok    9b · the provider name never implies a model id
+ok    10 · a missing secret is reported by name, never by value
+ok    10b · a present secret never appears in a result, description or error
+ok    11 · a provider that cannot be honoured never becomes another one
+ok    12 · factories return the existing ports and nothing else
+ok    13 · no provider import or provider setting reaches any other layer
+ok    13b · provider selectors and model ids never enter canonical state
+ok    15 · 20a registers no execution runtime, so the unconfigured path stands
+ok    14/§5 · no provider secret can be committed, and none has been
+ok    stop line · no provider HTTP, SDK, prompt or model call exists yet
+
+16/16 provider composition checks passed
+
+=== resolution states, host boundary ===
+
+this machine (process.env, unmodified)
+  research  NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  reviewer  NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  retrieval NOT_SELECTED              No provider is selected for this slot, so the run has no capability for it.
+  fully available: false
+
+a fully configured Anthropic deployment
+  research  NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
+  reviewer  NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
+  retrieval NOT_IMPLEMENTED           Provider "anthropic" is registered and configured, but no adapter for it is implemented yet.
+  fully available: false
+
+the same, with the key removed
+  research  CONFIGURATION_INCOMPLETE  Provider "anthropic" is selected but ANTHROPIC_API_KEY is not set.
+  reviewer  CONFIGURATION_INCOMPLETE  Provider "openai" is selected but OPENAI_API_KEY is not set.
+  retrieval NOT_IMPLEMENTED           Provider "custom" is registered and configured, but no adapter for it is implemented yet.
+  fully available: false
