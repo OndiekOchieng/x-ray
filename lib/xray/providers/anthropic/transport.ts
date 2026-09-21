@@ -24,6 +24,13 @@
  * on material that was actually fine. This is still validated afterwards: a
  * declared schema is a request, not a guarantee.
  *
+ * CLASSIFICATION READS TYPES AND HEADERS, NOT PROSE
+ * ================================================
+ * `classifyHttpFailure` prefers the HTTP status, the documented `error.type`,
+ * and documented headers. A message is prose that can quote the request, and
+ * the request carries the material under investigation — so exactly one
+ * condition reads one, under two guards. See `isSpendLimit`.
+ *
  * NO RETRY HERE
  * =============
  * `runPipeline` already retries `TRANSIENT` adapter failures and refuses to
@@ -240,116 +247,250 @@ function readEnvelope(
 // ---------------------------------------------------------------------------
 
 /**
- * Map an HTTP failure onto the vocabulary that already exists.
+ * The documented error types. Classification reads these first.
  *
- * The three-way split is the substance of this file:
+ * Preferring the type over the message is not a style choice: a message is
+ * prose that can quote the request, and the request carries the material under
+ * investigation. A type is a short closed-vocabulary token the provider chose.
+ */
+type AnthropicErrorType =
+  | 'invalid_request_error'
+  | 'authentication_error'
+  | 'permission_error'
+  | 'billing_error'
+  | 'not_found_error'
+  | 'request_too_large'
+  | 'rate_limit_error'
+  | 'timeout_error'
+  | 'api_error'
+  | 'overloaded_error'
+
+const ERROR_TYPES = [
+  'invalid_request_error', 'authentication_error', 'permission_error', 'billing_error',
+  'not_found_error', 'request_too_large', 'rate_limit_error', 'timeout_error',
+  'api_error', 'overloaded_error',
+] as const satisfies readonly AnthropicErrorType[]
+
+type UncoveredErrorType = Exclude<AnthropicErrorType, (typeof ERROR_TYPES)[number]>
+const _errorTypesExhaustive: UncoveredErrorType extends never ? true : never = true
+void _errorTypesExhaustive
+
+/** What the operator would change to resolve a billing or spend condition. */
+const RESOLVE_BILLING =
+  'Add credit to the Anthropic account, or raise the organization/workspace spend limit,'
+  + ' then re-run the stage.'
+
+/**
+ * Map a failure onto the vocabulary that already exists.
+ *
+ * Three outcomes, in the order the signals are trustworthy:
+ *
+ *   1. HTTP status, where the status alone is decisive (401, 402, 403, 404, 413).
+ *   2. The documented `error.type`.
+ *   3. Documented headers — `retry-after` is what separates ordinary rate
+ *      limiting from a spend cap, because both carry `rate_limit_error`.
+ *   4. The `error.message`, and only when it is demonstrably the provider
+ *      speaking rather than our own request echoed back.
+ *
+ * And the three destinations:
  *
  *   CapabilityUnavailable  the operator must change configuration or budget.
  *                          The run reports CAPABILITY_BLOCKED, which is
  *                          #20 boundary 6 and #6's amendment working as built.
  *   TRANSIENT              worth another attempt; `runPipeline` makes it.
  *   PERMANENT              not worth another attempt; `runPipeline` stops.
- *
- * An invalid key and an absent key are the same fault with different
- * spellings, so 401/403 is configuration rather than failure. A model id that
- * does not exist is configuration too — not a broken provider.
  */
 function classifyHttpFailure(
   request: MessagesRequest, response: Response, body: string,
   requestId: string | undefined,
 ): MessagesOutcome {
   const status = response.status
-  const errorType = readErrorType(body)
+  const error = readError(body)
   const where = requestId === undefined ? '' : ` (request ${requestId})`
+  const label = error.type === undefined ? `HTTP ${status}` : `HTTP ${status} (${error.type})`
 
-  // Configuration the operator must fix. Never the key's value, and never the
-  // provider's message, which may quote the request.
-  if (status === 401 || status === 403) {
-    return {
-      kind: 'CAPABILITY',
-      value: unavailable(
-        request.operation, 'NOT_CONFIGURED',
-        `Anthropic rejected the credential for this deployment (HTTP ${status})${where}.`,
-        RESOLVE_CONFIG,
-      ),
+  const capability = (
+    reason: 'NOT_CONFIGURED' | 'EXHAUSTED' | 'REFUSED_FOR_INPUT',
+    detail: string, resolvedBy: string,
+  ): MessagesOutcome => ({
+    kind: 'CAPABILITY',
+    value: unavailable(request.operation, reason, detail, resolvedBy),
+  })
+
+  // --- 1. statuses that decide on their own ------------------------------
+
+  // An invalid credential and an absent one are the same fault with different
+  // spellings, so authentication is configuration rather than failure.
+  if (status === 401 || status === 403 || error.type === 'authentication_error'
+    || error.type === 'permission_error') {
+    return capability('NOT_CONFIGURED',
+      `Anthropic rejected the credential or its permissions for this deployment (${label})${where}.`,
+      RESOLVE_CONFIG)
+  }
+
+  // 402 billing_error is the documented payment condition. No amount of
+  // waiting inside this run resolves it, so it is a capability gap.
+  if (status === 402 || error.type === 'billing_error') {
+    return capability('EXHAUSTED',
+      `The Anthropic account cannot be billed for this call (${label})${where}.`,
+      RESOLVE_BILLING)
+  }
+
+  if (status === 404 || error.type === 'not_found_error') {
+    return capability('NOT_CONFIGURED',
+      `Anthropic has no model "${request.modelId}" for this deployment (${label})${where}.`,
+      RESOLVE_CONFIG)
+  }
+
+  if (status === 413 || error.type === 'request_too_large') {
+    return capability('REFUSED_FOR_INPUT',
+      `Anthropic refused this input as too large (${label})${where}.`,
+      'Reduce the material offered to this stage, or split the work.')
+  }
+
+  // --- 2. rate limiting, split on the documented header ------------------
+
+  /*
+   * Both forms carry `rate_limit_error`, so the type cannot separate them.
+   * Ordinary rate limiting is documented as carrying `retry-after`; the
+   * usage-tier / monthly spend-cap form is documented as lacking it and as
+   * continuing to fail until access resumes.
+   *
+   * So a 429 without `retry-after` is treated as a spend cap. The tradeoff is
+   * stated in the report: a proxy that strips the header downgrades a
+   * retryable limit to a disclosed capability gap, which is recoverable and
+   * visible. The opposite mistake — retrying a spend cap until the stage
+   * exhausts its attempts — reports a billing state as a broken investigation.
+   */
+  if (status === 429 || error.type === 'rate_limit_error') {
+    const retryAfter = response.headers.get('retry-after')
+    if (retryAfter !== null && retryAfter.trim() !== '') {
+      throw new AdapterFailure(request.operation, 'TRANSIENT',
+        `Anthropic rate-limited this request (${label})${where}.`
+        + ` It may succeed after ${retryAfter.trim()} seconds.`)
     }
+    return capability('EXHAUSTED',
+      `Anthropic returned a rate limit with no retry-after (${label})${where},`
+      + ' which is the documented shape of a usage-tier or spend cap rather than'
+      + ' ordinary rate limiting.',
+      RESOLVE_BILLING)
   }
 
-  if (status === 404) {
-    return {
-      kind: 'CAPABILITY',
-      value: unavailable(
-        request.operation, 'NOT_CONFIGURED',
-        `Anthropic has no model "${request.modelId}" for this deployment (HTTP 404)${where}.`,
-        RESOLVE_CONFIG,
-      ),
-    }
+  // --- 3. retryable service failures -------------------------------------
+
+  // 500, 504 and 529 are documented as retryable; the rest of 5xx behaves the
+  // same way, and 408/409 are transport-shaped rather than request-shaped.
+  if (status >= 500 || status === 408 || status === 409
+    || error.type === 'api_error' || error.type === 'overloaded_error'
+    || error.type === 'timeout_error') {
+    throw new AdapterFailure(request.operation, 'TRANSIENT',
+      `Anthropic returned ${label}${where}. The request may succeed on another attempt.`)
   }
 
-  // Spent budget is not a rate limit: no amount of waiting inside this run
-  // restores it, so it is a capability gap rather than a transient failure.
-  if (isBudgetExhausted(status, errorType, body)) {
-    return {
-      kind: 'CAPABILITY',
-      value: unavailable(
-        request.operation, 'EXHAUSTED',
-        `The Anthropic account has no remaining budget for this call (HTTP ${status})${where}.`,
-        'Add credit to the Anthropic account, or raise its limit, and re-run the stage.',
-      ),
-    }
+  // --- 4. a 400 that is really a spend limit -----------------------------
+
+  /*
+   * An organization or workspace spend limit arrives as a 400
+   * `invalid_request_error`, and the message is the only signal. That makes
+   * this the one place a message is read at all — and it is read under two
+   * conditions, because the alternative is letting investigated material
+   * decide how a failure is classified.
+   */
+  if (status === 400 && isSpendLimit(error, request)) {
+    return capability('EXHAUSTED',
+      `Anthropic reported a spend limit for this organization or workspace (${label})${where}.`,
+      RESOLVE_BILLING)
   }
 
-  // A rate limit *is* transient, and the pipeline's retry is the right place
-  // for it — so it stays a failure rather than becoming a capability gap.
-  if (status === 429 || status === 408 || status === 409 || status >= 500) {
-    throw new AdapterFailure(
-      request.operation, 'TRANSIENT',
-      `Anthropic returned HTTP ${status}${errorType === undefined ? '' : ` (${errorType})`}`
-      + `${where}. The request may succeed on another attempt.`,
-    )
-  }
+  throw new AdapterFailure(request.operation, 'PERMANENT',
+    `Anthropic returned ${label}${where}. The request will not succeed unchanged.`)
+}
 
-  if (status === 413 || status === 422) {
-    return {
-      kind: 'CAPABILITY',
-      value: unavailable(
-        request.operation, 'REFUSED_FOR_INPUT',
-        `Anthropic refused this input (HTTP ${status})${where}.`,
-        'Reduce the material offered to this stage, or split the work.',
-      ),
-    }
-  }
-
-  throw new AdapterFailure(
-    request.operation, 'PERMANENT',
-    `Anthropic returned HTTP ${status}${errorType === undefined ? '' : ` (${errorType})`}`
-    + `${where}. The request will not succeed unchanged.`,
-  )
+interface ProviderError {
+  readonly type?: AnthropicErrorType
+  /** Present only when it is short enough to be a statement rather than an echo. */
+  readonly message?: string
 }
 
 /**
- * The provider's error *type*, never its message.
+ * The provider's error, read conservatively.
  *
- * A provider message can echo the request, and the request carries the
- * material under investigation. Reading only the type keeps a journal entry
- * from quoting a claim back at the operator — or worse, back into a diagnostic
- * that outlives the run.
+ * The type is kept only when it is one of the documented values: an
+ * unrecognised type is treated as absent rather than as something to branch
+ * on. The message is kept only when it is short — a billing statement is a
+ * sentence, and anything longer is far more likely to be our own request
+ * quoted back.
  */
-function readErrorType(body: string): string | undefined {
+function readError(body: string): ProviderError {
+  let parsed: { error?: { type?: unknown; message?: unknown } }
   try {
-    const parsed = JSON.parse(body) as { error?: { type?: unknown } }
-    const type = parsed.error?.type
-    return typeof type === 'string' ? type : undefined
-  } catch { return undefined }
+    parsed = JSON.parse(body) as typeof parsed
+  } catch {
+    return {}
+  }
+
+  const rawType = parsed.error?.type
+  const type = typeof rawType === 'string'
+    && (ERROR_TYPES as readonly string[]).includes(rawType)
+    ? rawType as AnthropicErrorType
+    : undefined
+
+  const rawMessage = parsed.error?.message
+  const message = typeof rawMessage === 'string' && rawMessage.length <= MAX_MESSAGE_LENGTH
+    ? rawMessage
+    : undefined
+
+  return { ...(type === undefined ? {} : { type }), ...(message === undefined ? {} : { message }) }
 }
 
-/** Whether the body says the account is out of budget rather than too fast. */
-function isBudgetExhausted(status: number, errorType: string | undefined, body: string): boolean {
-  if (status !== 400 && status !== 402 && status !== 429) return false
-  if (errorType === 'insufficient_quota') return true
-  // Anthropic reports a spent balance as a 400 invalid_request_error. The
-  // phrase is the only signal available, so it is matched narrowly.
-  return /credit balance is too low|insufficient (?:credit|funds|quota)/i.test(body)
+/** Longer than any documented billing statement, shorter than an echoed request. */
+const MAX_MESSAGE_LENGTH = 400
+
+const SPEND_LIMIT_PHRASES = [
+  /credit balance is too low/i,
+  /(?:organization|workspace|monthly)[^.]{0,40}spend limit/i,
+  /spend limit[^.]{0,40}(?:reached|exceeded)/i,
+  /insufficient (?:credit|credits|funds|quota)/i,
+] as const
+
+/**
+ * Whether a 400 is a spend limit, decided without letting the material decide.
+ *
+ * Two guards, because a phrase match alone is exploitable: a provider error
+ * message can quote the request, and an investigation into a utility's billing
+ * would put "credit balance is too low" straight into the material. Treating
+ * that as a spend limit would let the subject of an investigation control how
+ * its own research run is classified.
+ *
+ *   1. The message must be short enough to be a statement (`readError`).
+ *   2. The message must not contain anything we sent. If any run of
+ *      `ECHO_WINDOW` characters from the message also appears in the request,
+ *      the message is an echo and is not read at all.
+ */
+function isSpendLimit(error: ProviderError, request: MessagesRequest): boolean {
+  const message = error.message
+  if (message === undefined) return false
+  if (error.type !== undefined && error.type !== 'invalid_request_error') return false
+  if (echoesRequest(message, request)) return false
+  return SPEND_LIMIT_PHRASES.some((phrase) => phrase.test(message))
+}
+
+const ECHO_WINDOW = 24
+
+/**
+ * Whether a message contains a run of characters we sent.
+ *
+ * Deliberately cheap and deliberately eager: a false positive here only means
+ * a genuine billing message is classified `PERMANENT` instead of `EXHAUSTED` —
+ * disclosed either way — while a false negative would let echoed material
+ * steer classification.
+ */
+function echoesRequest(message: string, request: MessagesRequest): boolean {
+  const sent = `${request.userContent}\n${request.system}`
+  for (let start = 0; start + ECHO_WINDOW <= message.length; start += 8) {
+    if (sent.includes(message.slice(start, start + ECHO_WINDOW))) return true
+  }
+  return false
 }
 
 async function bodyText(response: Response): Promise<string> {

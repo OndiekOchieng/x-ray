@@ -599,48 +599,216 @@ check('10 · a provider cannot assert what a stage owns', () => {
 // 11 — failure mapping
 // ---------------------------------------------------------------------------
 
-check('11 · HTTP failures map onto the existing vocabulary', async () => {
+check('11 · HTTP failures map onto the documented error semantics', async () => {
   const research = model()
   const act = () => research.decompose(DECOMPOSE_INPUT)
 
-  const capabilityCases: [number, unknown, UnavailableReason][] = [
-    [401, { error: { type: 'authentication_error' } }, 'NOT_CONFIGURED'],
-    [403, { error: { type: 'permission_error' } }, 'NOT_CONFIGURED'],
-    [404, { error: { type: 'not_found_error' } }, 'NOT_CONFIGURED'],
-    [400, { error: { type: 'invalid_request_error', message: 'Your credit balance is too low' } },
-      'EXHAUSTED'],
-    [413, { error: { type: 'request_too_large' } }, 'REFUSED_FOR_INPUT'],
+  const capabilityCases: [string, Reply, UnavailableReason][] = [
+    ['401 authentication_error',
+      { status: 401, body: { error: { type: 'authentication_error' } } }, 'NOT_CONFIGURED'],
+    ['403 permission_error',
+      { status: 403, body: { error: { type: 'permission_error' } } }, 'NOT_CONFIGURED'],
+    ['404 not_found_error',
+      { status: 404, body: { error: { type: 'not_found_error' } } }, 'NOT_CONFIGURED'],
+    ['402 billing_error',
+      { status: 402, body: { error: { type: 'billing_error' } } }, 'EXHAUSTED'],
+    ['413 request_too_large',
+      { status: 413, body: { error: { type: 'request_too_large' } } }, 'REFUSED_FOR_INPUT'],
   ]
-  for (const [status, body, reason] of capabilityCases) {
-    stub.script({ status, body })
-    const result = await act()
-    const capability = gapOf(result)
-    if (capability === undefined) return `HTTP ${status}: was not a capability gap`
-    if (capability.reason !== reason)
-      return `HTTP ${status}: ${capability.reason}, expected ${reason}`
+  for (const [label, reply, reason] of capabilityCases) {
+    stub.script(reply)
+    const capability = gapOf(await act())
+    if (capability === undefined) return `${label}: was not a capability gap`
+    if (capability.reason !== reason) return `${label}: ${capability.reason}, expected ${reason}`
     if (capability.resolvedBy.trim() === '')
-      return `HTTP ${status}: no resolvedBy, so an operator cannot act on it`
+      return `${label}: no resolvedBy, so an operator cannot act on it`
   }
 
-  const failureCases: [number, unknown, string][] = [
-    [429, { error: { type: 'rate_limit_error' } }, 'TRANSIENT'],
-    [500, { error: { type: 'api_error' } }, 'TRANSIENT'],
-    [529, { error: { type: 'overloaded_error' } }, 'TRANSIENT'],
-    [418, { error: { type: 'teapot' } }, 'PERMANENT'],
+  const failureCases: [string, Reply, string][] = [
+    ['500 api_error', { status: 500, body: { error: { type: 'api_error' } } }, 'TRANSIENT'],
+    ['504 gateway timeout', { status: 504, body: { error: { type: 'timeout_error' } } }, 'TRANSIENT'],
+    ['529 overloaded_error',
+      { status: 529, body: { error: { type: 'overloaded_error' } } }, 'TRANSIENT'],
+    ['418 with no documented type', { status: 418, body: { error: { type: 'teapot' } } }, 'PERMANENT'],
   ]
-  for (const [status, body, disposition] of failureCases) {
-    stub.script({ status, body })
+  for (const [label, reply, disposition] of failureCases) {
+    stub.script(reply)
     const outcome = await failure(act)
-    if (outcome === undefined) return `HTTP ${status}: did not fail`
+    if (outcome === undefined) return `${label}: did not fail`
     if (outcome.disposition !== disposition)
-      return `HTTP ${status}: ${outcome.disposition}, expected ${disposition}`
+      return `${label}: ${outcome.disposition}, expected ${disposition}`
+  }
+  return null
+})
+
+check('11b · the two forms of 429 are told apart by retry-after', async () => {
+  /*
+   * Both carry `rate_limit_error`, so the type cannot separate them. Ordinary
+   * rate limiting is documented as carrying `retry-after`; the usage-tier /
+   * spend-cap form is documented as lacking it and as continuing to fail until
+   * access resumes. Retrying the second until a stage exhausts its attempts
+   * would report a billing state as a broken investigation.
+   */
+  const research = model()
+  const act = () => research.decompose(DECOMPOSE_INPUT)
+
+  stub.script({
+    status: 429,
+    headers: { 'retry-after': '30' },
+    body: { error: { type: 'rate_limit_error' } },
+  })
+  const limited = await failure(act)
+  if (limited === undefined) return 'an ordinary rate limit did not fail'
+  if (limited.disposition !== 'TRANSIENT')
+    return `an ordinary rate limit gave ${limited.disposition}, expected TRANSIENT`
+  if (!limited.message.includes('30'))
+    return 'the retry-after value was not reported to the operator'
+
+  stub.script({ status: 429, body: { error: { type: 'rate_limit_error' } } })
+  const capped = gapOf(await act())
+  if (capped === undefined) return 'a 429 with no retry-after was not a capability gap'
+  if (capped.reason !== 'EXHAUSTED') return `spend cap gave ${capped.reason}, expected EXHAUSTED`
+  if (!/spend limit/i.test(capped.resolvedBy))
+    return 'the spend cap did not tell the operator to raise a limit'
+
+  // A blank header is not a header.
+  stub.script({
+    status: 429, headers: { 'retry-after': '   ' },
+    body: { error: { type: 'rate_limit_error' } },
+  })
+  const blank = gapOf(await act())
+  return blank?.reason === 'EXHAUSTED'
+    ? null : `a blank retry-after gave ${String(blank?.reason)}`
+})
+
+check('11c · a 400 spend limit is EXHAUSTED; an ordinary 400 is PERMANENT', async () => {
+  const research = model()
+  const act = () => research.decompose(DECOMPOSE_INPUT)
+
+  const spendMessages = [
+    'Your credit balance is too low to access the Anthropic API.',
+    'This request would exceed your organization\u2019s monthly spend limit.',
+    'Workspace spend limit reached.',
+    'Insufficient credits remaining.',
+  ]
+  for (const message of spendMessages) {
+    stub.script({ status: 400, body: { error: { type: 'invalid_request_error', message } } })
+    const capability = gapOf(await act())
+    if (capability === undefined) return `"${message.slice(0, 40)}…" was not a capability gap`
+    if (capability.reason !== 'EXHAUSTED')
+      return `"${message.slice(0, 40)}…" gave ${capability.reason}, expected EXHAUSTED`
   }
 
-  // A rate limit stays a failure rather than becoming a capability gap: it is
-  // retryable, and `runPipeline` is what retries it.
-  stub.script({ status: 429, body: { error: { type: 'rate_limit_error' } } })
-  const rateLimited = await failure(act)
-  return rateLimited?.disposition === 'TRANSIENT' ? null : 'a rate limit was not transient'
+  // An unrelated 400 is a request that will not succeed unchanged.
+  const ordinary = [
+    'max_tokens: must be greater than 0',
+    'messages.0.content: field required',
+    'tools.0.input_schema: invalid JSON Schema',
+  ]
+  for (const message of ordinary) {
+    stub.script({ status: 400, body: { error: { type: 'invalid_request_error', message } } })
+    const outcome = await failure(act)
+    if (outcome === undefined) return `"${message}" did not fail`
+    if (outcome.disposition !== 'PERMANENT')
+      return `"${message}" gave ${outcome.disposition}, expected PERMANENT`
+  }
+
+  // A 400 with no message at all cannot be a spend limit.
+  stub.script({ status: 400, body: { error: { type: 'invalid_request_error' } } })
+  const bare = await failure(act)
+  return bare?.disposition === 'PERMANENT'
+    ? null : `a bare 400 gave ${String(bare?.disposition)}`
+})
+
+check('11d · investigated material cannot make a failure look like a spend limit', async () => {
+  /*
+   * The adversarial case. An investigation into a utility's billing practices
+   * legitimately contains the words "credit balance is too low". If the
+   * provider echoes the request in its error message — which providers do —
+   * then a phrase match against the body would let the *subject of an
+   * investigation* control how its own research run is classified.
+   *
+   * Two guards: a message longer than a statement is not read at all, and a
+   * message containing any run of characters we sent is treated as an echo.
+   */
+  const research = model()
+  const loaded = {
+    ...DECOMPOSE_INPUT,
+    document: {
+      ...document,
+      extract: {
+        text: 'The utility told subscribers that their credit balance is too low'
+          + ' and that the workspace spend limit reached its cap in March.',
+        truncated: false,
+      },
+    },
+  }
+
+  // The provider quotes the request back.
+  stub.script({
+    status: 400,
+    body: {
+      status: 400,
+      error: {
+        type: 'invalid_request_error',
+        message: 'Invalid request: their credit balance is too low and that the workspace'
+          + ' spend limit reached its cap in March.',
+      },
+    },
+  })
+  const echoed = await failure(() => research.decompose(loaded))
+  if (echoed === undefined) return 'an echoed 400 did not fail'
+  if (echoed.disposition !== 'PERMANENT')
+    return `echoed material produced ${echoed.disposition}, expected PERMANENT`
+
+  // The same words in a long message are not read either.
+  stub.script({
+    status: 400,
+    body: {
+      error: {
+        type: 'invalid_request_error',
+        message: `context: ${'x'.repeat(500)} credit balance is too low`,
+      },
+    },
+  })
+  const long = await failure(() => research.decompose(loaded))
+  if (long?.disposition !== 'PERMANENT')
+    return `a long message produced ${String(long?.disposition)}`
+
+  // And the guard is not so eager that a genuine short statement is lost,
+  // even when the material happens to contain the same words.
+  stub.script({
+    status: 400,
+    body: {
+      error: {
+        type: 'invalid_request_error',
+        message: 'Your credit balance is too low to access the Anthropic API.',
+      },
+    },
+  })
+  const genuine = gapOf(await research.decompose(loaded))
+  if (genuine?.reason !== 'EXHAUSTED')
+    return `a genuine statement gave ${String(genuine?.reason)}, expected EXHAUSTED`
+
+  // Nothing read from the message may reach what is returned.
+  const material = 'their credit balance is too low and that the workspace'
+  if (JSON.stringify(genuine).includes('Anthropic API.'))
+    return 'the provider message reached the returned detail'
+  return JSON.stringify(genuine).includes(material)
+    ? 'investigated material reached the returned detail' : null
+})
+
+check('11e · classification never reads the raw body, only typed fields', () => {
+  const transport = stripComments(read('lib/xray/providers/anthropic/transport.ts'))
+  // The old defect: a phrase test against the whole response body. Exactly one
+  // function may see the body string, and it parses rather than matches.
+  const bodyMatches = transport.match(/\btest\(body\)|body\.includes|\/.*\/[a-z]*\.test\(body/g)
+  if (bodyMatches !== null) return `classification still reads the raw body: ${bodyMatches.join(', ')}`
+  if (!/JSON\.parse\(body\)/.test(transport)) return 'the body is no longer parsed at all'
+  // And the documented type vocabulary is closed: an unrecognised type is
+  // treated as absent rather than as something to branch on.
+  return /ERROR_TYPES as readonly string\[\]\)\.includes/.test(transport)
+    ? null : 'an unrecognised error type is not filtered out'
 })
 
 check('12 · a refusal is a capability fact, not evidence about the claim', async () => {
@@ -703,11 +871,27 @@ check('14 · the adapter never retries; the pipeline owns that', async () => {
   if (stub.received.length !== 1)
     return `one call produced ${stub.received.length} requests`
 
-  // `runPipeline` re-attempts TRANSIENT and stops on PERMANENT. A retry loop
-  // here would multiply with that one and hide how transient a provider is.
+  /*
+   * `runPipeline` re-attempts TRANSIENT and stops on PERMANENT. A retry loop
+   * here would multiply with that one and hide how transient a provider is.
+   *
+   * The runtime assertion above is the real proof. This scan is scoped to the
+   * call path rather than the whole file: an earlier version scanned every
+   * line and tripped on the character loop inside `echoesRequest`, which is
+   * not a retry of anything.
+   */
   const transport = stripComments(read('lib/xray/providers/anthropic/transport.ts'))
-  return /for\s*\(|while\s*\(|setTimeout|backoff/i.test(transport)
-    ? 'the transport contains a loop or a backoff' : null
+  const requests = transport.match(/\bfetch\s*\(/g) ?? []
+  if (requests.length !== 1) return `the transport has ${requests.length} request sites`
+
+  const start = transport.indexOf('export async function callMessages')
+  if (start < 0) return 'callMessages was not found'
+  const body = transport.slice(start, transport.indexOf('\n}', start))
+  const scheduling = /\bfor\s*\(|\bwhile\s*\(|\bdo\s*\{|setTimeout|setInterval|backoff/i
+    .exec(body)
+  if (scheduling !== null) return `the call path contains ${scheduling[0]}`
+  return /setTimeout|setInterval|\bbackoff\b/i.test(transport)
+    ? 'the transport schedules a later attempt' : null
 })
 
 // ---------------------------------------------------------------------------

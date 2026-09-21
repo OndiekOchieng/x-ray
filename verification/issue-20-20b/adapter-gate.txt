@@ -9,7 +9,11 @@ ok    7 · XR-INV-007 is enforced at the boundary: a finding must be reversible
 ok    8 · a handle the stage did not offer is rejected
 ok    9 · no canonical id ever reaches the provider
 ok    10 · a provider cannot assert what a stage owns
-ok    11 · HTTP failures map onto the existing vocabulary
+ok    11 · HTTP failures map onto the documented error semantics
+ok    11b · the two forms of 429 are told apart by retry-after
+ok    11c · a 400 spend limit is EXHAUSTED; an ordinary 400 is PERMANENT
+ok    11d · investigated material cannot make a failure look like a spend limit
+ok    11e · classification never reads the raw body, only typed fields
 ok    12 · a refusal is a capability fact, not evidence about the claim
 ok    13 · a truncated answer is transient; a wrong-shaped one is not
 ok    14 · the adapter never retries; the pipeline owns that
@@ -23,57 +27,60 @@ ok    21 · every reviewer query kind has an authored question
 ok    22 · the request is a forced tool call carrying the cutoff
 ok    23 · an unobtained document is presented as unobtained
 
-23/23 Anthropic adapter checks passed
+27/27 Anthropic adapter checks passed
 Every call went to 127.0.0.1. No request left this machine.
 
-=== pnpm check:providers (20a, re-aimed for 20b) ===
-ok    1 · an empty environment selects no provider
-ok    2 · an Anthropic research selection with no model id is incomplete
-ok    3 · an Anthropic reviewer selection with no model id is incomplete
-ok    4 · a retrieval selection requires no model id
-ok    5/6/7 · an unknown provider is rejected in every slot, and named
-ok    8/9 · the slots may name different providers and different models
-ok    9b · the provider name never implies a model id
-ok    10 · a missing secret is reported by name, never by value
-ok    10b · a present secret never appears in a result, description or error
-ok    11 · a provider that cannot be honoured never becomes another one
-ok    12 · factories return the existing ports and nothing else
-ok    12b · every resolution names its exact slot, absence included
-ok    12c · a factory sees only what its own entry declares
-ok    12d · the type cannot carry an environment handle
-ok    13 · no provider import or provider setting reaches any other layer
-ok    13b · provider selectors and model ids never enter canonical state
-ok    15 · 20a registers no execution runtime, so the unconfigured path stands
-ok    14/§5 · no provider secret can be committed, and none has been
-ok    stop line · exactly one file reaches the network, and retrieval has none
+=== pnpm check:providers ===
 ok    stop line · prompts stay inside the prompt module
 
 20/20 provider composition checks passed
 
-=== negative controls (each reverted immediately) ===
-A  presentClaim leaks the canonical id                → FAIL 9  (classify: a canonical id was sent to the provider)
-B  the decoder stops checking the offered scope       → FAIL 8  (an invented claim handle: was accepted)
-C  a rate limit stops being transient                 → FAIL 11 (HTTP 429: PERMANENT, expected TRANSIENT)
-D  the key is put in the prompt                       → FAIL 15 (the key was in the request body)
-E  a reviewer may target an artifact it was not shown → FAIL 19 (an id that was not in the query: was accepted)
+=== failure mapping, as the gate exercises it (amended) ===
+signal read                                     outcome                  reason / disposition
+----------------------------------------------  -----------------------  --------------------
+401  |  authentication_error                    CapabilityUnavailable    NOT_CONFIGURED
+403  |  permission_error                        CapabilityUnavailable    NOT_CONFIGURED
+404  |  not_found_error   (no such model)       CapabilityUnavailable    NOT_CONFIGURED
+402  |  billing_error                           CapabilityUnavailable    EXHAUSTED
+413  |  request_too_large                       CapabilityUnavailable    REFUSED_FOR_INPUT
+       stop_reason: refusal                     CapabilityUnavailable    REFUSED_FOR_INPUT
+429 rate_limit_error  WITH retry-after          AdapterFailure           TRANSIENT
+429 rate_limit_error  WITHOUT retry-after       CapabilityUnavailable    EXHAUSTED  (documented spend-cap shape)
+400 invalid_request_error + trusted spend msg   CapabilityUnavailable    EXHAUSTED
+400 invalid_request_error, anything else        AdapterFailure           PERMANENT
+408, 409                                        AdapterFailure           TRANSIENT
+500, 502, 503, 504, 529  |  api_error,
+  overloaded_error, timeout_error               AdapterFailure           TRANSIENT
+network error / timeout                         AdapterFailure           TRANSIENT
+stop_reason: max_tokens                         AdapterFailure           TRANSIENT
+any other 4xx                                   AdapterFailure           PERMANENT
+200 prose / wrong tool / non-JSON               AdapterFailure           PERMANENT
+malformed or invalid structured answer          AdapterFailure           PERMANENT
+a handle that was not offered                   AdapterFailure           PERMANENT
 
-=== failure mapping, as the gate exercises it ===
-HTTP / condition                     outcome                  reason / disposition
------------------------------------  -----------------------  --------------------
-401 authentication_error             CapabilityUnavailable    NOT_CONFIGURED
-403 permission_error                 CapabilityUnavailable    NOT_CONFIGURED
-404 not_found_error (no such model)  CapabilityUnavailable    NOT_CONFIGURED
-400 "credit balance is too low"      CapabilityUnavailable    EXHAUSTED
-413 request_too_large                CapabilityUnavailable    REFUSED_FOR_INPUT
-stop_reason: refusal                 CapabilityUnavailable    REFUSED_FOR_INPUT
-429 rate_limit_error                 AdapterFailure           TRANSIENT
-500 api_error                        AdapterFailure           TRANSIENT
-529 overloaded_error                 AdapterFailure           TRANSIENT
-network error / timeout              AdapterFailure           TRANSIENT
-stop_reason: max_tokens              AdapterFailure           TRANSIENT
-418 (any other 4xx)                  AdapterFailure           PERMANENT
-200 with prose instead of a tool use AdapterFailure           PERMANENT
-200 answering a different tool       AdapterFailure           PERMANENT
-200 whose body is not JSON           AdapterFailure           PERMANENT
-a malformed / invalid structured answer  AdapterFailure       PERMANENT
-a handle that was not offered        AdapterFailure           PERMANENT
+Signals are read in order of how much they can be trusted:
+  1. HTTP status, where it decides alone            (401, 402, 403, 404, 413)
+  2. the documented error.type, filtered to a closed vocabulary
+  3. documented headers   (retry-after separates the two forms of 429)
+  4. error.message — ONE condition only (400 spend limit), under two guards:
+       the message must be <= 400 characters, and must contain no 24-character
+       run that also appears in the request we sent.
+
+=== negative controls (each reverted immediately) ===
+All re-run against the amended classifier, not carried forward. The original
+control C ("a rate limit stops being transient") edited a branch the amendment
+replaced, so it is superseded by G rather than restated.
+
+A  presentClaim leaks the canonical id                → FAIL 9   (classify: a canonical id was sent to the provider)
+B  the decoder stops checking the offered scope       → FAIL 8   (an invented claim handle: was accepted)
+D  the key is put in the prompt                       → FAIL 15  (the key was in the request body)
+E  a reviewer may target an artifact it was not shown → FAIL 19  (an id that was not in the query: was accepted)
+
+amendment controls:
+F  back to phrase-matching the whole response body    → FAIL 11c, 11d, 11e
+     11c  a genuine spend message was missed entirely
+     11d  "an echoed 400 did not fail"  — the defect this amendment closes
+     11e  "classification still reads the raw body"
+G  every 429 treated as ordinary rate limiting        → FAIL 11b
+H  the 402 billing branch removed                     → FAIL 11  (402 became PERMANENT)
+I  the echo guard removed                             → FAIL 11d ("an echoed 400 did not fail")

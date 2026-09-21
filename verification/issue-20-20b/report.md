@@ -5,6 +5,14 @@ Both model adapters are implemented. **No retrieval, no runtime registration,
 no live URL.** Every 20a boundary is preserved; three 20a checks were re-aimed
 rather than relaxed (see *The 20a gate*).
 
+> **Amendment (review response).** Failure classification now reads HTTP
+> status, the documented `error.type` and documented headers, in that order of
+> trust. 402 `billing_error` and the documented retry-after-less 429 spend-cap
+> shape become `EXHAUSTED`; the two forms of 429 are told apart by
+> `retry-after`; and exactly one condition reads `error.message`, under two
+> guards, so investigated material echoed back by the provider can no longer
+> steer classification. See *Amendment* below. First submission `1e9b11c`.
+
 ## What was added
 
 | File | Role |
@@ -80,32 +88,136 @@ a good answer survives intact; check **4** proves an *empty* answer is accepted
 — forcing a provider to invent something is how a fabricated claim enters a
 graph.
 
+## Amendment
+
+### The blocker: classification read prose, and the wrong prose
+
+Two defects, one of which was worse than the review stated.
+
+**The documented semantics were incomplete.** 402 `billing_error` had no
+branch at all, so a payment condition fell through to `PERMANENT`. 429 was
+treated as uniformly retryable, so the documented usage-tier / spend-cap form —
+which lacks `retry-after` and keeps failing until access resumes — would have
+been retried until the stage exhausted its attempts, reporting a billing state
+as a broken investigation.
+
+**And the budget test matched against the whole response body.** A provider
+error message can quote the request, and the request carries the material under
+investigation. So an investigation into a utility's billing — material that
+legitimately contains the words *"credit balance is too low"* — could have had
+its own run classified `EXHAUSTED` by the echo of its own text. The subject of
+an investigation could influence how its research run was classified. That is
+the defect control F reproduces, and it is why the fix is not simply a longer
+phrase list.
+
+### Signals, in order of how far they can be trusted
+
+```
+1. HTTP status, where it decides alone            401, 402, 403, 404, 413
+2. the documented error.type                      filtered to a closed vocabulary
+3. documented headers                             retry-after separates the two 429s
+4. error.message                                  ONE condition, under two guards
+```
+
+`error.type` is filtered through `ERROR_TYPES`, pinned with `satisfies` and an
+exhaustiveness guard, so an unrecognised type is treated as **absent** rather
+than as something to branch on.
+
+| Signal read | Outcome |
+|---|---|
+| 401 / `authentication_error`, 403 / `permission_error` | `NOT_CONFIGURED` |
+| 404 / `not_found_error` | `NOT_CONFIGURED` |
+| **402 / `billing_error`** | **`EXHAUSTED`** |
+| 413 / `request_too_large` | `REFUSED_FOR_INPUT` |
+| `stop_reason: refusal` | `REFUSED_FOR_INPUT` |
+| **429 `rate_limit_error` *with* `retry-after`** | **`TRANSIENT`** (value reported to the operator) |
+| **429 `rate_limit_error` *without* `retry-after`** | **`EXHAUSTED`** — documented spend-cap shape |
+| **400 `invalid_request_error` + a trusted spend message** | **`EXHAUSTED`** |
+| 400 `invalid_request_error`, anything else | `PERMANENT` |
+| 408, 409, 5xx, `api_error`, `overloaded_error`, `timeout_error` | `TRANSIENT` |
+| any other 4xx | `PERMANENT` |
+
+### The two guards on the one message that is read
+
+An organization or workspace spend limit arrives as a 400
+`invalid_request_error`, and the message is the only signal available. So it is
+read, but only when it is demonstrably the provider speaking:
+
+1. **Length.** `readError` keeps a message only at ≤ 400 characters. A billing
+   statement is a sentence; anything longer is far more likely to be our own
+   request quoted back.
+2. **Echo.** `echoesRequest` slides a 24-character window across the message
+   and rejects it if any run also appears in what we sent. The guard is
+   deliberately eager: a false positive only classifies a genuine billing
+   message as `PERMANENT` — disclosed either way — whereas a false negative
+   would let echoed material steer classification.
+
+Check **11d** is the adversarial case: material containing *"their credit
+balance is too low and that the workspace spend limit reached its cap"*, echoed
+back by the provider in a 400. Expected and observed: `PERMANENT`. The same
+check then proves the guard is not so eager that a genuine short statement is
+lost *even with that material in the request*, and that neither the provider's
+message nor the material reaches the returned detail.
+
+Check **11e** is the structural companion: classification may not read the raw
+body at all. It asserts no `test(body)` / `body.includes` remains, that the body
+is still *parsed*, and that the error type is filtered against the closed
+vocabulary.
+
+### The tradeoff I am taking, stated plainly
+
+A 429 without `retry-after` is treated as a spend cap. If a proxy strips the
+header, an ordinary rate limit is downgraded to a disclosed capability gap —
+recoverable, visible, and actionable (`resolvedBy` names the spend limit). The
+opposite mistake is worse: retrying a spend cap until the stage exhausts its
+attempts reports a billing state as a broken investigation. I have taken the
+recoverable error, but it is a judgement, not a derivation.
+
+### Negative controls
+
+Re-run against the amended classifier, not carried forward. Original control C
+edited a branch the amendment replaced, so G supersedes it rather than
+restating it.
+
+| Control | Result |
+|---|---|
+| A · `presentClaim` leaks the canonical id | FAIL 9 |
+| B · the decoder stops checking the offered scope | FAIL 8 |
+| D · the key is put in the prompt | FAIL 15 |
+| E · a reviewer may target an unshown artifact | FAIL 19 |
+| **F · back to phrase-matching the whole body** | **FAIL 11c, 11d, 11e** |
+| **G · every 429 treated as ordinary rate limiting** | **FAIL 11b** |
+| **H · the 402 billing branch removed** | **FAIL 11** (402 became `PERMANENT`) |
+| **I · the echo guard removed** | **FAIL 11d** — "an echoed 400 did not fail" |
+
+Control F is worth reading twice: reverting to the old code fails **three**
+checks, because the old narrow phrase list also *missed* three of the four
+genuine spend messages. The amendment improved coverage as well as safety.
+
+### One defect in my own gate
+
+Check 14 asserted "the transport contains no loop" by scanning the whole file,
+which tripped on the character loop inside `echoesRequest` — a loop over a
+string, not a retry of anything. The scan is now scoped to the `callMessages`
+call path, plus a whole-file assertion that there is exactly one request site
+and no scheduling primitive. The runtime assertion — two queued 429s produce
+exactly one request — was always the real proof.
+
 ### 5 · Transient vs permanent, in the vocabulary that already exists
 
 Three outcomes, not two. `capability.ts` already draws the line: "a function
 that may lack capability returns `CapabilityResult<T>`; a function that may
 break throws."
 
-| HTTP / condition | Outcome | Reason / disposition |
-|---|---|---|
-| 401, 403 | `CapabilityUnavailable` | `NOT_CONFIGURED` |
-| 404 — no such model | `CapabilityUnavailable` | `NOT_CONFIGURED` |
-| 400 "credit balance is too low" | `CapabilityUnavailable` | `EXHAUSTED` |
-| 413 / 422 | `CapabilityUnavailable` | `REFUSED_FOR_INPUT` |
-| `stop_reason: refusal` | `CapabilityUnavailable` | `REFUSED_FOR_INPUT` |
-| 429, 5xx, network, timeout, `max_tokens` | `AdapterFailure` | `TRANSIENT` |
-| other 4xx, prose instead of a tool call, wrong tool, non-JSON 200, malformed answer, unoffered handle | `AdapterFailure` | `PERMANENT` |
-
-Three judgement calls worth stating, since each could reasonably go the other
-way:
+The full mapping is the table under *Amendment* — that supersedes the one
+originally submitted here. The reasoning that survived unchanged:
 
 - **An invalid key is configuration, not failure.** 401/403 becomes
   `NOT_CONFIGURED`, so the run reports `CAPABILITY_BLOCKED` — #20 boundary 6.
   An absent key and a wrong key are the same fault with different spellings.
-- **A spent balance is not a rate limit.** No amount of waiting inside the run
-  restores it, so it is `EXHAUSTED` rather than `TRANSIENT`. A rate limit *is*
-  retryable and stays a `TRANSIENT` failure, because `runPipeline` is the right
-  place to retry it.
+- **A billing condition is not a rate limit.** No amount of waiting inside the
+  run resolves it, so it is `EXHAUSTED`. Ordinary rate limiting *is* retryable
+  and stays `TRANSIENT`, because `runPipeline` is the right place to retry it.
 - **A refusal is not evidence.** `resolvedBy` says so in words: "a refusal is
   not evidence about the claim." #20 boundary 4.
 
@@ -158,7 +270,7 @@ judgment fails; an honest `flagged: false` survives.
 
 ## Gate
 
-`pnpm check:anthropic-adapters` — **23/23**, in `adapter-gate.txt`. Every call
+`pnpm check:anthropic-adapters` — **27/27**, in `adapter-gate.txt`. Every call
 goes to a stub on `127.0.0.1`, reached through the `ANTHROPIC_BASE_URL` the
 registry entry declares. **No request left this machine.**
 
@@ -169,16 +281,8 @@ same room; the gate uses the same configuration boundary an operator would.
 
 ### Negative controls
 
-Each boundary check was verified to fail when the property it claims is
-removed, then reverted:
-
-| Control | Result |
-|---|---|
-| A · `presentClaim` leaks the canonical id | FAIL 9 — `classify: a canonical id was sent to the provider` |
-| B · the decoder stops checking the offered scope | FAIL 8 — `an invented claim handle: was accepted` |
-| C · a rate limit stops being transient | FAIL 11 — `HTTP 429: PERMANENT, expected TRANSIENT` |
-| D · the key is put in the prompt | FAIL 15 — `the key was in the request body` |
-| E · a reviewer may target an artifact it was not shown | FAIL 19 — `an id that was not in the query: was accepted` |
+Nine controls, listed under *Amendment*. Each boundary check was verified to
+fail when the property it claims is removed, then reverted.
 
 ## The 20a gate
 
@@ -239,10 +343,12 @@ check:acceptance Canonical benchmark verdict: BLOCKED (0 reason(s) against the g
   real call happens in 20d/20e, and a schema mismatch there would surface as a
   `PERMANENT` rejection with a named path, which is the intended way to find
   out.
-- **Budget detection is phrase-matched.** A spent balance arrives as a 400
-  `invalid_request_error`, and the message is the only signal. The match is
-  narrow (`credit balance is too low`, `insufficient credit|funds|quota`); if
-  Anthropic rewords it, the case degrades to `PERMANENT` — visible, not silent.
+- **One condition still reads a message.** A 400 spend limit has no other
+  signal. It is guarded by length and by the echo check, and if Anthropic
+  rewords the statement the case degrades to `PERMANENT` — visible, not silent.
+  402 `billing_error` and the retry-after-less 429 need no message at all.
+- **A stripped `retry-after` downgrades an ordinary rate limit** to a disclosed
+  `EXHAUSTED` capability gap. Deliberate; see the tradeoff under *Amendment*.
 - **`max_tokens` is treated as transient.** The same request can complete, but
   if a stage's material genuinely exceeds the budget it will retry and fail
   again. Per-operation `maxTokens` constants are authored, not configurable.

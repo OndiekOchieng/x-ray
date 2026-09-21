@@ -8,7 +8,7 @@ ok    stop line · prompts stay inside the prompt module
 
 === check:anthropic-adapters ===
 
-23/23 Anthropic adapter checks passed
+27/27 Anthropic adapter checks passed
 Every call went to 127.0.0.1. No request left this machine.
 
 === check:fixtures ===
