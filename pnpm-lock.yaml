@@ -26,6 +26,9 @@ importers:
       next:
         specifier: 16.3.3
         version: 16.3.3(@babel/core@7.29.7)(@types/node@24.10.4)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
       react:
         specifier: ^19
         version: 19.2.4
@@ -60,9 +63,6 @@ importers:
       '@types/react-dom':
         specifier: ^19
         version: 19.2.3(@types/react@19.2.14)
-      pg:
-        specifier: ^8.23.0
-        version: 8.23.0
       postcss:
         specifier: ^8.5
         version: 8.5.6
