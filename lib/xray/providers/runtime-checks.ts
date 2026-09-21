@@ -26,12 +26,14 @@ import { available, unavailable, isAvailable, isUnavailable } from '@/lib/xray/c
 import type { CapabilityResult } from '@/lib/xray/capability'
 import type { Claim, Evidence, Finding, Gap, Source, SourcePosition } from '@/lib/xray/domain'
 import { runPipeline } from '@/lib/xray/pipeline/run'
+import { validateXRayGraph } from '@/lib/xray/validation'
+import { submittedInvestigation } from '@/lib/xray/application/runtime'
 import type { ResearchModel } from '@/lib/xray/pipeline/model-port'
 import type { ReviewerModel, ReviewerModelQuery, ModelJudgment } from '@/lib/xray/review'
 import type {
   ResearchAdapter, RetrievalQuery, RetrievalResult, RetrievedDocument,
 } from '@/lib/xray/pipeline/retrieval-port'
-import { isInspectable } from '@/lib/xray/pipeline/retrieval-port'
+import { hashExtract, isInspectable } from '@/lib/xray/pipeline/retrieval-port'
 import type { ProposalRef } from '@/lib/xray/pipeline/proposals'
 import type { GraduationResult } from '@/lib/xray/acceptance'
 import { activePortChecks } from '@/lib/xray/review'
@@ -48,7 +50,9 @@ import {
 } from './live-runtime'
 import { DEFAULT_REGISTRY, type ProviderRegistry } from './registry'
 import { gatherMaterial } from './material'
-import { newRunMaterial } from './live-stages'
+import {
+  liveStages, newRunMaterial, sameArtifact, type RunMaterial,
+} from './live-stages'
 import { PROVIDER_ENV } from './config'
 import { AnthropicResearchAdapter } from './anthropic'
 
@@ -814,6 +818,33 @@ async function drive(adapters: {
   })
 }
 
+/**
+ * Drive the stages with a `RunMaterial` this gate holds.
+ *
+ * `liveRuntime` builds its own material per plan, which is right — it is run
+ * state, not a public surface. So for assertions about that state the gate
+ * builds the stages directly rather than widening a production type to let a
+ * test peek. The runtime-level path is covered by check 8.
+ */
+async function driveStages(adapters: {
+  model?: ResearchModel; research?: ResearchAdapter
+}): Promise<{ result: Awaited<ReturnType<typeof runPipeline>>; material: RunMaterial }> {
+  const material = newRunMaterial()
+  const stages = liveStages({
+    sourceUrl: URL_UNDER_INVESTIGATION,
+    material,
+    now: () => '2026-09-21T12:00:00Z',
+    retrieveLimit: 3,
+  })
+  const result = await runPipeline({
+    investigation: submittedInvestigation('XRAY-LIVE-200', '2026-04-01T00:00:00Z'),
+    stages,
+    adapters,
+    maxAttempts: 1,
+  })
+  return { result, material }
+}
+
 check('8 · the composed runtime drives every stage end to end', async () => {
   const calls: string[] = []
   const result = await drive({
@@ -1496,6 +1527,450 @@ check('25 · a record with no retrievedAt gets X-Ray\'s own observation time', a
   if (secondSurface === undefined) return 'no source was minted for the nonsense timestamp'
   return secondSurface.retrievedAt === OBSERVED
     ? null : `an unparseable provider timestamp survived: "${secondSurface.retrievedAt}"`
+})
+
+// ---------------------------------------------------------------------------
+// 26 — Source identity and Surface Source Isolation (#20 first-light Finding 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * The exact first-light shape.
+ *
+ * `INGEST` mints a Source for the submitted URL; `TRACE`'s search rediscovers
+ * the identical URL with identical content; the model then tries to use it as
+ * evidence for the SURFACE claim decomposed out of that same article.
+ *
+ * In first light this produced SRC-001 and SRC-006 with byte-identical
+ * digests, and all three evidence items cited SRC-006 — which slipped past
+ * `XR-INV-001`, because that invariant compares `Evidence.sourceId` against
+ * `investigation.surfaceSourceId` and the ids differed.
+ */
+function rediscoveringAdapter(options: {
+  /** Content the second fetch would return. Omit to return the same bytes. */
+  readonly changedContent?: string
+  readonly calls?: string[]
+} = {}): ResearchAdapter {
+  const surface = () => document('d1', URL_UNDER_INVESTIGATION, ARTICLE)
+  return {
+    name: 'stub:rediscovery',
+    capabilities: ['search', 'retrieve'],
+    async search(query) {
+      options.calls?.push('search')
+      // Discovery returns the submitted article itself, as a search result:
+      // url + title, no content. Exactly what web_search_result decodes to.
+      return available({
+        query,
+        documents: [
+          document('s1', URL_UNDER_INVESTIGATION, undefined, 'NOT_RETRIEVED'),
+          document('s2', 'https://example.invalid/audit', undefined, 'NOT_RETRIEVED'),
+        ],
+      })
+    },
+    async retrieve(locator) {
+      options.calls?.push(`retrieve:${locator}`)
+      if (locator === URL_UNDER_INVESTIGATION) {
+        return available(options.changedContent === undefined
+          ? surface()
+          : document('d1', locator, options.changedContent))
+      }
+      return available(document('d1', locator, CORROBORATION))
+    },
+  }
+}
+
+/** A model that tries to cite whatever it is shown for the claim it is given. */
+function citingModel(calls?: string[]): ResearchModel {
+  const base = stubModel(calls === undefined ? {} : { calls })
+  return {
+    ...base,
+    async trace(input) {
+      calls?.push('trace')
+      // Cite every document offered, for the claim being traced.
+      return available({
+        evidence: input.documents.filter((entry) => isInspectable(entry)).map((entry) => ({
+          sourceRef: entry.ref,
+          proposition: `Drawn from ${String(entry.locator)}.`,
+          relationship: 'SUPPORTS' as const,
+          strength: 'DIRECT' as const,
+          claimRefs: [input.claim.ref],
+        })),
+        discoveredClaims: [],
+      })
+    },
+  }
+}
+
+check('26 · one artifact yields one Source, and never corroborates its own claim', async () => {
+  const calls: string[] = []
+  const { result, material } = await driveStages({
+    model: citingModel(calls), research: rediscoveringAdapter({ calls }),
+  })
+  const graph = result.graph
+
+  // --- one canonical Source for the identical artifact ---------------------
+  const forSurfaceUrl = graph.sources.filter((source) => source.url === URL_UNDER_INVESTIGATION)
+  if (forSurfaceUrl.length !== 1)
+    return `${forSurfaceUrl.length} Sources for the submitted URL: ${
+      forSurfaceUrl.map((source) => source.id).join(', ')}`
+  if (forSurfaceUrl[0]!.id !== graph.investigation.surfaceSourceId)
+    return `the surviving Source is ${forSurfaceUrl[0]!.id}, not the surface record`
+
+  // No two Sources share a locator at all.
+  const byUrl = new Map<string, string[]>()
+  for (const source of graph.sources) {
+    if (source.url === undefined) continue
+    byUrl.set(source.url, [...(byUrl.get(source.url) ?? []), source.id])
+  }
+  for (const [url, ids] of byUrl) {
+    if (ids.length > 1) return `${ids.join(' + ')} all claim ${url}`
+  }
+
+  // --- no Evidence for a SURFACE claim from the surface artifact ------------
+  const surfaceClaimIds = new Set<string>(
+    graph.claims.filter((claim) => claim.origin === 'SURFACE').map((claim) => claim.id))
+  for (const item of graph.evidence) {
+    if (item.sourceId !== graph.investigation.surfaceSourceId) continue
+    const own = item.claimIds.filter((id) => surfaceClaimIds.has(id))
+    if (own.length > 0)
+      return `${item.id} draws on the surface record for surface claim(s) ${own.join(', ')}`
+  }
+
+  /*
+   * And the validator agrees. This is the assertion that would have failed
+   * before the fix: not because validation changed, but because one id for one
+   * artifact is what makes its comparison sound.
+   */
+  const validation = validateXRayGraph(graph, { mode: 'STAGED' })
+  const isolation = validation.violations.filter((violation) =>
+    violation.invariant === 'XR-INV-001')
+  if (isolation.length > 0)
+    return `XR-INV-001 violated: ${isolation.map((v) => v.code).join(', ')}`
+
+  // --- the rediscovery stays visible as research extent --------------------
+  const rediscoveries = [...material.rediscoveries.values()].flat()
+  if (!rediscoveries.includes(URL_UNDER_INVESTIGATION))
+    return 'the rediscovery was not recorded as research extent'
+  if (material.withheldSurfaceOffers === 0)
+    return 'withholding the surface artifact was not recorded'
+
+  // --- no second fetch of material already in hand -------------------------
+  const surfaceFetches = calls.filter((call) => call === `retrieve:${URL_UNDER_INVESTIGATION}`)
+  if (surfaceFetches.length !== 1)
+    return `the submitted URL was fetched ${surfaceFetches.length} times`
+  const reuse = [...material.gathered.values()].reduce(
+    (total, gathered) => total + gathered.stats.reused, 0)
+  if (reuse === 0) return 'the rediscovery was re-fetched rather than reused'
+
+  // Corroborating material still got through: the fix withholds one artifact,
+  // not the search.
+  return graph.sources.length >= 2
+    ? null : `${graph.sources.length} source(s) — the fix suppressed the whole search`
+})
+
+check('26b · same locator with different content is NOT collapsed', () => {
+  /*
+   * A record that moved is a different observation, and collapsing it would
+   * silently discard the change. Identity therefore requires the locator
+   * **and** the stage-computed hash.
+   *
+   * Asserted at the predicate rather than end to end, and the reason is worth
+   * recording rather than hiding. Two attempts to drive it through a run
+   * failed for structural reasons, not because the rule is wrong:
+   *
+   *   - within one run the case cannot arise. Reuse satisfies a rediscovered
+   *     locator from material already in hand, so the same locator yields the
+   *     same bytes by construction and there is nothing to differ.
+   *   - seeding a prior Source into an *initial* run is not a real scenario
+   *     either: `submittedInvestigation` fixes `surfaceSourceId` to `SRC-001`,
+   *     while a seeded allocator mints a different first id, so the seeded run
+   *     fails INGEST with a DANGLING_REFERENCE before reaching TRACE.
+   *
+   * The scenario that does produce it is a re-evaluation seeded from a
+   * committed predecessor, re-retrieving a record that has since changed — and
+   * `liveRuntime` deliberately does not implement `reevaluation` (20d). So the
+   * rule is proven where it is decided, and the end-to-end case is recorded as
+   * unreachable until re-evaluation is composed.
+   */
+  const text = 'The audit records 19 kilometres.'
+  const changed = 'The audit records 31 kilometres.'
+  const locator = 'https://example.invalid/audit'
+  const hash = hashExtract({ text, truncated: false })
+  const otherHash = hashExtract({ text: changed, truncated: false })
+  const held = { url: locator, contentHash: hash }
+
+  // The one case that collapses: same locator, same stage-computed hash.
+  if (!sameArtifact(held, locator, hash))
+    return 'an identical artifact was not recognised'
+
+  // Same locator, different content: two observations, never collapsed.
+  if (sameArtifact(held, locator, otherHash))
+    return 'a changed document was collapsed onto the earlier observation'
+
+  // Different locator, identical content: two records, never collapsed.
+  if (sameArtifact(held, 'https://elsewhere.invalid/audit', hash))
+    return 'two different URLs were collapsed because their hashes matched'
+
+  // Identity is established, never assumed: a missing hash proves nothing.
+  if (sameArtifact(held, locator, undefined))
+    return 'a document with no hash was treated as a known artifact'
+  if (sameArtifact({ url: locator }, locator, hash))
+    return 'a Source with no hash was treated as matching'
+  if (sameArtifact(held, undefined, hash))
+    return 'a document with no locator was treated as a known artifact'
+
+  /*
+   * And both decisions that turn on identity actually consult it: the minting
+   * path through `sameArtifact`, and the withholding path through
+   * `isSurfaceArtifact`, which compares the same two fields against the
+   * surface document. Two predicates rather than one because they answer
+   * different questions — "have I already got this?" and "is this the article
+   * under investigation?" — and an earlier version of this assertion expected
+   * one predicate used twice.
+   */
+  const stages = stripComments(read('lib/xray/providers/live-stages.ts'))
+    .replace(/\s+/g, ' ')
+  if (!/sameArtifact\(candidate, document\.locator, hash\)/.test(stages))
+    return 'the minting path no longer resolves identity'
+  if (!/stageHash\(document\) === surfaceHash/.test(stages))
+    return 'the withholding path no longer compares the stage-computed hash'
+  return /source\.contentHash === hash/.test(stages)
+    ? null : 'identity no longer compares the stage-computed hash'
+})
+
+check('26d · one corroborator found twice yields one Source', async () => {
+  /*
+   * The dedup rule on its own, isolated from the withholding rule.
+   *
+   * This check exists because check 26 passed while dedup was **not
+   * implemented**: withholding the surface artifact alone is enough to leave
+   * one Source for the submitted URL, so 26 could not tell the two mechanisms
+   * apart. Here nothing is withheld — the record is an ordinary corroborator —
+   * so only identity resolution can keep it to one `Source`.
+   *
+   * Two claims, each search finding the same audit record. Without dedup that
+   * is two Sources for one artifact, and a later stage counting them as two
+   * records is the corroboration inflation XR-INV-004 exists to catch.
+   */
+  const SHARED = 'https://example.invalid/shared-audit'
+  const twoClaims: ResearchModel = {
+    ...stubModel(),
+    async decompose() {
+      return available([
+        { text: 'The county resurfaced 42 kilometres.', layer: 'OBSERVATION' as const,
+          type: 'QUANTITATIVE' as const, priority: 'HIGH' as const },
+        { text: 'The works cost 310 million shillings.', layer: 'OBSERVATION' as const,
+          type: 'FINANCIAL' as const, priority: 'HIGH' as const },
+      ])
+    },
+    async trace(input) {
+      return available({
+        evidence: input.documents.filter((entry) => isInspectable(entry)).map((entry) => ({
+          sourceRef: entry.ref,
+          proposition: `Drawn from ${String(entry.locator)} for ${input.claim.value.id}.`,
+          relationship: 'SUPPORTS' as const,
+          strength: 'DIRECT' as const,
+          claimRefs: [input.claim.ref],
+        })),
+        discoveredClaims: [],
+      })
+    },
+  }
+
+  const sharedFinder: ResearchAdapter = {
+    name: 'stub:shared',
+    capabilities: ['search', 'retrieve'],
+    async search(query) {
+      // Every claim's search finds the same record.
+      return available({
+        query,
+        documents: [document('s1', SHARED, undefined, 'NOT_RETRIEVED')],
+      })
+    },
+    async retrieve(locator) {
+      if (locator === URL_UNDER_INVESTIGATION) {
+        return available(document('d1', locator, ARTICLE))
+      }
+      return available(document('d1', locator, CORROBORATION))
+    },
+  }
+
+  const { result, material } = await driveStages({
+    model: twoClaims, research: sharedFinder,
+  })
+  const graph = result.graph
+
+  if (graph.claims.filter((claim) => claim.origin === 'SURFACE').length !== 2)
+    return `${graph.claims.length} claims; the fixture needs two surface claims`
+
+  const forShared = graph.sources.filter((source) => source.url === SHARED)
+  if (forShared.length !== 1)
+    return `${forShared.length} Sources for one corroborator found twice: ${
+      forShared.map((source) => source.id).join(', ')}`
+
+  // Both claims' evidence cites the same single identity.
+  const citing = graph.evidence.filter((item) => item.sourceId === forShared[0]!.id)
+  if (citing.length < 2)
+    return `${citing.length} evidence item(s) cite the shared record, expected 2`
+  const claimsCovered = new Set(citing.flatMap((item) => [...item.claimIds]))
+  if (claimsCovered.size !== 2)
+    return `the shared record bears on ${claimsCovered.size} claim(s), expected 2`
+
+  // The reuse is recorded, so "one Source" reads as a decision.
+  if (!material.reusedSourceIds.includes(forShared[0]!.id))
+    return 'the reused identity was not recorded'
+
+  // And the second search did not pay for a second fetch of the same bytes.
+  const validation = validateXRayGraph(graph, { mode: 'STAGED' })
+  return validation.violations.some((violation) =>
+    violation.invariant === 'XR-INV-001' || violation.invariant === 'XR-INV-004')
+    ? `validation objected: ${validation.violations.map((v) => v.code).join(', ')}`
+    : null
+})
+
+check('26c · different URLs are never collapsed, whatever their hashes', async () => {
+  /*
+   * Two distinct records that happen to serve identical bytes — a mirror, a
+   * syndicated copy, a CDN alias — are two records. Collapsing them on hash
+   * alone would be inferring that they are the same source, which is a lineage
+   * judgement this stage does not get to make and `XR-INV-004` exists to check.
+   */
+  const identical = 'Identical bytes served from two different locations.'
+  const mirroring: ResearchAdapter = {
+    name: 'stub:mirrors',
+    capabilities: ['search', 'retrieve'],
+    async search(query) {
+      return available({
+        query,
+        documents: [
+          document('s1', 'https://a.invalid/report', undefined, 'NOT_RETRIEVED'),
+          document('s2', 'https://b.invalid/report', undefined, 'NOT_RETRIEVED'),
+        ],
+      })
+    },
+    async retrieve(locator) {
+      if (locator === URL_UNDER_INVESTIGATION) {
+        return available(document('d1', locator, ARTICLE))
+      }
+      return available(document('d1', locator, identical))
+    },
+  }
+
+  const { result } = await driveStages({ model: citingModel(), research: mirroring })
+  const mirrors = result.graph.sources.filter((source) =>
+    source.url === 'https://a.invalid/report' || source.url === 'https://b.invalid/report')
+  if (mirrors.length !== 2)
+    return `${mirrors.length} Sources for two mirrored URLs, expected 2`
+  const hashes = new Set(mirrors.map((source) => source.contentHash))
+  if (hashes.size !== 1) return 'the mirrors did not actually serve identical bytes'
+  // Two ids, and no dependency or independence claim invented between them.
+  if (result.graph.sourceDependencies.length !== 0)
+    return `${result.graph.sourceDependencies.length} source dependencies were inferred`
+  return new Set(mirrors.map((source) => source.id)).size === 2
+    ? null : 'the mirrors were collapsed onto one identity'
+})
+
+check('26e · a resumed run still withholds the surface artifact', async () => {
+  /*
+   * `RunMaterial` is per-plan and in memory, so a resumed run has no surface
+   * document in hand — and withholding that depended on it alone would quietly
+   * stop working exactly there, while the graph still holds the surface Source
+   * and a search can still rediscover it.
+   *
+   * Simulated by running the stages with the material a resume would have:
+   * empty. INGEST is not scheduled, so nothing populates `material.surface`,
+   * and only the graph knows what the surface record is.
+   */
+  const material = newRunMaterial()
+  const stages = liveStages({
+    sourceUrl: URL_UNDER_INVESTIGATION,
+    material,
+    now: () => '2026-09-21T12:00:00Z',
+    retrieveLimit: 3,
+  })
+  /*
+   * The stages a resume after CLASSIFY would run. INGEST and DECOMPOSE are
+   * already done, so the surface Source and the claims come from durable state
+   * and the in-memory material starts empty — which is the shape a resume
+   * actually presents.
+   *
+   * An earlier version of this fixture ran DECOMPOSE too, and it reported a
+   * capability gap for want of the surface document in memory, so there were
+   * no claims and TRACE never ran. The check passed while testing nothing.
+   */
+  const resumed = stages.filter((stage) =>
+    stage.stage !== 'INGEST' && stage.stage !== 'DECOMPOSE' && stage.stage !== 'CLASSIFY')
+
+  const surfaceHash = hashExtract({ text: ARTICLE, truncated: false })
+  const surface: Source = {
+    id: 'SRC-001',
+    title: 'The article under investigation',
+    url: URL_UNDER_INVESTIGATION,
+    retrievedAt: '2026-09-21T11:00:00Z',
+    sourceType: 'NEWS',
+    evidenceClass: 'SECONDARY',
+    originStatus: 'UNKNOWN',
+    accessibility: 'RETRIEVED',
+    contentHash: surfaceHash,
+  }
+
+  const alreadyDecomposed: Claim = {
+    id: 'C001',
+    origin: 'SURFACE',
+    investigationId: 'XRAY-LIVE-201',
+    text: 'The county resurfaced 42 kilometres of road in the period.',
+    layer: 'OBSERVATION',
+    type: 'QUANTITATIVE',
+    priority: 'HIGH',
+    entities: ['Kisumu County'],
+    ambiguities: [],
+  }
+
+  const result = await runPipeline({
+    investigation: submittedInvestigation('XRAY-LIVE-201', '2026-04-01T00:00:00Z'),
+    stages: resumed,
+    adapters: { model: citingModel(), research: rediscoveringAdapter() },
+    seed: { sources: [surface], claims: [alreadyDecomposed] },
+    maxAttempts: 1,
+  })
+  if (result.graph.claims.length === 0)
+    return 'the fixture produced no claims, so TRACE never ran'
+
+  if (material.surface !== undefined)
+    return 'the fixture populated the surface document; the resume shape is not being tested'
+
+  const graph = result.graph
+  const forSurfaceUrl = graph.sources.filter((source) => source.url === URL_UNDER_INVESTIGATION)
+  if (forSurfaceUrl.length !== 1)
+    return `${forSurfaceUrl.length} Sources for the submitted URL on resume`
+
+  const surfaceClaimIds = new Set<string>(
+    graph.claims.filter((claim) => claim.origin === 'SURFACE').map((claim) => claim.id))
+  for (const item of graph.evidence) {
+    if (item.sourceId !== graph.investigation.surfaceSourceId) continue
+    const own = item.claimIds.filter((id) => surfaceClaimIds.has(id))
+    if (own.length > 0)
+      return `on resume, ${item.id} draws on the surface record for ${own.join(', ')}`
+  }
+  const validation = validateXRayGraph(graph, { mode: 'STAGED' })
+  if (validation.violations.some((violation) => violation.invariant === 'XR-INV-001'))
+    return 'XR-INV-001 violated on the resume path'
+
+  /*
+   * And it was *withholding* that did it, not the backstop.
+   *
+   * The two mechanisms cover each other, so the outcome alone cannot tell them
+   * apart — control AT proved that by removing graph-based withholding and
+   * still passing, because the backstop caught the citation instead. Asserting
+   * that the artifact was withheld pins this check to the mechanism it is
+   * about, and leaves the backstop as what it should be: the thing that fires
+   * only when the first layer has failed.
+   */
+  if (material.withheldSurfaceOffers === 0)
+    return 'the surface artifact was not withheld on resume; only the backstop caught it'
+  const refusals = result.capabilityGaps.filter((gap) =>
+    gap.operation === 'trace:surface-source-isolation')
+  return refusals.length === 0
+    ? null : 'the backstop had to fire, so withholding did not cover the resume path'
 })
 
 // ---------------------------------------------------------------------------

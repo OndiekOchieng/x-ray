@@ -23,6 +23,35 @@
  *   - lineage is not decided at all where retrieval supplies no attribution —
  *     `PROVENANCE` reports a capability gap instead of guessing.
  *
+ * SOURCE IDENTITY, AND WHY IT IS AN INVARIANT CONCERN
+ * ===================================================
+ * **Same normalised locator + same stage-computed content hash, in one run =
+ * one canonical `Source`.** A search rediscovery is a retrieval fact, not a
+ * second canonical identity.
+ *
+ * First light showed why this is not cosmetic. `INGEST` minted `SRC-001` for
+ * the submitted article; `TRACE`'s search rediscovered the same article and
+ * minted `SRC-006` with a byte-identical extract. Evidence then cited
+ * `SRC-006` — and `XR-INV-001` is enforced by comparing
+ * `Evidence.sourceId` against `investigation.surfaceSourceId`, so a second id
+ * for the same artifact **laundered the surface record past a deterministic
+ * invariant**. The surface article became evidence for a claim decomposed out
+ * of itself, and validation could not see it.
+ *
+ * Two consequences shape the code below:
+ *
+ *   - identity is resolved before minting, against `Source`s the run already
+ *     has, so one artifact has one id and the invariant's comparison is sound;
+ *   - the surface artifact is withheld from the material offered for a
+ *     `SURFACE` claim, so it cannot re-enter `TRACE` at all for the claims it
+ *     is the origin of. Prevention at the material boundary, not repair after
+ *     the fact — and never repair by `PROVENANCE`, which decides lineage and
+ *     is not an identity-fixing stage.
+ *
+ * A **changed** document is not a duplicate. Same locator with a different
+ * hash is a different observation of a record that moved, and collapsing the
+ * two would silently discard the change. It gets its own `Source`.
+ *
  * WHY EVERY ABSENCE IS A CAPABILITY GAP
  * =====================================
  * A stage that quietly produced nothing would be indistinguishable from one
@@ -42,7 +71,10 @@ import type {
 import { correlateAndAssign } from '@/lib/xray/pipeline/correlation'
 import type { Offered } from '@/lib/xray/pipeline/model-port'
 import type { ProposalRef } from '@/lib/xray/pipeline/proposals'
-import { isInspectable, isQuotable, type RetrievalQuery, type RetrievedDocument } from '@/lib/xray/pipeline/retrieval-port'
+import {
+  hashExtract, isInspectable, isQuotable,
+  type RetrievalQuery, type RetrievedDocument,
+} from '@/lib/xray/pipeline/retrieval-port'
 import type { StageContext, StageDefinition, StageOutcome } from '@/lib/xray/pipeline/stages'
 import { gatherMaterial, type GatheredMaterial } from './material'
 
@@ -62,11 +94,30 @@ export interface RunMaterial {
   plannedQueries: Map<string, RetrievalQuery>
   /** Material TRACE gathered, per claim id. */
   gathered: Map<string, GatheredMaterial>
+  /**
+   * Locators a search rediscovered that the run already held, per claim.
+   *
+   * Non-canonical. It is the evidence that the search *did* find them, which
+   * stays true and stays visible even though one artifact yields one Source.
+   */
+  rediscoveries: Map<string, readonly string[]>
+  /** Existing Sources reused rather than duplicated. Non-canonical. */
+  reusedSourceIds: readonly string[]
+  /**
+   * How many times the surface artifact was withheld from a SURFACE claim.
+   *
+   * Non-canonical, and the point of recording it: "we did not use the article
+   * as evidence for its own claim" is a research decision, not an absence.
+   */
+  withheldSurfaceOffers: number
 }
 
 export const newRunMaterial = (): RunMaterial => ({
   plannedQueries: new Map(),
   gathered: new Map(),
+  rediscoveries: new Map(),
+  reusedSourceIds: [],
+  withheldSurfaceOffers: 0,
 })
 
 export interface LiveStageOptions {
@@ -84,6 +135,35 @@ export interface LiveStageOptions {
    * field that tolerates a placeholder. See `observedAt`.
    */
   readonly now: () => string
+}
+
+/**
+ * The stage's own digest over what it actually holds.
+ *
+ * `RetrievedDocument.contentHash` is advisory — the port says so — and a
+ * digest is only worth anything if whoever relies on it computed it. Source
+ * identity relies on it, so the stage computes it.
+ */
+export function stageHash(document: RetrievedDocument): string | undefined {
+  return document.extract === undefined ? undefined : hashExtract(document.extract)
+}
+
+/**
+ * Whether two records are the same artifact for identity purposes.
+ *
+ * Exact locator equality plus equal stage-computed hash. Exact rather than
+ * fuzzy for the reason 20c settled on after review: normalisation belongs at
+ * the retrieval boundary, and anything still different after it is a
+ * difference in the resource. A missing hash on either side proves nothing, so
+ * it is not a match — identity is established, never assumed.
+ */
+export function sameArtifact(
+  source: Pick<Source, 'url' | 'contentHash'>,
+  locator: string | undefined, hash: string | undefined,
+): boolean {
+  if (locator === undefined || hash === undefined) return false
+  if (source.url !== locator) return false
+  return source.contentHash === hash
 }
 
 /** An ISO 8601 instant. Anything else is not a time. */
@@ -192,7 +272,11 @@ function ingest(options: LiveStageOptions): StageDefinition {
         evidenceClass: 'SECONDARY',
         originStatus: 'UNKNOWN',
         accessibility: document.outcome,
-        ...(document.contentHash === undefined ? {} : { contentHash: document.contentHash }),
+        // The stage's own digest, so `sameArtifact` compares like with like.
+        ...(() => {
+          const hash = stageHash(document)
+          return hash === undefined ? {} : { contentHash: hash }
+        })(),
       }
       return { sources: [source] }
     },
@@ -228,7 +312,18 @@ function decompose(options: LiveStageOptions): StageDefinition {
       const model = ctx.adapters.model
       if (model === undefined) return noModel('DECOMPOSE')
 
-      const surface = ctx.graph.sources[0]
+      /*
+       * The surface record by identity, not by position.
+       *
+       * `ctx.graph.sources[0]` happened to be right for a fresh run and is
+       * wrong for any seeded one — a re-evaluation carries the predecessor's
+       * sources, and index 0 is then whichever record came first, not the
+       * article under investigation. Found while testing Source identity, and
+       * it is the same class of mistake: an artifact identified by something
+       * other than its id.
+       */
+      const surface = ctx.graph.sources.find(
+        (source) => source.id === ctx.graph.investigation.surfaceSourceId)
       const document = options.material.surface
       if (surface === undefined || document === undefined) {
         return unavailable('research-model:decompose', 'REFUSED_FOR_INPUT',
@@ -387,20 +482,78 @@ function trace(options: LiveStageOptions): StageDefinition {
       const evidence: Evidence[] = []
       const claims: Claim[] = []
       const gaps: CapabilityUnavailable[] = []
+      /** Existing Sources reused rather than duplicated. For the journal. */
+      const reusedSourceIds = new Set<string>()
+      /** Times the surface artifact was withheld from a SURFACE claim. */
+      let withheldSurfaceOffers = 0
+
+      /*
+       * Material this run already inspected, so a rediscovery costs no second
+       * fetch. The surface document is the one that always matters: a search
+       * for a claim made by an article routinely finds the article.
+       */
+      const known = new Map<string, RetrievedDocument>()
+      const surfaceDocument = options.material.surface
+      if (surfaceDocument?.locator !== undefined && isInspectable(surfaceDocument)) {
+        known.set(surfaceDocument.locator, surfaceDocument)
+      }
+      const surfaceSourceId = ctx.graph.investigation.surfaceSourceId
 
       for (const claim of ctx.graph.claims) {
         const query = options.material.plannedQueries.get(claim.id)
           ?? { terms: claim.text.slice(0, 180) }
 
         const gathered = await gatherMaterial(
-          adapter, query, options.retrieveLimit ?? undefined)
+          adapter, query, options.retrieveLimit ?? undefined, known)
         if ('unavailable' in gathered) { gaps.push(gathered.unavailable); continue }
         options.material.gathered.set(claim.id, gathered)
+
+        /*
+         * XR-INV-001, enforced where it can still be prevented.
+         *
+         * A surface source establishes that a claim was *made*; it cannot
+         * corroborate the claim it made. So when the claim being traced is a
+         * SURFACE claim, the surface artifact is withheld from the material the
+         * provider is shown — it cannot be cited because it is not offered.
+         *
+         * The rediscovery is not erased: it stays in `gathered.rediscovered`
+         * and in the stats, which is run material rather than canonical state.
+         * The search did find it, and that remains recorded.
+         *
+         * A DISCOVERED claim is different: the article commenting on a claim it
+         * did not make is legitimate evidence, and the invariant does not
+         * forbid it.
+         */
+        /*
+         * The surface artifact, identified from the graph as well as from
+         * material in hand.
+         *
+         * `material.surface` is per-plan and in memory, so a **resumed** run
+         * does not have it — and withholding that depended on it alone would
+         * quietly stop working on resume, exactly when the graph still holds
+         * SRC-001 and a search can still rediscover it. The canonical Source
+         * carries the locator and the stage-computed hash, which is all the
+         * comparison needs.
+         */
+        const surfaceSource = ctx.graph.sources.find(
+          (source) => source.id === surfaceSourceId)
+        const surfaceLocator = surfaceDocument?.locator ?? surfaceSource?.url
+        const surfaceHash = surfaceDocument === undefined
+          ? surfaceSource?.contentHash : stageHash(surfaceDocument)
+        const isSurfaceArtifact = (document: RetrievedDocument): boolean =>
+          surfaceLocator !== undefined && surfaceHash !== undefined
+          && document.locator === surfaceLocator && stageHash(document) === surfaceHash
+
+        const offerable = claim.origin === 'SURFACE'
+          ? gathered.documents.filter((document) => !isSurfaceArtifact(document))
+          : gathered.documents
+        const withheldFromClaim = gathered.documents.length - offerable.length
+        if (withheldFromClaim > 0) withheldSurfaceOffers += withheldFromClaim
 
         const claimRef = handle('c', 0)
         const proposed = await model.trace({
           claim: { ref: claimRef, value: claim },
-          documents: gathered.documents,
+          documents: offerable,
           queriesAttempted: gathered.queries,
           ...(options.researchCutoffAt === undefined
             ? {} : { researchCutoffAt: options.researchCutoffAt }),
@@ -420,6 +573,22 @@ function trace(options: LiveStageOptions): StageDefinition {
         for (const ref of [...drawnOn].sort()) {
           const document = documentByRef.get(ref)
           if (document === undefined) continue
+
+          /*
+           * Resolve identity before minting. `ctx.graph.sources` holds what the
+           * run already has and `sources` holds what this stage minted a moment
+           * ago, so two claims whose searches both find the same corroborating
+           * record share one identity rather than producing two.
+           */
+          const hash = stageHash(document)
+          const existing = [...ctx.graph.sources, ...sources].find(
+            (candidate) => sameArtifact(candidate, document.locator, hash))
+          if (existing !== undefined) {
+            sourceIdByRef.set(ref, existing.id)
+            reusedSourceIds.add(existing.id)
+            continue
+          }
+
           const source = sourceFrom(document, ctx.ids.source(), options.now)
           sources.push(source)
           sourceIdByRef.set(ref, source.id)
@@ -460,6 +629,23 @@ function trace(options: LiveStageOptions): StageDefinition {
 
           const claimIds = resolve(proposal.claimRefs, new Map([[claimRef, claim.id]]))
           if (claimIds.length === 0) continue
+
+          /*
+           * Defence in depth for XR-INV-001. The surface artifact is withheld
+           * above, so this should be unreachable — but the invariant is
+           * enforced by comparing ids, and the cost of being wrong here is a
+           * surface record corroborating its own claim while validation cannot
+           * see it. Refused, and recorded as a gap rather than thrown: the
+           * provider did nothing wrong, it was offered what it used.
+           */
+          if (sourceId === surfaceSourceId && claim.origin === 'SURFACE') {
+            gaps.push(unavailable('trace:surface-source-isolation', 'REFUSED_FOR_INPUT',
+              `A proposition from the surface record was offered as evidence for surface`
+              + ` claim ${claim.id}. A surface source establishes that a claim was made;`
+              + ' it cannot corroborate the claim it made. It was not recorded.',
+              'Trace this claim against records other than the article under investigation.'))
+            continue
+          }
 
           evidence.push({
             id: ctx.ids.evidence(),
@@ -503,6 +689,16 @@ function trace(options: LiveStageOptions): StageDefinition {
         }
       }
 
+      // Record the identity work as run material, so "one Source" is visible
+      // as a decision rather than looking like a search that found less.
+      for (const [claimId, material] of options.material.gathered) {
+        if (material.rediscovered.length > 0) {
+          options.material.rediscoveries.set(claimId, material.rediscovered)
+        }
+      }
+      options.material.reusedSourceIds = [...reusedSourceIds]
+      options.material.withheldSurfaceOffers = withheldSurfaceOffers
+
       // Nothing at all, and a reason for it: report the gap rather than an
       // empty success that reads as an exhausted search.
       if (sources.length === 0 && evidence.length === 0 && gaps.length > 0) return gaps[0]!
@@ -542,7 +738,10 @@ function sourceFrom(
     evidenceClass: 'SECONDARY',
     originStatus: 'UNKNOWN',
     accessibility: document.outcome,
-    ...(document.contentHash === undefined ? {} : { contentHash: document.contentHash }),
+    ...(() => {
+      const hash = stageHash(document)
+      return hash === undefined ? {} : { contentHash: hash }
+    })(),
   }
 }
 

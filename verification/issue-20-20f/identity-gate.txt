@@ -1,0 +1,61 @@
+=== pnpm check:live-runtime ===
+ok    26 · one artifact yields one Source, and never corroborates its own claim
+ok    26b · same locator with different content is NOT collapsed
+ok    26d · one corroborator found twice yields one Source
+ok    26c · different URLs are never collapsed, whatever their hashes
+ok    26e · a resumed run still withholds the surface artifact
+ok    17 · the stage layer is provider-neutral and the pipeline is untouched
+ok    18 · review stays out of the pipeline adapters
+ok    19 · no secret reaches a composed runtime, a plan, or a graph
+
+34/34 live runtime checks passed
+Every call went to 127.0.0.1. No civic URL was used.
+
+
+28/28 Anthropic adapter checks passed
+29/29 Anthropic retrieval checks passed
+
+=== the rule as implemented ===
+same normalised locator + same STAGE-COMPUTED content hash, in one run
+  = one canonical Source
+
+  locator differs                  -> two Sources (never collapsed on hash alone)
+  hash differs, same locator       -> two Sources (a changed record is a new observation)
+  either hash missing              -> two Sources (identity is established, never assumed)
+
+Two decisions turn on it, and they answer different questions:
+  sameArtifact()      "have I already got this?"   -> minting: reuse the id
+  isSurfaceArtifact() "is this the article under investigation?" -> withhold it
+                                                      from a SURFACE claim
+
+Withholding consults the surface document in hand AND the graph's surface
+Source, so it keeps working on a resumed run where the in-memory material is
+empty. The XR-INV-001 id comparison is the third layer.
+
+=== why this was an invariant defect, not a tidiness one ===
+validateEpistemics: `if (e.sourceId !== surfaceSourceId) continue`
+
+First light had surfaceSourceId=SRC-001 and evidence citing SRC-006 — the same
+artifact under a second id. The duplicate LAUNDERED the surface record past a
+DETERMINISTIC invariant, and the article became evidence for a claim decomposed
+out of itself with validation unable to see it.
+
+One artifact, one id, is what makes that comparison sound. Nothing in the
+validator changed.
+
+=== negative controls (each verified to apply, then reverted) ===
+AN dedup removed from the minting loop            -> FAIL 26d (2 Sources: SRC-002, SRC-003)
+AO the surface artifact no longer withheld        -> FAIL 26
+AP identity collapses on locator alone            -> FAIL 26b
+AQ identity collapses on hash alone               -> FAIL 26b, 26c
+AR rediscovered material re-fetched not reused    -> FAIL 26
+AT withholding consults only in-memory material   -> FAIL 26e
+     "the surface artifact was not withheld on resume; only the backstop caught it"
+     — which is also the evidence that the backstop works when withholding is
+       defeated
+
+AS the XR-INV-001 backstop removed                -> NO CHECK FAILS
+     Withholding always wins, so no check distinguishes the backstop's absence.
+     Kept deliberately as defence in depth, and recorded as unreachable-while-
+     withholding-holds rather than claimed as covered. AT is the evidence it is
+     functional.

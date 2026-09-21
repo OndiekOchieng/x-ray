@@ -28,6 +28,18 @@
  * search. Missing evidence is not negative evidence, and an unreadable record
  * is neither.
  *
+ * REUSING MATERIAL ALREADY IN HAND
+ * ================================
+ * A search routinely rediscovers a record this run already inspected — most
+ * obviously the submitted article itself. Fetching it again costs a second
+ * request for bytes we are already holding, and first light did exactly that
+ * with a 28 KB document.
+ *
+ * So a caller may pass material it already has, keyed by locator. A discovered
+ * record that matches one is satisfied from it instead of re-fetched, and the
+ * reuse is counted — because "the search found this" stays true whether or not
+ * we had to fetch it again to learn so.
+ *
  * WHAT IT DOES NOT DO
  * ===================
  * It mints nothing canonical, decides no `evidenceClass`, and reads no
@@ -62,8 +74,21 @@ export interface GatheredMaterial {
     readonly unobtained: number
     /** Records discovery found but the retrieve budget did not reach. */
     readonly notAttempted: number
+    /** Records satisfied from material already in hand, not re-fetched. */
+    readonly reused: number
   }
+  /**
+   * Locators discovery returned that this run had already inspected.
+   *
+   * Non-canonical run material. It is the record that the search *did* find
+   * them — which stays true, and stays visible, even though no second
+   * canonical Source comes of it.
+   */
+  readonly rediscovered: readonly string[]
 }
+
+/** Material the caller already holds, by locator. Never re-fetched. */
+export type KnownMaterial = ReadonlyMap<string, RetrievedDocument>
 
 /**
  * Discover records for a query, then obtain what can be obtained.
@@ -76,21 +101,44 @@ export async function gatherMaterial(
   adapter: ResearchAdapter,
   query: RetrievalQuery,
   limit: number = DEFAULT_RETRIEVE_LIMIT,
+  known: KnownMaterial = new Map(),
 ): Promise<GatheredMaterial | { readonly unavailable: CapabilityUnavailable }> {
   const found = await adapter.search(query)
   if (isUnavailable(found)) return { unavailable: found }
 
   const discovered = found.value.documents
   const documents: RetrievedDocument[] = []
+  const rediscovered: string[] = []
   let obtained = 0
   let unobtained = 0
   let notAttempted = 0
+  let reused = 0
 
   for (const document of discovered) {
     // Already readable: a provider that obtained content during discovery has
     // nothing left to fetch.
     if (isInspectable(document)) {
       documents.push(document)
+      obtained += 1
+      continue
+    }
+
+    /*
+     * Already in hand. The search found this record, which is recorded — but
+     * the bytes are the bytes we inspected, so there is nothing to fetch and
+     * nothing new to learn by fetching.
+     */
+    const held = document.locator === undefined ? undefined : known.get(document.locator)
+    if (held !== undefined) {
+      rediscovered.push(document.locator!)
+      documents.push({
+        ...held,
+        // Discovery's handle, so a proposal citing it means what the search
+        // found; discovery's metadata fills gaps in what we already held.
+        ref: document.ref,
+        observed: { ...document.observed, ...held.observed },
+      })
+      reused += 1
       obtained += 1
       continue
     }
@@ -113,7 +161,8 @@ export async function gatherMaterial(
     documents,
     queries: [query],
     ...(found.value.moreAvailable === true ? { moreAvailable: true } : {}),
-    stats: { discovered: discovered.length, obtained, unobtained, notAttempted },
+    stats: { discovered: discovered.length, obtained, unobtained, notAttempted, reused },
+    rediscovered,
   }
 }
 

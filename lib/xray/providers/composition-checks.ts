@@ -599,9 +599,17 @@ async function main(): Promise<void> {
      */
     const composition = /^lib\/xray\/(providers|host)\//
     const hostEntryPoint = 'instrumentation.ts'
+    /*
+     * Verification runners compose providers on purpose — a first-light gate
+     * cannot drive a live run without them, and they are not application code.
+     * Excluded for the same reason `-checks.ts` harnesses are, and named here
+     * rather than discovered: this is the third exclusion in this project that
+     * lagged behind the convention it was enforcing.
+     */
+    const verification = /^verification\//
 
     for (const file of tracked) {
-      if (composition.test(file) || file === hostEntryPoint) continue
+      if (composition.test(file) || file === hostEntryPoint || verification.test(file)) continue
       const source = stripComments(readFileSync(join(repository, file), 'utf8'))
       /*
        * Static *and* dynamic imports. An earlier version matched only
