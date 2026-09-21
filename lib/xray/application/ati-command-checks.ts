@@ -33,10 +33,12 @@ import {
   readSnapshot, writeInitialSnapshot, type SnapshotDatabase,
 } from '@/lib/xray/persistence/snapshot'
 import { closeRequest } from '@/lib/xray/persistence/ati-lifecycle'
+import { LockInterleavingDatabase } from './ati-check-support'
 import { commitNextVersion } from '@/lib/xray/persistence/version-commit'
 import { prepareAssessedRun } from '@/lib/xray/persistence/graduation-check-support'
 import {
-  AT, MIGRATIONS, candidateNext, corpusFor, reEvaluationAudit, seedLineage,
+  AT, ATI_MIGRATIONS, MIGRATIONS, candidateNext, corpusFor, reEvaluationAudit,
+  seedLineage,
 } from '@/lib/xray/persistence/publication-check-support'
 import { ATIActionRejected, ATIActionService } from './ati-service'
 import { projectATIRequest } from './ati-read-model'
@@ -49,11 +51,6 @@ async function check(name: string, fn: () => Promise<string | null>): Promise<vo
   try { detail = await fn() } catch (err) { detail = `threw: ${(err as Error).message}` }
   results.push({ name, ok: detail === null, detail: detail ?? undefined })
 }
-
-const ATI_MIGRATIONS = [
-  '0009_ati_lifecycle', '0010_ati_origin_and_acceptance',
-  '0011_ati_acceptance_requires_added_source',
-]
 
 async function migrate(db: PGlite) {
   for (const n of [...MIGRATIONS, ...ATI_MIGRATIONS])
@@ -75,50 +72,6 @@ const rejectedWith = async (
   if (error === null) return `accepted; expected ${code}`
   if (!(error instanceof ATIActionRejected)) return `threw ${error.name}: ${error.message}`
   return error.code === code ? null : `rejected with ${error.code}, expected ${code}`
-}
-
-/**
- * A database that lets another command's commit land at the exact moment this
- * one acquires the request lock.
- *
- * This is the interleaving a single PGlite connection cannot produce for real:
- *
- *   B decides                    (stale, if the decision came before the lock)
- *   A appends CLOSE and commits  ← injected here, right after B's FOR UPDATE
- *   B appends                    (corrupt: ... CLOSE → EXPORT)
- *
- * The injection sits immediately AFTER the `FOR UPDATE` statement and before
- * anything else, so a command that re-reads history under the lock must see it
- * and a command that decided beforehand cannot. Which side of the lock the
- * lifecycle checks run on is exactly what that discriminates.
- */
-class LockInterleavingDatabase implements SnapshotDatabase {
-  private fired = false
-  readonly interleaved: string[] = []
-  private readonly inner: PGlite
-  private readonly requestId: string
-  private readonly other: (db: SnapshotDatabase) => Promise<void>
-
-  constructor(
-    inner: PGlite, requestId: string, other: (db: SnapshotDatabase) => Promise<void>,
-  ) {
-    this.inner = inner
-    this.requestId = requestId
-    this.other = other
-  }
-
-  async query(sql: string, params: unknown[] = []): Promise<{ rows: Record<string, unknown>[] }> {
-    const isRequestLock = /FROM ati_requests WHERE id=\$1 FOR UPDATE/.test(sql)
-      && params[0] === this.requestId
-    if (isRequestLock && !this.fired) {
-      this.fired = true
-      const locked = await this.inner.query(sql, params)
-      await this.other(this.inner)
-      this.interleaved.push(sql)
-      return locked as { rows: Record<string, unknown>[] }
-    }
-    return (await this.inner.query(sql, params)) as { rows: Record<string, unknown>[] }
-  }
 }
 
 const INV = 'XRAY-ATI-CMD'

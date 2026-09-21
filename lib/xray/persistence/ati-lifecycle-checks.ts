@@ -16,7 +16,7 @@ import { PGlite } from '@electric-sql/pglite'
 
 import { readSnapshot } from './snapshot'
 import {
-  AT, MIGRATIONS, commitFurtherVersion, seedLineage,
+  AT, ATI_MIGRATIONS, MIGRATIONS, commitFurtherVersion, seedLineage,
 } from './publication-check-support'
 import {
   acceptIntakeSource, closeRequest, confirmSubmission, createRequest, deriveStatus,
@@ -34,11 +34,10 @@ async function check(name: string, fn: () => Promise<string | null>): Promise<vo
 }
 
 async function migrate(db: PGlite) {
-  const ati = ['0009_ati_lifecycle', '0010_ati_origin_and_acceptance',
-    '0011_ati_acceptance_requires_added_source']
+  const ati = ATI_MIGRATIONS
   for (const n of [...MIGRATIONS, ...ati])
     await db.exec(readFileSync(new URL(`../../../db/migrations/${n}.up.sql`, import.meta.url), 'utf8'))
-  // Both ATI migrations must remain reversible, newest first.
+  // Every ATI migration must remain reversible, newest first.
   for (const n of [...ati].reverse())
     await db.exec(readFileSync(new URL(`../../../db/migrations/${n}.down.sql`, import.meta.url), 'utf8'))
   for (const n of ati)

@@ -41,6 +41,15 @@ export type ResponseCompleteness = 'PARTIAL' | 'FINAL' | 'UNSTATED'
 /** Whether holder context was carried from the origin gap or supplied. */
 export type HolderContextOrigin = 'ORIGIN_GAP' | 'HUMAN_SUPPLIED'
 
+/**
+ * Who established an intake's content digest.
+ *
+ * `COMPUTED` — X-Ray hashed content it actually held at receipt time.
+ * `SUPPLIED` — someone else stated it. Recorded as their claim, never upgraded
+ * to a verified one (ADR-0018, #10 slice 10c).
+ */
+export type DigestOrigin = 'COMPUTED' | 'SUPPLIED'
+
 export class ATILifecycleError extends Error {
   constructor(message: string) {
     super(message)
@@ -232,7 +241,13 @@ export interface IntakeRecord {
   /** What arrived, as described on arrival. Not a claim about what it shows. */
   describedAs: string
   mediaType?: string
+  /**
+   * Normalized as `sha256:<64 lowercase hex>`, the database's only accepted
+   * shape. Present only with `contentHashOrigin`; neither is inferred from the
+   * other.
+   */
   contentHash?: string
+  contentHashOrigin?: DigestOrigin
 }
 
 /**
@@ -240,6 +255,15 @@ export interface IntakeRecord {
  *
  * Zero records is a legitimate response: an acknowledgement letter carries no
  * evidence, and a duplicate document yields nothing new (ADR-0018).
+ *
+ * Nothing that arrived is stored here beyond receipt facts — no body, no file,
+ * no bounded content. There is no document store, and 10c deliberately did not
+ * invent one; the material reaches research in 10d, named against this intake
+ * identity (release 10c §G).
+ *
+ * `inTransaction` lets the command boundary write the response and every one of
+ * its intakes inside one locked unit of work, so a single bad intake takes the
+ * whole response with it.
  */
 export async function recordResponse(
   db: SnapshotDatabase, requestId: string, response: {
@@ -248,8 +272,9 @@ export async function recordResponse(
     summary?: string
     intakes?: readonly IntakeRecord[]
   },
+  options: { inTransaction?: boolean } = {},
 ): Promise<number> {
-  await db.query('BEGIN')
+  if (!options.inTransaction) await db.query('BEGIN')
   try {
     const sequence = await nextSequence(db, 'ati_responses', requestId)
     await db.query(
@@ -260,15 +285,16 @@ export async function recordResponse(
     for (const intake of response.intakes ?? []) {
       await db.query(
         `INSERT INTO ati_response_intakes(intake_id, request_id, response_sequence,
-           received_at, described_as, media_type, content_hash)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+           received_at, described_as, media_type, content_hash, content_hash_origin)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [intake.intakeId, requestId, sequence, intake.receivedAt, intake.describedAs,
-          intake.mediaType ?? null, intake.contentHash ?? null])
+          intake.mediaType ?? null, intake.contentHash ?? null,
+          intake.contentHashOrigin ?? null])
     }
-    await db.query('COMMIT')
+    if (!options.inTransaction) await db.query('COMMIT')
     return sequence
   } catch (error) {
-    await db.query('ROLLBACK')
+    if (!options.inTransaction) await db.query('ROLLBACK')
     throw error
   }
 }
@@ -443,7 +469,7 @@ export async function readRequestLifecycle(
 
   const intakeRows = (await db.query(
     `SELECT i.intake_id, i.response_sequence, i.received_at, i.described_as,
-            i.media_type, i.content_hash
+            i.media_type, i.content_hash, i.content_hash_origin
        FROM ati_response_intakes i WHERE i.request_id=$1 ORDER BY i.intake_id`,
     [requestId])).rows
 
@@ -480,6 +506,8 @@ export async function readRequestLifecycle(
         describedAs: intake.described_as as string,
         ...(intake.media_type === null ? {} : { mediaType: intake.media_type as string }),
         ...(intake.content_hash === null ? {} : { contentHash: intake.content_hash as string }),
+        ...(intake.content_hash_origin === null
+          ? {} : { contentHashOrigin: intake.content_hash_origin as DigestOrigin }),
         acceptedSources: acceptedByIntake.get(intake.intake_id as string) ?? [],
       })),
   }))

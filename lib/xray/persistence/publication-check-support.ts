@@ -26,6 +26,18 @@ export const MIGRATIONS = [
   '0007_investigation_submissions', '0008_publication_events',
 ]
 
+/**
+ * The ATI action-lifecycle migrations, in order.
+ *
+ * Shared by every ATI gate. Three copies of this list drifted the moment 10c
+ * added one, so there is one copy.
+ */
+export const ATI_MIGRATIONS = [
+  '0009_ati_lifecycle', '0010_ati_origin_and_acceptance',
+  '0011_ati_acceptance_requires_added_source',
+  '0012_ati_intake_digest_provenance',
+]
+
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
 export async function migrate(db: PGlite, roundTripLast = true): Promise<void> {

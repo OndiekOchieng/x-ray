@@ -30,8 +30,63 @@
 
 import type { ATIRequest, CustodyBasis } from '@/lib/xray/domain'
 import type {
-  HolderContextOrigin, RequestLifecycle,
+  DigestOrigin, HolderContextOrigin, RequestLifecycle, ResponseCompleteness,
 } from '@/lib/xray/persistence/ati-lifecycle'
+
+/**
+ * One record that arrived, as a surface may show it.
+ *
+ * WHAT A SURFACE MAY NOT SAY ABOUT THIS
+ * =====================================
+ * An intake is not a Source and not Evidence. There is deliberately no field
+ * here for evidence class, origin status, accessibility, claim relationship,
+ * provenance or effect on a finding — those are research determinations 10d's
+ * stages make, and a receipt shape that carried them would let a surface
+ * present an unread document as an established fact (ADR-0018, #10 slice 10c).
+ *
+ * `acceptedSourceIds` is populated only once research has actually committed a
+ * version that introduced the source. Until then it is empty, and empty means
+ * "not yet research" rather than "nothing useful arrived".
+ */
+export interface ATIIntakeView {
+  /** X-Ray-owned. Never a filename. */
+  intakeId: string
+  receivedAt: string
+  /** What arrived, as described on arrival. Not a claim about what it shows. */
+  describedAs: string
+  mediaType?: string
+
+  /**
+   * Whether a receipt digest exists — not the digest itself, which is for the
+   * 10d bridge rather than for a reader.
+   */
+  hasIntegrityDigest: boolean
+
+  /**
+   * Who established it. A `SUPPLIED` digest is somebody's statement; presenting
+   * it as equivalent to a `COMPUTED` one would be the silent upgrade the
+   * schema exists to prevent.
+   */
+  digestOrigin?: DigestOrigin
+
+  /** Canonical sources a committed version introduced from this record. */
+  acceptedSourceIds: readonly string[]
+}
+
+/**
+ * One response event, as a surface may show it.
+ *
+ * `completeness` is what was represented, never what X-Ray concluded. Nothing
+ * about the number of records, the passage of a deadline, or the request having
+ * been closed makes a response `FINAL`.
+ */
+export interface ATIResponseView {
+  sequence: number
+  receivedAt: string
+  completeness: ResponseCompleteness
+  summary?: string
+  intakes: readonly ATIIntakeView[]
+}
 
 /**
  * `ATIRequest` plus what action history knows and the graph shape could not
@@ -58,6 +113,15 @@ export interface ATIRequestView extends ATIRequest {
 
   /** Every revision's number, oldest first. What a reader can still inspect. */
   revisions: readonly number[]
+
+  /**
+   * Recorded responses, oldest first.
+   *
+   * Present even when `status` is `CLOSED`: a response that arrived after the
+   * operator closed the thread is recorded without reopening it, so a closed
+   * request can legitimately show responses (#10 slice 10c §C).
+   */
+  responses: readonly ATIResponseView[]
 }
 
 /**
@@ -107,5 +171,21 @@ export function projectATIRequest(lifecycle: RequestLifecycle): ATIRequestView {
     ...(closedAt === undefined ? {} : { closedAt }),
     receivedSourceIds: [...lifecycle.receivedSourceIds],
     revisions: lifecycle.revisions.map((revision) => revision.revision),
+    responses: lifecycle.responses.map((response) => ({
+      sequence: response.sequence,
+      receivedAt: response.receivedAt,
+      completeness: response.completeness,
+      ...(response.summary === undefined ? {} : { summary: response.summary }),
+      intakes: response.intakes.map((intake) => ({
+        intakeId: intake.intakeId,
+        receivedAt: intake.receivedAt,
+        describedAs: intake.describedAs,
+        ...(intake.mediaType === undefined ? {} : { mediaType: intake.mediaType }),
+        hasIntegrityDigest: intake.contentHash !== undefined,
+        ...(intake.contentHashOrigin === undefined
+          ? {} : { digestOrigin: intake.contentHashOrigin }),
+        acceptedSourceIds: intake.acceptedSources.map((accepted) => accepted.sourceId),
+      })),
+    })),
   }
 }

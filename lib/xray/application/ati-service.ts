@@ -55,12 +55,16 @@
  * ledger's words or they are not in the request.
  */
 
+import { createHash } from 'node:crypto'
+
 import type { CustodyBasis, Gap } from '@/lib/xray/domain'
 import { readSnapshot, type SnapshotDatabase } from '@/lib/xray/persistence/snapshot'
 import {
   closeRequest, confirmSubmission, createRequest, readRequestLifecycle,
-  readRequestsForGap, recordAcknowledgement, recordExport, reviseRequest,
-  type EventRow, type RequestLifecycle, type RevisionContent, type SubmissionFacts,
+  readRequestsForGap, recordAcknowledgement, recordExport, recordResponse,
+  reviseRequest,
+  type DigestOrigin, type EventRow, type IntakeRecord, type RequestLifecycle,
+  type ResponseCompleteness, type RevisionContent, type SubmissionFacts,
 } from '@/lib/xray/persistence/ati-lifecycle'
 import { projectATIRequest, type ATIRequestView } from './ati-read-model'
 
@@ -92,6 +96,10 @@ export type ATIRejectionCode =
   | 'ATI/ACKNOWLEDGEMENT_BEFORE_SUBMISSION'
   | 'ATI/CLOSE_REQUIRES_POST_DRAFT_STATE'
   | 'ATI/RETROGRADE_EVENT'
+  | 'ATI/RESPONSE_REQUIRES_SUBMISSION'
+  | 'ATI/INTAKE_DESCRIPTION_MISSING'
+  | 'ATI/DIGEST_MALFORMED'
+  | 'ATI/DIGEST_MISMATCH'
 
 export class ATIActionRejected extends Error {
   readonly code: ATIRejectionCode
@@ -171,6 +179,55 @@ export interface ReviseDraftInput {
  */
 export interface SubmissionAssertion extends SubmissionFacts {
   humanConfirmed: true
+}
+
+/**
+ * One record that arrived, as described on arrival.
+ *
+ * The caller may name a file; it does not name an intake. `intakeId` is
+ * X-Ray-owned and allocated by the command (release 10c §I) — a raw filename
+ * is not identity, because two institutions both send `scan.pdf`.
+ *
+ * `material` is used to compute a receipt digest and is then discarded.
+ * Nothing here is persisted beyond receipt facts: there is no document store,
+ * and 10c deliberately did not invent one (§G).
+ */
+export interface IntakeAssertion {
+  /** What arrived, as described on arrival. Not a claim about what it shows. */
+  describedAs: string
+  receivedAt?: string
+  mediaType?: string
+
+  /**
+   * Content held at receipt time. Hashed, never stored.
+   *
+   * Preferred over `suppliedDigest`: a digest X-Ray computed from bytes it had
+   * means something a stated one does not (§H).
+   */
+  material?: string | Uint8Array
+
+  /**
+   * A digest someone else stated — an institution's covering letter, a portal
+   * listing. Recorded as their claim. If `material` is also present the two
+   * must agree, and the result is `COMPUTED`.
+   */
+  suppliedDigest?: string
+}
+
+/**
+ * A response that arrived, as reported.
+ *
+ * `completeness` is required and never defaulted. `UNSTATED` is an explicit
+ * choice the caller has to make, because the honest reading of silence is "we
+ * were not told", and a command that filled it in would be inferring the one
+ * thing ADR-0018 says may not be inferred (§D).
+ */
+export interface ResponseAssertion {
+  receivedAt: string
+  completeness: ResponseCompleteness
+  /** What the response said, if anything. Never synthesized from the intakes. */
+  summary?: string
+  intakes?: readonly IntakeAssertion[]
 }
 
 /** Closure is administrative and says nothing about whether anyone answered. */
@@ -432,7 +489,161 @@ export class ATIActionService {
     })
   }
 
+  // -- response ------------------------------------------------------------
+
+  /**
+   * Record that something arrived in answer to a filed request.
+   *
+   * **A response requires a request that was actually submitted.** At least one
+   * `SUBMIT` must exist; a `DRAFT` or `EXPORTED` request cannot receive one
+   * (release 10c §B). `EXPORTED` is not `SUBMITTED`, and without this rule a
+   * document found by other means could be laundered into ATI provenance
+   * because a draft happened to exist. Material that arrived through another
+   * channel belongs on the normal retrieval path, not here.
+   *
+   * An acknowledgement is not required. Institutions answer without one.
+   *
+   * **A response may arrive after `CLOSE`.** This is the one act that is not
+   * refused on a closed request, and it is deliberate (§C). Closure is
+   * administrative — it records that the operator stopped chasing, not a claim
+   * that no further external event can occur. A ministry can reply afterwards,
+   * and that reply is a fact that happened outside X-Ray. Recording it does not
+   * reopen anything: `deriveStatus` keeps `CLOSED` because closure is still the
+   * current administrative state, and revise, export, submit, acknowledge and a
+   * second close all stay refused.
+   *
+   * **Nothing here creates a Source.** Response received ≠ Source created
+   * (ADR-0018). No canonical id is written, `receivedSourceIds` stays empty
+   * until 10d's research actually commits a version, and this boundary exposes
+   * no way for an operator to assert one (§L).
+   */
+  async recordResponseReceived(
+    requestId: string, assertion: ResponseAssertion,
+  ): Promise<{ sequence: number; intakeIds: readonly string[] }> {
+    return this.withRequestLock(requestId, async (lifecycle) => {
+      const submissions = lifecycle.events.filter((event) => event.act === 'SUBMIT')
+      if (submissions.length === 0) {
+        reject('ATI/RESPONSE_REQUIRES_SUBMISSION',
+          `request ${requestId} was never filed (${lifecycle.status}), so nothing can be a response to it`,
+          { requestId, status: lifecycle.status })
+      }
+
+      // A response cannot predate the filing it answers. Note what is NOT
+      // checked: a response after a close may be stamped before that close.
+      // It genuinely arrived when it arrived and was entered later, and the
+      // close is an administrative act, not an event the response answers.
+      const filedAt = (submissions[0] as EventRow).occurredAt
+      if (assertion.receivedAt < filedAt) {
+        reject('ATI/RETROGRADE_EVENT',
+          `response at ${assertion.receivedAt} precedes the submission it answers, at ${filedAt}`,
+          { requestId, receivedAt: assertion.receivedAt, submittedAt: filedAt })
+      }
+
+      const sequence = lifecycle.responses.length + 1
+      const intakes = (assertion.intakes ?? []).map((intake, index) =>
+        this.buildIntake(requestId, sequence, index, intake, assertion.receivedAt))
+
+      await recordResponse(this.db, requestId, {
+        receivedAt: assertion.receivedAt,
+        completeness: assertion.completeness,
+        ...(assertion.summary === undefined ? {} : { summary: assertion.summary }),
+        intakes,
+      }, { inTransaction: true })
+
+      return { sequence, intakeIds: intakes.map((intake) => intake.intakeId) }
+    })
+  }
+
   // -- internals -----------------------------------------------------------
+
+  /**
+   * One intake's receipt facts, with an X-Ray-owned identity.
+   *
+   * The id is derived from the locked request, the response sequence and the
+   * position, so it is stable, collision-free under the lock, and carries no
+   * caller-supplied string. The filename lives in `describedAs`, where it is
+   * a description rather than an identifier.
+   */
+  private buildIntake(
+    requestId: string, sequence: number, index: number,
+    assertion: IntakeAssertion, responseReceivedAt: string,
+  ): IntakeRecord {
+    if (assertion.describedAs.trim() === '') {
+      reject('ATI/INTAKE_DESCRIPTION_MISSING',
+        `an intake must say what arrived; response ${sequence} record ${index + 1} describes nothing`,
+        { requestId, responseSequence: sequence, position: index + 1 })
+    }
+
+    const receivedAt = assertion.receivedAt ?? responseReceivedAt
+    // A record cannot arrive before the response that carried it.
+    if (receivedAt < responseReceivedAt) {
+      reject('ATI/RETROGRADE_EVENT',
+        `intake received ${receivedAt}, before the response that carried it at ${responseReceivedAt}`,
+        { requestId, responseSequence: sequence, receivedAt, responseReceivedAt })
+    }
+
+    const digest = this.resolveDigest(requestId, sequence, index, assertion)
+
+    return {
+      intakeId: `${requestId}/R${sequence}/I${index + 1}`,
+      receivedAt,
+      describedAs: assertion.describedAs,
+      ...(assertion.mediaType === undefined ? {} : { mediaType: assertion.mediaType }),
+      ...(digest === undefined ? {} : digest),
+    }
+  }
+
+  /**
+   * Establish the receipt digest, and say who established it.
+   *
+   * A digest X-Ray computed from content it held is not the same fact as one an
+   * institution stated in a covering letter, and 10d has to be able to tell
+   * them apart before it will research the material. So provenance is stored
+   * beside the value and a supplied digest is never silently upgraded (§H).
+   *
+   * Where both exist they must agree — a stated digest that does not match the
+   * bytes is a discrepancy to surface, not something to quietly overwrite.
+   */
+  private resolveDigest(
+    requestId: string, sequence: number, index: number, assertion: IntakeAssertion,
+  ): { contentHash: string; contentHashOrigin: DigestOrigin } | undefined {
+    const supplied = assertion.suppliedDigest === undefined
+      ? undefined : this.normalizeDigest(requestId, sequence, index, assertion.suppliedDigest)
+
+    if (assertion.material === undefined) {
+      return supplied === undefined
+        ? undefined : { contentHash: supplied, contentHashOrigin: 'SUPPLIED' }
+    }
+
+    const computed = `sha256:${createHash('sha256').update(assertion.material).digest('hex')}`
+    if (supplied !== undefined && supplied !== computed) {
+      reject('ATI/DIGEST_MISMATCH',
+        `the stated digest does not match the material received for response ${sequence} record ${index + 1}`,
+        { requestId, responseSequence: sequence, position: index + 1, supplied, computed })
+    }
+    return { contentHash: computed, contentHashOrigin: 'COMPUTED' }
+  }
+
+  /**
+   * One accepted representation: `sha256:<64 lowercase hex>`.
+   *
+   * A bare hex string is accepted and prefixed, because that is how digests are
+   * usually quoted; anything else is refused rather than guessed at. The
+   * database holds the same constraint, so a malformed digest cannot arrive by
+   * another route.
+   */
+  private normalizeDigest(
+    requestId: string, sequence: number, index: number, digest: string,
+  ): string {
+    const trimmed = digest.trim().toLowerCase()
+    const bare = trimmed.startsWith('sha256:') ? trimmed.slice('sha256:'.length) : trimmed
+    if (!/^[0-9a-f]{64}$/.test(bare)) {
+      reject('ATI/DIGEST_MALFORMED',
+        `"${digest}" is not a sha256 digest; v0 records sha256 only, and adding an algorithm is a migration`,
+        { requestId, responseSequence: sequence, position: index + 1, digest })
+    }
+    return `sha256:${bare}`
+  }
 
   /**
    * Take the request's row lock FIRST, then read the history every check will
