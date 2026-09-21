@@ -160,4 +160,33 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /*
+   * Keyboard focus, visible on every control (#11 slice 11d §C).
+   *
+   * 11a measured focus styling in one file out of twenty-plus components, and
+   * the rendered audit confirmed it: 33 of 33 focusable controls on the
+   * explorer had none. Per-component classes were never going to close that —
+   * a control added later would simply not have one.
+   *
+   * So the rule is global and keyed on :focus-visible, which fires for
+   * keyboard focus and not for mouse clicks. Two channels on purpose: an
+   * outline that survives a dark or light background, and an offset so the
+   * ring does not sit on top of the control's own border. Components may still
+   * add their own; this is the floor, not a ceiling.
+   */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+
+  /*
+   * Long record titles, urls and ids wrap instead of forcing the viewport
+   * sideways (§B). Applied to the text containers rather than globally, so
+   * layout primitives are untouched.
+   */
+  p, li, dd, dt, h1, h2, h3, h4, td, th {
+    overflow-wrap: anywhere;
+  }
 }

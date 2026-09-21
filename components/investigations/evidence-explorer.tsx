@@ -109,7 +109,7 @@ export function EvidenceExplorer({ payload }: { payload: ExplorerPayload }) {
             onSelect={setSelectedId}
           />
 
-          <main className="flex min-w-0 flex-col gap-6">
+          <div className="flex min-w-0 flex-col gap-6">
             {selected.finding && (
               <FindingPanel
                 finding={selected.finding}
@@ -158,7 +158,7 @@ export function EvidenceExplorer({ payload }: { payload: ExplorerPayload }) {
               investigatedAt={investigatedAt}
               protocolVersion={investigation.protocolVersion}
             />
-          </main>
+          </div>
         </div>
       </div>
 

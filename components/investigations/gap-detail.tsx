@@ -82,7 +82,7 @@ export function GapDetail({ payload }: { payload: GapPayload }) {
           </div>
         </header>
 
-        <main className="grid gap-8 py-10 lg:grid-cols-[1fr_300px]">
+        <div className="grid gap-8 py-10 lg:grid-cols-[1fr_300px]">
           <div className="flex min-w-0 flex-col gap-6">
             <section className="rounded-2xl border border-border bg-card p-6">
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -324,7 +324,7 @@ export function GapDetail({ payload }: { payload: GapPayload }) {
               View cached X-Rays
             </Link>
           </aside>
-        </main>
+        </div>
       </div>
     </AppShell>
   )

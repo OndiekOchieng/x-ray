@@ -29,7 +29,7 @@ export function CompletionState({ investigation }: { investigation: Investigatio
     <section className="border border-border rounded-lg p-8 bg-muted/30 text-center">
       <h2 className="text-2xl font-bold text-foreground mb-6">X-Ray complete</h2>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {stats.map((stat) => (
           <div key={stat.label}>
             <div className="text-2xl font-bold text-foreground">{stat.value}</div>

@@ -30,7 +30,7 @@ export function CachedXRayCard({ entry }: { entry: LibraryCard }) {
           </span>
         </div>
 
-        <div className="mb-6 grid grid-cols-3 gap-4 border-y border-border py-4">
+        <div className="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-4 border-y border-border py-4">
           {stats.map((stat) => (
             <div key={stat.label} className="text-center">
               <div className="text-2xl font-bold text-foreground">{stat.value}</div>

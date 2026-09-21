@@ -49,7 +49,7 @@ export function InvestigationLibrary({ entries }: { entries: readonly LibraryCar
           </div>
         </header>
 
-        <main className="py-10">
+        <div className="py-10">
           <div className="relative max-w-xl">
             <SearchIcon
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -140,7 +140,7 @@ export function InvestigationLibrary({ entries }: { entries: readonly LibraryCar
               </div>
             )}
           </div>
-        </main>
+        </div>
       </div>
     </AppShell>
   )

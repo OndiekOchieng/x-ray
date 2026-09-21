@@ -49,11 +49,11 @@ export function PipelineStageComponent({ stage }: { stage: StageRunView }) {
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <h4
+          <h3
             className={`text-sm font-medium ${dim ? 'text-muted-foreground' : 'text-foreground'}`}
           >
             {copy.name}
-          </h4>
+          </h3>
           {/* Status in words, not colour alone. */}
           <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
             {STATUS_TEXT[stage.status]}

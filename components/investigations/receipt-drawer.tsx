@@ -125,7 +125,7 @@ export function ReceiptDrawer({
               <p className="text-xs uppercase tracking-wider text-muted-foreground">
                 What it measures
               </p>
-              <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+              <dl className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
                 {receipt.measurement.metric && (
                   <>
                     <dt className="text-muted-foreground">Metric</dt>
@@ -179,7 +179,7 @@ export function ReceiptDrawer({
             </div>
           )}
 
-          <dl className="grid grid-cols-2 gap-4 border-y border-border py-5">
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-y border-border py-5">
             {rows.map(
               ([label, value]) =>
                 value && (

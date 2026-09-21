@@ -57,6 +57,22 @@ const STYLES = `
   footer { border-top: 1px solid var(--line); margin-top: 3rem; padding-top: 1.5rem;
     font-size: .875rem; color: var(--muted); }
   code, .addr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+
+  /*
+   * Keyboard focus, authored (#11 slice 11d §C).
+   *
+   * A published version is a self-contained document: it loads none of the
+   * application's stylesheets, so the global focus rule never reached it and
+   * its two links fell back to the browser default. The 11d gate found that
+   * only once it learned to tell an authored ring from a default one.
+   *
+   * The citation link is the whole point of this page — somebody has to be
+   * able to find it by keyboard and see that they have.
+   */
+  a:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; border-radius: .25rem; }
+
+  /* Long slugs and citation addresses wrap rather than widen the page (§B). */
+  p, li, dd, dt, h1, h2, .addr { overflow-wrap: anywhere; }
 `
 
 export function document_(title: string, body: string): string {
